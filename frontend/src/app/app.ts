@@ -15,6 +15,7 @@ import { firstValueFrom } from 'rxjs';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { Cartella, Foto, Importazione } from './modelli';
+import { durata } from './formati';
 import { esci } from './sessione';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -80,6 +81,10 @@ export class App {
 
   protected miniatura(f: Foto): string {
     return FotoApi.miniatura(f);
+  }
+
+  protected durata(secondi?: number): string {
+    return durata(secondi);
   }
 
   protected clic(f: Foto, e: MouseEvent): void {

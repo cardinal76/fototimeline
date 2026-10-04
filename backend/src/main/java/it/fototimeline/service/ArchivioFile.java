@@ -1,7 +1,6 @@
 package it.fototimeline.service;
 
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -78,8 +77,8 @@ public class ArchivioFile {
         return percorso != null && percorso.startsWith(cartella(giorno) + "/") && percorso.indexOf('/', 11) < 0;
     }
 
-    /** Salva l'originale nella cartella del giorno e restituisce il percorso relativo alla radice. */
-    public String salvaOriginale(String nome, String riserva, String estensione, LocalDate giorno, byte[] contenuto)
+    /** Copia l'originale nella cartella del giorno e restituisce il percorso relativo alla radice. */
+    public String salvaOriginale(String nome, String riserva, String estensione, LocalDate giorno, Path sorgente)
             throws IOException {
         cloud.verifica();
         Path cartella = radice.resolve(cartella(giorno));
@@ -88,7 +87,8 @@ public class ArchivioFile {
         for (int n = 1; ; n++) {
             Path destinazione = cartella.resolve(conNumero(pulito, n));
             try {
-                Files.write(destinazione, contenuto, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                // Senza REPLACE_EXISTING: se il nome è preso, eccezione e si prova il numero dopo.
+                Files.copy(sorgente, destinazione);
                 return relativo(destinazione);
             } catch (FileAlreadyExistsException e) {
                 // Nome già preso da un'altra foto dello stesso giorno: si prova "nome (2).jpg".
@@ -119,14 +119,33 @@ public class ArchivioFile {
         }
     }
 
-    /** Scrive la miniatura JPEG, già ruotata secondo l'EXIF. */
-    public void creaMiniatura(String id, byte[] contenuto) throws IOException {
-        Thumbnails.of(new ByteArrayInputStream(contenuto))
+    /**
+     * Scrive la miniatura JPEG da un'immagine che ImageIO sa leggere.
+     *
+     * @param exif true per ruotarla secondo l'EXIF; false se è già dritta
+     *             (un JPEG convertito da HEIC o un fotogramma di video)
+     */
+    public void creaMiniatura(String id, Path immagine, boolean exif) throws IOException {
+        Thumbnails.of(immagine.toFile())
+                .useExifOrientation(exif)
                 .size(latoMiniatura, latoMiniatura)
                 .imageType(BufferedImage.TYPE_INT_RGB)
                 .outputFormat("jpg")
                 .outputQuality(0.85)
                 .toFile(miniatura(id).toFile());
+    }
+
+    /**
+     * La "vista": un JPEG che il browser sa mostrare, per gli originali che non
+     * sa mostrare (HEIC). Sul disco locale, accanto alle miniature.
+     */
+    public Path vista(String id) {
+        return miniature.resolve("viste").resolve(id + ".jpg");
+    }
+
+    public void salvaVista(String id, Path jpeg) throws IOException {
+        Files.createDirectories(vista(id).getParent());
+        Files.copy(jpeg, vista(id), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
     public Path originale(String percorsoRelativo) {
@@ -148,6 +167,7 @@ public class ArchivioFile {
         }
         try {
             Files.deleteIfExists(miniatura(id));
+            Files.deleteIfExists(vista(id));
             if (percorsoRelativo != null) {
                 Path originale = originale(percorsoRelativo);
                 Files.deleteIfExists(originale);

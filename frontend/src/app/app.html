@@ -57,7 +57,7 @@
     <button type="button" [disabled]="!galleria.archivioDisponibile()" (click)="apriImporta()">Importa cartella</button>
     <label class="bottone primario" [class.spento]="!galleria.archivioDisponibile()">
       Carica foto
-      <input #scelta type="file" accept="image/*" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
+      <input #scelta type="file" accept="image/*,video/mp4,video/quicktime,.heic,.heif,.mov,.m4v" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
     </label>
     @if (galleria.io()?.login) {
       <span class="utente">
@@ -116,6 +116,9 @@
               @if (f.preferita) {
                 <span class="stella" aria-label="Preferita">★</span>
               }
+              @if (f.video) {
+                <span class="video" aria-label="Video">▶ {{ durata(f.durata) }}</span>
+              }
               @if (selezione()) {
                 <span class="spunta" aria-hidden="true">✓</span>
               }
@@ -134,7 +137,7 @@
             <button type="button" (click)="azzera()">Azzera filtri</button>
           } @else {
             <p class="grande">L'archivio è vuoto</p>
-            <p>Trascina qui le foto, usa <b>Carica foto</b> o importa una cartella del PC.</p>
+            <p>Trascina qui foto e video, usa <b>Carica foto</b> o importa una cartella.</p>
             <p class="tenue">La data di scatto viene dai dati EXIF: le foto si mettono in ordine da sole.</p>
           }
         </div>

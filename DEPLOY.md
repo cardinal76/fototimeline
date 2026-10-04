@@ -161,7 +161,8 @@ l'app sia sana. Poi:
    spariscono dalla cartella di origine (quelle già in archivio pure: il
    contenuto è identico).
 
-Un'importazione grande richiede tempo: ogni foto passa da LifetimeCloud a
+Entrano anche le foto **HEIC** dell'iPhone e i **video** MP4/MOV (l'immagine
+Docker ha `heif-convert` e `ffmpeg`). Un'importazione grande richiede tempo: ogni foto passa da LifetimeCloud a
 server2 e torna indietro. Meglio una cartella alla volta.
 
 ## Comandi utili su server2

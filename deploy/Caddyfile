@@ -3,7 +3,8 @@
 {$FOTOTIMELINE_DOMINIO} {
 	encode zstd gzip
 	request_body {
-		max_size 2GB
+		# I video del telefono: fino a 8 GB per caricamento.
+		max_size 8GB
 	}
 	reverse_proxy app:8080
 }

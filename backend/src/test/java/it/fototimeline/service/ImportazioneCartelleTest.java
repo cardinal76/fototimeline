@@ -58,7 +58,7 @@ class ImportazioneCartelleTest {
 
         assertThatThrownBy(() -> importazione.elenca(null)).isInstanceOf(ArchivioNonDisponibile.class);
         assertThatThrownBy(() -> archivio.originale("2024/01/01/a.jpg")).isInstanceOf(ArchivioNonDisponibile.class);
-        assertThatThrownBy(() -> archivio.salvaOriginale("a.jpg", "id", "jpg", java.time.LocalDate.now(), new byte[] {1}))
+        assertThatThrownBy(() -> archivio.salvaOriginale("a.jpg", "id", "jpg", java.time.LocalDate.now(), disco.resolve("a.jpg")))
                 .isInstanceOf(ArchivioNonDisponibile.class);
         // Niente cartella dell'archivio creata sul disco al posto del cloud.
         assertThat(radice.resolve("FotoTimeline")).doesNotExist();

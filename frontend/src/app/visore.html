@@ -1,14 +1,27 @@
 <div class="scena" (click)="chiudi.emit()">
   <img class="sfondo" [src]="anteprima()" alt="" aria-hidden="true" />
-  <img
-    class="immagine"
-    [class.pronta]="caricata()"
-    [src]="src()"
-    [alt]="foto().titolo || foto().nomeOriginale"
-    (load)="caricata.set(true)"
-    (click)="$event.stopPropagation()"
-  />
-  @if (!caricata()) {
+  @if (foto().video) {
+    <video
+      class="immagine pronta"
+      [src]="src()"
+      [poster]="anteprima()"
+      controls
+      autoplay
+      playsinline
+      preload="metadata"
+      (click)="$event.stopPropagation()"
+    ></video>
+  } @else {
+    <img
+      class="immagine"
+      [class.pronta]="caricata()"
+      [src]="src()"
+      [alt]="foto().titolo || foto().nomeOriginale"
+      (load)="caricata.set(true)"
+      (click)="$event.stopPropagation()"
+    />
+  }
+  @if (!caricata() && !foto().video) {
     <img class="immagine segnaposto" [src]="anteprima()" alt="" aria-hidden="true" (click)="$event.stopPropagation()" />
   }
 
@@ -89,6 +102,10 @@
           }
           · {{ peso(foto().dimensione) }}
         </dd>
+      }
+      @if (foto().video && foto().durata) {
+        <dt>Durata</dt>
+        <dd>{{ durata(foto().durata) }}</dd>
       }
       @if (foto().fotocamera) {
         <dt>Fotocamera</dt>

@@ -17,7 +17,10 @@ COPY --from=frontend /src/backend/src/main/resources/static ./src/main/resources
 RUN mvn -B -q -DskipTests package
 
 FROM eclipse-temurin:21-jre
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# curl per l'healthcheck; heif-convert (+ decoder HEVC) per gli HEIC; ffmpeg per i video.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ffmpeg libheif-examples libheif-plugin-libde265 \
+    && rm -rf /var/lib/apt/lists/*
 # Stesso uid di marco su server2: scrive nel cloud montato da rclone con --uid 1000.
 RUN userdel -r ubuntu 2>/dev/null || true; useradd --uid 1000 --create-home fototimeline
 USER fototimeline
