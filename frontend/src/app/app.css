@@ -488,6 +488,35 @@ progress {
   margin: 0.4rem 0 0;
 }
 
+/* ---------------------------------------------------------- viste */
+.viste {
+  display: inline-flex;
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.barra .viste button {
+  border: 0;
+  border-radius: 0;
+  padding: 0.45rem 0.8rem;
+  background: var(--superficie-2);
+}
+.barra .viste button[aria-selected='true'] {
+  background: var(--accento);
+  color: #fff;
+}
+.vista-mappa {
+  flex: 1;
+  min-width: 0;
+}
+.vista-mappa.caricamento {
+  display: grid;
+  place-items: center;
+}
+main[hidden] {
+  display: none;
+}
+
 .tassello .video {
   position: absolute;
   right: 6px;

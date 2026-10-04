@@ -48,6 +48,12 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
 - **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
   informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
   tag, album, data; si scarica l'originale o si elimina.
+- **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
+  sono vicine; dal popup si apre la foto. Rispetta i filtri.
+- **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
+  anni passati ("3 anni fa"); si chiude fino al giorno dopo.
+- **App sul telefono**: dal browser "Aggiungi a schermata Home" / "Installa
+  app" (manifest, icone, service worker); si apre a schermo intero.
 - **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
@@ -154,6 +160,8 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo); con `Range` per i video |
 | GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
+| GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline)                |
+| GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
 
 ## Test
 

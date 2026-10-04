@@ -12,6 +12,14 @@ public final class Risultati {
     public record PaginaFoto(List<Foto> foto, long totale, int pagina, boolean altre) {
     }
 
+    /** Una foto sulla mappa: solo quello che serve al marker. */
+    public record PuntoMappa(String id, double lat, double lon, String giorno, String titolo, boolean video) {
+    }
+
+    /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */
+    public record Ricordo(int anno, int anniFa, List<Foto> foto) {
+    }
+
     /** Un mese della timeline con quante foto contiene. */
     public record VoceMese(int anno, int mese, long conteggio) {
     }

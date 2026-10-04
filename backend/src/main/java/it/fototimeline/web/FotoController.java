@@ -38,6 +38,8 @@ import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 import it.fototimeline.service.Risultati.Cartella;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.PaginaFoto;
+import it.fototimeline.service.Risultati.PuntoMappa;
+import it.fototimeline.service.Risultati.Ricordo;
 import it.fototimeline.service.Risultati.VoceMese;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -78,6 +80,22 @@ public class FotoController {
             @RequestParam(required = false) String album,
             @RequestParam(required = false) Boolean preferite) {
         return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null));
+    }
+
+    @GetMapping("/mappa")
+    public List<PuntoMappa> mappa(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String album,
+            @RequestParam(required = false) Boolean preferite) {
+        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null));
+    }
+
+    /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */
+    @GetMapping("/ricordi")
+    public List<Ricordo> ricordi(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate data) {
+        return service.ricordi(data != null ? data : LocalDate.now(), 12);
     }
 
     @GetMapping("/foto/{id}")

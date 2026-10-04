@@ -10,6 +10,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -49,6 +50,8 @@ import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
 import it.fototimeline.service.Risultati.Importazione;
 import it.fototimeline.service.Risultati.PaginaFoto;
+import it.fototimeline.service.Risultati.PuntoMappa;
+import it.fototimeline.service.Risultati.Ricordo;
 import it.fototimeline.service.Risultati.VoceMese;
 
 @Service
@@ -275,6 +278,40 @@ public class FotoService {
                     return new VoceMese(Integer.parseInt(am[0]), Integer.parseInt(am[1]),
                             ((Number) d.get("conteggio")).longValue());
                 })
+                .toList();
+    }
+
+    /** Le foto con posizione GPS, con i filtri della timeline. */
+    public List<PuntoMappa> mappa(FiltroFoto filtro) {
+        Query query = new Query(new Criteria().andOperator(
+                criteri(filtro),
+                Criteria.where("latitudine").ne(null),
+                Criteria.where("longitudine").ne(null)));
+        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video");
+        return mongo.find(query, Foto.class).stream()
+                .map(f -> new PuntoMappa(f.getId(), f.getLatitudine(), f.getLongitudine(), f.getGiorno(),
+                        f.getTitolo(), f.isVideo()))
+                .toList();
+    }
+
+    /**
+     * "Accadde oggi": le foto scattate lo stesso giorno e mese di {@code oggi}
+     * negli anni passati, dal più recente; al massimo {@code perAnno} per anno.
+     */
+    public List<Ricordo> ricordi(LocalDate oggi, int perAnno) {
+        String meseGiorno = "-%02d-%02d".formatted(oggi.getMonthValue(), oggi.getDayOfMonth());
+        Query query = Query.query(Criteria.where("giorno").regex(Pattern.quote(meseGiorno) + "$")
+                .lt(oggi.getYear() + "-"))
+                .with(Sort.by(Sort.Order.desc("scattataIl")));
+        Map<Integer, List<Foto>> perAnni = new java.util.LinkedHashMap<>();
+        for (Foto f : mongo.find(query, Foto.class)) {
+            List<Foto> anno = perAnni.computeIfAbsent(f.getScattataIl().getYear(), a -> new ArrayList<>());
+            if (anno.size() < perAnno) {
+                anno.add(f);
+            }
+        }
+        return perAnni.entrySet().stream()
+                .map(e -> new Ricordo(e.getKey(), oggi.getYear() - e.getKey(), e.getValue()))
                 .toList();
     }
 

@@ -134,6 +134,23 @@ export interface Giorno {
   foto: Foto[];
 }
 
+/** Una foto sulla mappa. */
+export interface PuntoMappa {
+  id: string;
+  lat: number;
+  lon: number;
+  giorno: string;
+  titolo?: string;
+  video: boolean;
+}
+
+/** "Accadde oggi": le foto di un anno passato nello stesso giorno. */
+export interface Ricordo {
+  anno: number;
+  anniFa: number;
+  foto: Foto[];
+}
+
 /** Un backup dei metadati, nella cartella .backup dell'archivio. */
 export interface CopiaBackup {
   nome: string;

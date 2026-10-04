@@ -13,6 +13,8 @@ import {
   Modifica,
   Operazione,
   PaginaFoto,
+  PuntoMappa,
+  Ricordo,
   StatoCloud,
   VoceMese,
 } from './modelli';
@@ -28,6 +30,19 @@ export class FotoApi {
   timeline(filtro: Filtro): Observable<VoceMese[]> {
     const { al: _, ...senzaSalto } = filtro;
     return this.http.get<VoceMese[]>('/api/timeline', { params: parametri(senzaSalto) });
+  }
+
+  mappa(filtro: Filtro): Observable<PuntoMappa[]> {
+    const { al: _, ...senzaSalto } = filtro;
+    return this.http.get<PuntoMappa[]>('/api/mappa', { params: parametri(senzaSalto) });
+  }
+
+  ricordi(): Observable<Ricordo[]> {
+    return this.http.get<Ricordo[]>('/api/ricordi');
+  }
+
+  foto(id: string): Observable<Foto> {
+    return this.http.get<Foto>(`/api/foto/${id}`);
   }
 
   tag(): Observable<string[]> {
