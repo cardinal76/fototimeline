@@ -1,0 +1,51 @@
+name: Rilascio
+
+# Parte con un push sul branch "produzione", o a mano dalla scheda Actions.
+on:
+  push:
+    branches: [produzione]
+  workflow_dispatch:
+
+concurrency:
+  group: rilascio
+  cancel-in-progress: false
+
+jobs:
+  rilascio:
+    name: Rilascio su server2
+    # Il runner gira sulla stessa macchina dell'app: niente registro né SSH.
+    runs-on: [self-hosted, fototimeline-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Controlla la configurazione sul server
+        run: |
+          ENV_FILE="$HOME/fototimeline/.env"
+          test -f "$ENV_FILE" || { echo "::error::Manca $ENV_FILE (vedi deploy/env.esempio e DEPLOY.md)"; exit 1; }
+          set -a; . "$ENV_FILE"; set +a
+          test -f "$FOTOTIMELINE_DATI/rclone/rclone.conf" || { echo "::error::Manca $FOTOTIMELINE_DATI/rclone/rclone.conf"; exit 1; }
+          mkdir -p "$FOTOTIMELINE_DATI/cloud"
+          # Un montaggio rimasto appeso da un rclone fermato male bloccherebbe il bind.
+          if ! ls "$FOTOTIMELINE_DATI/cloud" >/dev/null 2>&1; then
+            fusermount3 -uz "$FOTOTIMELINE_DATI/cloud" 2>/dev/null || fusermount -uz "$FOTOTIMELINE_DATI/cloud" 2>/dev/null || true
+          fi
+
+      - name: Costruisci e avvia
+        run: |
+          docker compose -p fototimeline -f deploy/docker-compose.yml --env-file "$HOME/fototimeline/.env" \
+            up -d --build --remove-orphans
+
+      - name: Aspetta che l'app sia sana
+        run: |
+          for i in $(seq 1 40); do
+            stato=$(docker inspect -f '{{.State.Health.Status}}' fototimeline-app-1 2>/dev/null || echo assente)
+            echo "app: $stato"
+            [ "$stato" = healthy ] && exit 0
+            sleep 5
+          done
+          docker logs --tail 80 fototimeline-app-1
+          exit 1
+
+      - name: Pulizia
+        if: always()
+        run: docker image prune -f

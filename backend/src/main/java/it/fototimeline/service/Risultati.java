@@ -21,6 +21,15 @@ public final class Risultati {
     public record Caricamento(String nome, Esito esito, Foto foto, String messaggio) {
     }
 
-    public record Importazione(int trovate, int importate, int duplicate, int errori, List<String> messaggi) {
+    /**
+     * @param rimossi originali tolti dalla cartella di origine (importazione con
+     *                "sposta": le importate e le duplicate già in archivio)
+     */
+    public record Importazione(int trovate, int importate, int duplicate, int errori, int rimossi,
+            List<String> messaggi) {
+    }
+
+    /** Una cartella vista dal navigatore di "Importa cartella". */
+    public record Cartella(String percorso, String padre, List<String> sottocartelle, int immagini) {
     }
 }

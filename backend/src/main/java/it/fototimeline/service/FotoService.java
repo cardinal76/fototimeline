@@ -61,8 +61,6 @@ public class FotoService {
             "bmp", "image/bmp",
             "webp", "image/webp");
 
-    private static final int MAX_MESSAGGI = 50;
-
     private final FotoRepository repository;
     private final MongoTemplate mongo;
     private final ArchivioFile archivio;
@@ -85,6 +83,7 @@ public class FotoService {
      * se il file non è un'immagine leggibile risponde con un errore senza lanciare.
      */
     public Caricamento importa(String nome, byte[] contenuto, Instant ultimaModifica, String album) {
+        archivio.verificaDisponibile();
         String estensione = estensione(nome);
         if (!TIPI.containsKey(estensione)) {
             return new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato");
@@ -146,48 +145,6 @@ public class FotoService {
         }
     }
 
-    /** Importa tutte le immagini di una cartella e delle sue sottocartelle. */
-    public Importazione importaCartella(Path cartella, boolean albumDaCartella) throws IOException {
-        if (!Files.isDirectory(cartella)) {
-            throw new IllegalArgumentException("Cartella inesistente: " + cartella);
-        }
-        List<Path> file;
-        try (Stream<Path> s = Files.walk(cartella)) {
-            file = s.filter(Files::isRegularFile)
-                    .filter(p -> TIPI.containsKey(estensione(p.getFileName().toString())))
-                    .sorted()
-                    .toList();
-        }
-
-        int importate = 0;
-        int duplicate = 0;
-        int errori = 0;
-        List<String> messaggi = new ArrayList<>();
-        for (Path p : file) {
-            Caricamento esito;
-            try {
-                String album = albumDaCartella && !p.getParent().equals(cartella)
-                        ? p.getParent().getFileName().toString()
-                        : null;
-                esito = importa(p.getFileName().toString(), Files.readAllBytes(p),
-                        Files.getLastModifiedTime(p).toInstant(), album);
-            } catch (IOException e) {
-                esito = new Caricamento(p.toString(), Esito.ERRORE, null, e.getMessage());
-            }
-            switch (esito.esito()) {
-                case CARICATA -> importate++;
-                case DUPLICATA -> duplicate++;
-                case ERRORE -> {
-                    errori++;
-                    if (messaggi.size() < MAX_MESSAGGI) {
-                        messaggi.add(p + ": " + esito.messaggio());
-                    }
-                }
-            }
-        }
-        return new Importazione(file.size(), importate, duplicate, errori, messaggi);
-    }
-
     // ---------------------------------------------------------------- lettura
 
     public PaginaFoto cerca(FiltroFoto filtro, int pagina, int dimensione) {
@@ -243,8 +200,20 @@ public class FotoService {
         return archivio.originale(foto.getPercorso());
     }
 
+    /**
+     * La miniatura; se manca (archivio nel cloud e disco del server nuovo, o
+     * cartella delle miniature cancellata) la rifà dall'originale.
+     */
     public Path fileMiniatura(Foto foto) {
-        return archivio.miniatura(foto.getId());
+        Path miniatura = archivio.miniatura(foto.getId());
+        if (!Files.exists(miniatura)) {
+            try {
+                archivio.creaMiniatura(foto.getId(), Files.readAllBytes(fileOriginale(foto)));
+            } catch (IOException e) {
+                throw new UncheckedIOException("Non riesco a rifare la miniatura di " + foto.getPercorso(), e);
+            }
+        }
+        return miniatura;
     }
 
     // ---------------------------------------------------------------- modifica
@@ -294,6 +263,10 @@ public class FotoService {
      * foto ha spostato.
      */
     public int riordinaArchivio() {
+        if (!archivio.disponibile()) {
+            log.info("Archivio smontato: il riordino aspetta il montaggio");
+            return 0;
+        }
         int spostate = 0;
         for (Foto foto : repository.findAll()) {
             try {
@@ -336,6 +309,7 @@ public class FotoService {
     }
 
     public boolean elimina(String id) {
+        archivio.verificaDisponibile();
         return repository.findById(id).map(foto -> {
             repository.delete(foto);
             archivio.elimina(foto.getId(), foto.getPercorso());

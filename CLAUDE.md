@@ -1,7 +1,9 @@
 # FotoTimeline
 
-Gestore di foto con timeline, per uso locale sul PC di Marco: niente login,
-niente deploy. Backend Spring Boot 3.5 / Java 21 / Maven / MongoDB in
+Gestore di foto con timeline. Gira in due modi: sul PC di Marco (niente
+login, solo `127.0.0.1`, archivio su disco) e su **server2** (profilo `server`:
+login Keycloak, HTTPS con Caddy, originali su LifetimeCloud montato da rclone).
+Il deploy è in `DEPLOY.md`. Backend Spring Boot 3.5 / Java 21 / Maven / MongoDB in
 `backend`, frontend Angular 20 standalone (zoneless, signals, nessuna
 libreria UI) in `frontend`. Il codice, i commenti e i messaggi di commit sono
 in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
@@ -64,12 +66,45 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 
 ## Sicurezza
 
-Il server ascolta solo su `127.0.0.1` (`FOTOTIMELINE_INDIRIZZO`) perché non
-c'è autenticazione e `POST /api/importa` legge qualunque cartella del PC. Non
-cambiare questo valore predefinito senza aggiungere prima un login.
+- **Login spento** (PC): tutto aperto, ma `ConfigurazioneSicurezza` non fa
+  partire l'app se `server.address` non è di loopback. Non togliere quel
+  controllo.
+- **Login acceso** (profilo `server`): OIDC con `oauth2Login` sul Keycloak di
+  presenze, **realm `fototimeline`**, client confidenziale `fototimeline`.
+  Sessione con cookie, non token Bearer: le foto si caricano con `<img>`, che
+  non può mandare header. Le API senza sessione rispondono 401 (Angular manda
+  a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
+- I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
+  token: li legge `RuoliKeycloak`. `POST /api/cloud/**` vuole
+  `fototimeline-admin` (`fototimeline.login.ruolo-admin`).
+- CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
+  `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
+  `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
+  (`sessione.ts`), perché la risposta porta a Keycloak, su un'altra origine.
+- `fototimeline.importazione` limita "Importa cartella" e il navigatore a una
+  radice (sul server `/cloud`). L'archivio e le miniature si saltano sempre.
+
+## Cloud e montaggio
+
+- Il cloud lo monta un container `rclone rcd` (solo lui ha FUSE e il token);
+  l'app lo comanda via API rc (`Cloud`): `mount/mount`, `mount/unmount`,
+  `mount/listmounts`. rclone risponde JSON con `Content-Type: text/plain`: si
+  legge come stringa. Le opzioni del VFS vanno nella richiesta, in forma
+  numerica (`CacheMode` 3 = full, durate in nanosecondi): `rclone rcd` non
+  accetta i flag `--vfs-*` in tutte le versioni.
+- Ogni accesso agli originali passa da `ArchivioFile`, che chiama
+  `cloud.verifica()`: da smontato lancia `ArchivioNonDisponibile` (503). Così
+  niente viene scritto nel punto di montaggio vuoto, cioè sul disco di server2.
+  Un metodo nuovo che tocca gli originali deve passare da lì; per lo stesso
+  motivo `ArchivioFile` non crea la radice all'avvio.
+- Miniature e MongoDB stanno su server2: da smontato la timeline si vede.
+  `FotoService.fileMiniatura` rifà una miniatura mancante dall'originale.
+- Dopo un riavvio il cloud è smontato, salvo `RCLONE_MONTA_ALL_AVVIO=true`.
 
 ## Git e CI
 
 - Lavora su un branch e apri una pull request verso `main`; la GitHub Action
   `.github/workflows/test.yml` lancia `./mvnw verify` e `npm run build`.
 - Prima di fare push esegui gli stessi due comandi in locale.
+- Il rilascio su server2 parte quando il branch `produzione` riceve un push
+  (`.github/workflows/rilascio.yml`): fallo solo quando Marco lo chiede.

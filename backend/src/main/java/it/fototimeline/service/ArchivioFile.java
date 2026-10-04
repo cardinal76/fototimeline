@@ -12,6 +12,7 @@ import java.time.LocalDate;
 
 import org.springframework.stereotype.Component;
 
+import it.fototimeline.cloud.Cloud;
 import net.coobird.thumbnailator.Thumbnails;
 
 /**
@@ -20,7 +21,7 @@ import net.coobird.thumbnailator.Thumbnails;
  * <pre>
  *   2024/08/15/IMG_0001.jpg
  *   2024/08/15/IMG_0001 (2).jpg   ← stesso nome, foto diversa
- *   .miniature/&lt;id&gt;.jpg
+ *   .miniature/&lt;id&gt;.jpg     ← o fototimeline.miniature, se impostata
  * </pre>
  */
 @Component
@@ -29,13 +30,21 @@ public class ArchivioFile {
     static final String MINIATURE = ".miniature";
 
     private final Path radice;
+    private final Path miniature;
     private final int latoMiniatura;
 
-    public ArchivioFile(ArchivioProperties properties) {
+    private final Cloud cloud;
+
+    public ArchivioFile(ArchivioProperties properties, Cloud cloud) {
+        this.cloud = cloud;
         this.radice = properties.archivio().toAbsolutePath().normalize();
+        this.miniature = properties.miniature() == null
+                ? radice.resolve(MINIATURE)
+                : properties.miniature().toAbsolutePath().normalize();
         this.latoMiniatura = properties.miniaturaLato();
         try {
-            Files.createDirectories(radice.resolve(MINIATURE));
+            // La radice no: se è nel cloud smontato finirebbe sul disco del server.
+            Files.createDirectories(miniature);
         } catch (IOException e) {
             throw new UncheckedIOException("Non riesco a creare l'archivio in " + radice, e);
         }
@@ -43,6 +52,20 @@ public class ArchivioFile {
 
     public Path radice() {
         return radice;
+    }
+
+    /** Lancia {@link it.fototimeline.cloud.ArchivioNonDisponibile} se il cloud è smontato. */
+    public void verificaDisponibile() {
+        cloud.verifica();
+    }
+
+    public boolean disponibile() {
+        return cloud.disponibile();
+    }
+
+    /** Dove stanno le miniature: dentro l'archivio, o sul disco locale se l'archivio è nel cloud. */
+    public Path cartellaMiniature() {
+        return miniature;
     }
 
     /** "2024/08/15": la cartella del giorno, relativa alla radice. */
@@ -58,6 +81,7 @@ public class ArchivioFile {
     /** Salva l'originale nella cartella del giorno e restituisce il percorso relativo alla radice. */
     public String salvaOriginale(String nome, String riserva, String estensione, LocalDate giorno, byte[] contenuto)
             throws IOException {
+        cloud.verifica();
         Path cartella = radice.resolve(cartella(giorno));
         Files.createDirectories(cartella);
         String pulito = nomeSicuro(nome, riserva, estensione);
@@ -106,6 +130,7 @@ public class ArchivioFile {
     }
 
     public Path originale(String percorsoRelativo) {
+        cloud.verifica();
         Path p = radice.resolve(percorsoRelativo).normalize();
         if (!p.startsWith(radice) || p.equals(radice)) {
             throw new IllegalArgumentException("Percorso fuori dall'archivio: " + percorsoRelativo);
@@ -114,10 +139,13 @@ public class ArchivioFile {
     }
 
     public Path miniatura(String id) {
-        return radice.resolve(MINIATURE).resolve(id + ".jpg");
+        return miniature.resolve(id + ".jpg");
     }
 
     public void elimina(String id, String percorsoRelativo) {
+        if (percorsoRelativo != null) {
+            cloud.verifica();
+        }
         try {
             Files.deleteIfExists(miniatura(id));
             if (percorsoRelativo != null) {
@@ -132,8 +160,13 @@ public class ArchivioFile {
 
     /** Toglie le cartelle rimaste vuote risalendo verso la radice (giorno, poi mese, poi anno). */
     void pulisciCartelleVuote(Path cartella) {
+        pulisciCartelleVuote(cartella, radice);
+    }
+
+    /** Come sopra, fermandosi a {@code limite} (che non viene mai cancellata). */
+    static void pulisciCartelleVuote(Path cartella, Path limite) {
         Path c = cartella;
-        while (c != null && c.startsWith(radice) && !c.equals(radice)) {
+        while (c != null && c.startsWith(limite) && !c.equals(limite)) {
             try {
                 Files.deleteIfExists(c);
             } catch (IOException e) {

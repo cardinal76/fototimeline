@@ -1,6 +1,7 @@
 package it.fototimeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -30,6 +31,7 @@ import it.fototimeline.service.FiltroFoto;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.FotoService.Modifica;
 import it.fototimeline.service.FotoService.Operazione;
+import it.fototimeline.service.ImportazioneCartelle;
 import it.fototimeline.service.Risultati.Esito;
 import it.fototimeline.service.Risultati.VoceMese;
 
@@ -51,6 +53,9 @@ class FotoServiceTest {
 
     @Autowired
     FotoRepository repository;
+
+    @Autowired
+    ImportazioneCartelle importazione;
 
     @BeforeEach
     void svuota() {
@@ -149,7 +154,7 @@ class FotoServiceTest {
         Files.write(cartella.resolve("sciolta.jpg"), immagine(Color.BLUE, "jpg"));
         Files.writeString(cartella.resolve("leggimi.txt"), "non è una foto");
 
-        var esito = service.importaCartella(cartella, true);
+        var esito = importazione.importa(cartella, true, false);
 
         assertThat(esito.trovate()).isEqualTo(2);
         assertThat(esito.importate()).isEqualTo(2);
@@ -158,7 +163,42 @@ class FotoServiceTest {
         assertThat(natale.getOrigineData()).isEqualTo(OrigineData.FILE);
         assertThat(natale.getScattataIl().getYear()).isEqualTo(2022);
 
-        assertThat(service.importaCartella(cartella, true).duplicate()).isEqualTo(2);
+        assertThat(importazione.importa(cartella, true, false).duplicate()).isEqualTo(2);
+        assertThat(foto).exists();
+    }
+
+    @Test
+    void importaSpostandoTogliGliOriginaliAncheSeGiaInArchivio(@TempDir Path cartella) throws IOException {
+        Files.createDirectories(cartella.resolve("2019/Mare"));
+        Files.write(cartella.resolve("2019/Mare/onda.png"), immagine(Color.CYAN, "png"));
+        byte[] doppione = immagine(Color.ORANGE, "png");
+        service.importa("gia.png", doppione, Instant.parse("2020-01-01T10:00:00Z"), null);
+        Files.write(cartella.resolve("copia-della-gia.png"), doppione);
+        Files.writeString(cartella.resolve("leggimi.txt"), "resta dov'è");
+
+        var esito = importazione.importa(cartella, true, true);
+
+        assertThat(esito.importate()).isEqualTo(1);
+        assertThat(esito.duplicate()).isEqualTo(1);
+        assertThat(esito.rimossi()).isEqualTo(2);
+        assertThat(cartella.resolve("2019")).doesNotExist();
+        assertThat(cartella.resolve("copia-della-gia.png")).doesNotExist();
+        assertThat(cartella.resolve("leggimi.txt")).exists();
+        assertThat(cartella).exists();
+        assertThat(repository.count()).isEqualTo(2);
+    }
+
+    @Test
+    void nonImportaDallArchivioStesso() {
+        assertThatThrownBy(() -> importazione.importa(archivio, false, true))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rifaLaMiniaturaSeManca() throws IOException {
+        var foto = service.importa("a.png", immagine(Color.RED, "png"), Instant.parse("2024-01-01T10:00:00Z"), null).foto();
+        Files.delete(service.fileMiniatura(foto));
+        assertThat(service.fileMiniatura(foto)).exists();
     }
 
     @Test

@@ -1,0 +1,183 @@
+package it.fototimeline.service;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import it.fototimeline.dominio.Foto;
+import it.fototimeline.service.Risultati.Caricamento;
+import it.fototimeline.service.Risultati.Cartella;
+import it.fototimeline.service.Risultati.Importazione;
+
+/**
+ * "Importa cartella": legge le immagini di una cartella del server (sul server
+ * è il cloud montato con rclone) e le mette in archivio, copiandole o
+ * spostandole.
+ *
+ * <p>Le cartelle accettate stanno sotto {@code fototimeline.importazione}, se
+ * impostata: sul server l'app è su internet e non deve leggere il resto del
+ * disco. L'archivio e le miniature si saltano sempre, anche quando stanno
+ * dentro la cartella scelta.
+ */
+@Service
+public class ImportazioneCartelle {
+
+    private static final Logger log = LoggerFactory.getLogger(ImportazioneCartelle.class);
+    private static final int MAX_MESSAGGI = 50;
+
+    private final FotoService fotoService;
+    private final ArchivioFile archivio;
+    private final Path radice;
+
+    public ImportazioneCartelle(FotoService fotoService, ArchivioFile archivio, ArchivioProperties properties) {
+        this.fotoService = fotoService;
+        this.archivio = archivio;
+        this.radice = properties.importazione() == null ? null : properties.importazione().toAbsolutePath().normalize();
+    }
+
+    /** La radice consentita, o null se si può leggere ovunque (sul PC). */
+    public Path radice() {
+        return radice;
+    }
+
+    /**
+     * @param sposta se true, dopo l'importazione l'originale viene tolto dalla
+     *               cartella di origine. Le foto già in archivio (stesso
+     *               contenuto) si tolgono anche loro: il contenuto è identico.
+     */
+    public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta) throws IOException {
+        archivio.verificaDisponibile();
+        Path base = consentita(cartella);
+        if (!Files.isDirectory(base)) {
+            throw new IllegalArgumentException("Cartella inesistente: " + cartella);
+        }
+        if (dentroArchivio(base)) {
+            throw new IllegalArgumentException("Questa cartella fa già parte dell'archivio");
+        }
+        List<Path> file;
+        try (Stream<Path> s = Files.walk(base)) {
+            file = s.filter(p -> !dentroArchivio(p))
+                    .filter(Files::isRegularFile)
+                    .filter(p -> FotoService.TIPI.containsKey(FotoService.estensione(p.getFileName().toString())))
+                    .sorted()
+                    .toList();
+        }
+
+        int importate = 0;
+        int duplicate = 0;
+        int errori = 0;
+        int rimossi = 0;
+        List<String> messaggi = new ArrayList<>();
+        for (Path p : file) {
+            Caricamento esito;
+            try {
+                String album = albumDaCartella && !p.getParent().equals(base)
+                        ? p.getParent().getFileName().toString()
+                        : null;
+                esito = fotoService.importa(p.getFileName().toString(), Files.readAllBytes(p),
+                        Files.getLastModifiedTime(p).toInstant(), album);
+            } catch (IOException e) {
+                esito = new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, e.getMessage());
+            }
+            switch (esito.esito()) {
+                case CARICATA -> importate++;
+                case DUPLICATA -> duplicate++;
+                case ERRORE -> {
+                    errori++;
+                    if (messaggi.size() < MAX_MESSAGGI) {
+                        messaggi.add(relativo(p) + ": " + esito.messaggio());
+                    }
+                }
+            }
+            if (sposta && esito.esito() != Risultati.Esito.ERRORE && inArchivio(esito.foto())) {
+                try {
+                    Files.delete(p);
+                    rimossi++;
+                } catch (IOException e) {
+                    log.warn("Importata ma non riesco a togliere {}: {}", p, e.getMessage());
+                }
+            }
+        }
+        if (sposta) {
+            pulisciSottocartelleVuote(base);
+        }
+        return new Importazione(file.size(), importate, duplicate, errori, rimossi, messaggi);
+    }
+
+    /** Le sottocartelle di una cartella consentita, per il navigatore. */
+    public Cartella elenca(Path cartella) throws IOException {
+        archivio.verificaDisponibile();
+        Path c = cartella == null ? partenza() : consentita(cartella);
+        if (!Files.isDirectory(c)) {
+            throw new IllegalArgumentException("Cartella inesistente: " + cartella);
+        }
+        List<String> sottocartelle;
+        int immagini;
+        try (Stream<Path> s = Files.list(c)) {
+            List<Path> voci = s.filter(p -> !dentroArchivio(p))
+                    .filter(p -> !p.getFileName().toString().startsWith("."))
+                    .toList();
+            sottocartelle = voci.stream().filter(Files::isDirectory)
+                    .map(p -> p.getFileName().toString())
+                    .sorted(String.CASE_INSENSITIVE_ORDER)
+                    .toList();
+            immagini = (int) voci.stream().filter(Files::isRegularFile)
+                    .filter(p -> FotoService.TIPI.containsKey(FotoService.estensione(p.getFileName().toString())))
+                    .count();
+        }
+        boolean inCima = radice != null ? c.equals(radice) : c.getParent() == null;
+        return new Cartella(c.toString(), inCima ? null : c.getParent().toString(), sottocartelle, immagini);
+    }
+
+    private Path partenza() {
+        return radice != null ? radice : Path.of(System.getProperty("user.home"));
+    }
+
+    /** Normalizza e controlla che stia sotto la radice consentita. */
+    Path consentita(Path cartella) {
+        Path c = cartella.toAbsolutePath().normalize();
+        if (radice != null && !c.startsWith(radice)) {
+            throw new IllegalArgumentException("Si può importare solo da " + radice);
+        }
+        return c;
+    }
+
+    private boolean dentroArchivio(Path p) {
+        Path n = p.toAbsolutePath().normalize();
+        return n.startsWith(archivio.radice()) || n.startsWith(archivio.cartellaMiniature());
+    }
+
+    private boolean inArchivio(Foto foto) {
+        return foto != null && foto.getPercorso() != null && Files.exists(fotoService.fileOriginale(foto));
+    }
+
+    private String relativo(Path p) {
+        return radice != null && p.startsWith(radice) ? radice.relativize(p).toString() : p.toString();
+    }
+
+    /** Dopo uno spostamento le sottocartelle svuotate spariscono; la cartella scelta resta. */
+    private static void pulisciSottocartelleVuote(Path base) throws IOException {
+        List<Path> cartelle;
+        try (Stream<Path> s = Files.walk(base)) {
+            cartelle = s.filter(Files::isDirectory).filter(p -> !p.equals(base))
+                    .sorted((a, b) -> b.getNameCount() - a.getNameCount())
+                    .toList();
+        }
+        for (Path c : cartelle) {
+            try (Stream<Path> dentro = Files.list(c)) {
+                if (dentro.findAny().isEmpty()) {
+                    Files.delete(c);
+                }
+            } catch (IOException e) {
+                // Non vuota o non cancellabile: resta.
+            }
+        }
+    }
+}

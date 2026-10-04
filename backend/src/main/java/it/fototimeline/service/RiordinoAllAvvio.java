@@ -11,6 +11,9 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
+import it.fototimeline.cloud.Cloud;
+import it.fototimeline.cloud.CloudProperties;
+
 /** All'avvio porta l'archivio nella forma anno/mese/giorno. */
 @Component
 class RiordinoAllAvvio implements ApplicationRunner {
@@ -19,14 +22,29 @@ class RiordinoAllAvvio implements ApplicationRunner {
 
     private final FotoService service;
     private final ArchivioFile archivio;
+    private final Cloud cloud;
+    private final CloudProperties cloudProperties;
 
-    RiordinoAllAvvio(FotoService service, ArchivioFile archivio) {
+    RiordinoAllAvvio(FotoService service, ArchivioFile archivio, Cloud cloud, CloudProperties cloudProperties) {
         this.service = service;
         this.archivio = archivio;
+        this.cloud = cloud;
+        this.cloudProperties = cloudProperties;
     }
 
     @Override
     public void run(ApplicationArguments args) throws IOException {
+        if (cloudProperties.gestito() && cloudProperties.montaAllAvvio()) {
+            try {
+                cloud.monta();
+            } catch (RuntimeException e) {
+                log.warn("Montaggio all'avvio non riuscito: {}", e.getMessage());
+            }
+        }
+        if (!archivio.disponibile()) {
+            log.info("Archivio smontato: niente riordino finché non viene montato");
+            return;
+        }
         spostaVecchieMiniature();
         int spostate = service.riordinaArchivio();
         if (spostate > 0) {
@@ -42,7 +60,7 @@ class RiordinoAllAvvio implements ApplicationRunner {
         }
         try (DirectoryStream<Path> file = Files.newDirectoryStream(vecchie, "*.jpg")) {
             for (Path f : file) {
-                Path nuova = archivio.radice().resolve(ArchivioFile.MINIATURE).resolve(f.getFileName());
+                Path nuova = archivio.cartellaMiniature().resolve(f.getFileName());
                 if (!Files.exists(nuova)) {
                     Files.move(f, nuova);
                 }

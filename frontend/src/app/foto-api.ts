@@ -2,7 +2,7 @@ import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { Caricamento, Filtro, Foto, Importazione, Modifica, Operazione, PaginaFoto, VoceMese } from './modelli';
+import { Caricamento, Cartella, Filtro, Foto, Importazione, Io, Modifica, Operazione, PaginaFoto, StatoCloud, VoceMese } from './modelli';
 
 @Injectable({ providedIn: 'root' })
 export class FotoApi {
@@ -34,8 +34,28 @@ export class FotoApi {
     return this.http.post<Caricamento[]>('/api/foto', dati, { reportProgress: true, observe: 'events' });
   }
 
-  importa(cartella: string, albumDaCartella: boolean): Observable<Importazione> {
-    return this.http.post<Importazione>('/api/importa', { cartella, albumDaCartella });
+  importa(cartella: string, albumDaCartella: boolean, sposta: boolean): Observable<Importazione> {
+    return this.http.post<Importazione>('/api/importa', { cartella, albumDaCartella, sposta });
+  }
+
+  cartelle(percorso?: string): Observable<Cartella> {
+    return this.http.get<Cartella>('/api/cartelle', { params: percorso ? { percorso } : {} });
+  }
+
+  io(): Observable<Io> {
+    return this.http.get<Io>('/api/io');
+  }
+
+  cloud(): Observable<StatoCloud> {
+    return this.http.get<StatoCloud>('/api/cloud');
+  }
+
+  monta(): Observable<StatoCloud> {
+    return this.http.post<StatoCloud>('/api/cloud/monta', {});
+  }
+
+  smonta(): Observable<StatoCloud> {
+    return this.http.post<StatoCloud>('/api/cloud/smonta', {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

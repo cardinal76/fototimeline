@@ -1,0 +1,107 @@
+# FotoTimeline su server2. Lo lancia .github/workflows/rilascio.yml:
+#   docker compose -p fototimeline -f deploy/docker-compose.yml --env-file ~/fototimeline/.env up -d --build
+#
+#   internet ─▶ caddy (HTTPS) ─▶ app ─┬─▶ mongo
+#                                     └─▶ rclone (API rc) ─▶ LifetimeCloud via WebDAV
+#
+# Le foto stanno nel cloud: il container rclone lo monta in $FOTOTIMELINE_DATI/cloud
+# quando un amministratore preme "Monta" nell'app, e lo smonta con "Smonta".
+# Solo rclone ha i permessi FUSE e il token del cloud; l'app no.
+
+name: fototimeline
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    # Poca cache: server2 fa anche le build di presenze e TrovaCampo.
+    command: ["--wiredTigerCacheSizeGB", "0.25"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?}
+    volumes:
+      - mongo:/data/db
+
+  rclone:
+    image: rclone/rclone:1.68
+    restart: unless-stopped
+    # Solo l'API di controllo: il montaggio lo chiede l'app (mount/mount, mount/unmount),
+    # con le opzioni di cache e permessi (Cloud.opzioniVfs).
+    command:
+      - rcd
+      - --rc-addr=:5572
+      - --config=/config/rclone/rclone.conf
+      - --cache-dir=/cache
+    environment:
+      RCLONE_RC_USER: fototimeline
+      RCLONE_RC_PASS: ${RCLONE_RC_PASSWORD:?}
+    # FUSE: serve per montare. È il motivo per cui rclone sta in un container suo.
+    cap_add: [SYS_ADMIN]
+    devices: ["/dev/fuse:/dev/fuse"]
+    security_opt: ["apparmor:unconfined"]
+    stop_grace_period: 30s
+    volumes:
+      - ${FOTOTIMELINE_DATI:?}/rclone:/config/rclone:ro
+      - rclone-cache:/cache
+      # rshared: il montaggio fatto qui dentro si vede sull'host e quindi nell'app.
+      - type: bind
+        source: ${FOTOTIMELINE_DATI:?}/cloud
+        target: /cloud
+        bind:
+          propagation: rshared
+
+  app:
+    build:
+      context: ..
+    restart: unless-stopped
+    depends_on: [mongo, rclone]
+    environment:
+      SPRING_PROFILES_ACTIVE: server
+      JAVA_TOOL_OPTIONS: -Xmx384m
+      MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/fototimeline?authSource=admin
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://presenze.footballer.it/auth/realms/fototimeline}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?}
+      FOTOTIMELINE_ARCHIVIO: /cloud/FotoTimeline
+      FOTOTIMELINE_MINIATURE: /miniature
+      FOTOTIMELINE_IMPORTAZIONE: /cloud
+      RCLONE_RC_URL: http://rclone:5572
+      RCLONE_RC_PASSWORD: ${RCLONE_RC_PASSWORD:?}
+      RCLONE_REMOTO: ${RCLONE_REMOTO:-lifetime:}
+      RCLONE_PUNTO_MONTAGGIO: /cloud
+      RCLONE_MONTA_ALL_AVVIO: ${RCLONE_MONTA_ALL_AVVIO:-false}
+    volumes:
+      # Miniature sul disco di server2: dal cloud la timeline sarebbe lenta.
+      - miniature:/miniature
+      - type: bind
+        source: ${FOTOTIMELINE_DATI:?}/cloud
+        target: /cloud
+        bind:
+          propagation: rslave
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/salute"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      FOTOTIMELINE_DOMINIO: ${FOTOTIMELINE_DOMINIO:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dati:/data
+      - caddy-config:/config
+
+volumes:
+  mongo:
+  miniature:
+  rclone-cache:
+  caddy-dati:
+  caddy-config:
