@@ -32,9 +32,10 @@ import it.fototimeline.service.FotoService;
 import it.fototimeline.service.FotoService.Modifica;
 import it.fototimeline.service.FotoService.Operazione;
 import it.fototimeline.service.ImportazioneCartelle;
+import it.fototimeline.service.LavoriImportazione;
+import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 import it.fototimeline.service.Risultati.Cartella;
 import it.fototimeline.service.Risultati.Caricamento;
-import it.fototimeline.service.Risultati.Importazione;
 import it.fototimeline.service.Risultati.PaginaFoto;
 import it.fototimeline.service.Risultati.VoceMese;
 import jakarta.validation.Valid;
@@ -47,10 +48,12 @@ public class FotoController {
 
     private final FotoService service;
     private final ImportazioneCartelle importazione;
+    private final LavoriImportazione lavori;
 
-    public FotoController(FotoService service, ImportazioneCartelle importazione) {
+    public FotoController(FotoService service, ImportazioneCartelle importazione, LavoriImportazione lavori) {
         this.service = service;
         this.importazione = importazione;
+        this.lavori = lavori;
     }
 
     @GetMapping("/foto")
@@ -94,9 +97,22 @@ public class FotoController {
     public record RichiestaImportazione(@NotBlank String cartella, boolean albumDaCartella, boolean sposta) {
     }
 
+    /** Avvia l'importazione in sottofondo; lo stato si segue con GET /api/importazioni/corrente. */
     @PostMapping("/importa")
-    public Importazione importa(@Valid @RequestBody RichiestaImportazione r) throws IOException {
-        return importazione.importa(Path.of(r.cartella().trim()), r.albumDaCartella(), r.sposta());
+    public ResponseEntity<StatoLavoro> importa(@Valid @RequestBody RichiestaImportazione r) {
+        Path cartella = importazione.consentita(Path.of(r.cartella().trim()));
+        return ResponseEntity.accepted()
+                .body(lavori.avvia(cartella, r.albumDaCartella(), r.sposta(), LavoriImportazione.Origine.MANUALE));
+    }
+
+    @GetMapping("/importazioni/corrente")
+    public ResponseEntity<StatoLavoro> importazioneCorrente() {
+        return lavori.corrente().map(ResponseEntity::ok).orElse(ResponseEntity.noContent().build());
+    }
+
+    @PostMapping("/importazioni/annulla")
+    public ResponseEntity<Void> annullaImportazione() {
+        return lavori.annulla() ? ResponseEntity.accepted().build() : ResponseEntity.noContent().build();
     }
 
     /** Sottocartelle per il navigatore di "Importa cartella"; senza percorso parte dalla radice consentita. */
