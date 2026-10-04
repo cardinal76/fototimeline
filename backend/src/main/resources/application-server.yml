@@ -1,0 +1,31 @@
+# Profilo per server2: dietro Caddy, con login sul Keycloak di presenze,
+# realm "fototimeline".
+server:
+  address: 0.0.0.0
+  # Caddy fa HTTPS: lo dice con X-Forwarded-*, e il redirect del login deve
+  # tornare su https://<dominio>.
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      timeout: 12h
+      cookie:
+        secure: true
+        same-site: lax
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            client-id: ${KEYCLOAK_CLIENT_ID:fototimeline}
+            client-secret: ${KEYCLOAK_CLIENT_SECRET}
+            scope: openid,profile,email
+        provider:
+          keycloak:
+            issuer-uri: ${KEYCLOAK_ISSUER:https://presenze.footballer.it/auth/realms/fototimeline}
+            user-name-attribute: preferred_username
+
+fototimeline:
+  login:
+    attivo: true

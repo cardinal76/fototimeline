@@ -1,0 +1,9 @@
+# HTTPS con Let's Encrypt per il dominio di FotoTimeline. Caddy aggiunge da
+# solo X-Forwarded-Proto e X-Forwarded-Host, che Spring usa per il login.
+{$FOTOTIMELINE_DOMINIO} {
+	encode zstd gzip
+	request_body {
+		max_size 2GB
+	}
+	reverse_proxy app:8080
+}

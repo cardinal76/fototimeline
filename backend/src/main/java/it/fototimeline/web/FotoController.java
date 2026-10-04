@@ -31,6 +31,8 @@ import it.fototimeline.service.FiltroFoto;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.FotoService.Modifica;
 import it.fototimeline.service.FotoService.Operazione;
+import it.fototimeline.service.ImportazioneCartelle;
+import it.fototimeline.service.Risultati.Cartella;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Importazione;
 import it.fototimeline.service.Risultati.PaginaFoto;
@@ -44,9 +46,11 @@ import jakarta.validation.constraints.NotNull;
 public class FotoController {
 
     private final FotoService service;
+    private final ImportazioneCartelle importazione;
 
-    public FotoController(FotoService service) {
+    public FotoController(FotoService service, ImportazioneCartelle importazione) {
         this.service = service;
+        this.importazione = importazione;
     }
 
     @GetMapping("/foto")
@@ -87,12 +91,18 @@ public class FotoController {
         return esiti;
     }
 
-    public record RichiestaImportazione(@NotBlank String cartella, boolean albumDaCartella) {
+    public record RichiestaImportazione(@NotBlank String cartella, boolean albumDaCartella, boolean sposta) {
     }
 
     @PostMapping("/importa")
     public Importazione importa(@Valid @RequestBody RichiestaImportazione r) throws IOException {
-        return service.importaCartella(Path.of(r.cartella().trim()), r.albumDaCartella());
+        return importazione.importa(Path.of(r.cartella().trim()), r.albumDaCartella(), r.sposta());
+    }
+
+    /** Sottocartelle per il navigatore di "Importa cartella"; senza percorso parte dalla radice consentita. */
+    @GetMapping("/cartelle")
+    public Cartella cartelle(@RequestParam(required = false) String percorso) throws IOException {
+        return importazione.elenca(percorso == null || percorso.isBlank() ? null : Path.of(percorso));
     }
 
     @PutMapping("/foto/{id}")

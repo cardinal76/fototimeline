@@ -1,21 +1,53 @@
 server:
   port: 8080
-  # Solo da questo PC: l'importazione legge cartelle locali.
+  # Senza login l'app deve restare su questo PC: con un altro indirizzo e il
+  # login spento non parte (ConfigurazioneSicurezza).
   address: ${FOTOTIMELINE_INDIRIZZO:127.0.0.1}
 
 spring:
   application:
     name: fototimeline
+  autoconfigure:
+    # Niente utente "user" con password generata: il login è Keycloak o niente.
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/fototimeline}
       auto-index-creation: true
+  http:
+    client:
+      # Le chiamate a rclone (montare può richiedere qualche secondo).
+      connect-timeout: 5s
+      read-timeout: 60s
   servlet:
     multipart:
       max-file-size: 200MB
       max-request-size: 2GB
 
 fototimeline:
-  # Dove finiscono originali e miniature.
+  # Dove finiscono gli originali (AAAA/MM/GG/nome). Sul server è una cartella
+  # di pCloud (o simile) montata con rclone.
   archivio: ${FOTOTIMELINE_ARCHIVIO:${user.home}/FotoTimeline}
+  # Miniature: vuoto = <archivio>/.miniature. Sul server stanno sul disco
+  # locale, perché leggerle dal cloud renderebbe lenta la timeline.
+  miniature: ${FOTOTIMELINE_MINIATURE:}
   miniatura-lato: 480
+  # "Importa cartella" accetta solo cartelle sotto questa; vuoto = qualunque
+  # (va bene solo sul PC).
+  importazione: ${FOTOTIMELINE_IMPORTAZIONE:}
+  login:
+    attivo: ${FOTOTIMELINE_LOGIN:false}
+    # Ruolo di realm richiesto; vuoto = basta un utente del realm.
+    ruolo: ${FOTOTIMELINE_RUOLO:}
+    # Ruolo di realm per montare e smontare il cloud.
+    ruolo-admin: ${FOTOTIMELINE_RUOLO_ADMIN:fototimeline-admin}
+  # Il cloud montato dal container rclone (deploy/docker-compose.yml). Vuoto
+  # sul PC: l'archivio è un disco sempre disponibile.
+  cloud:
+    rc-url: ${RCLONE_RC_URL:}
+    rc-utente: ${RCLONE_RC_UTENTE:fototimeline}
+    rc-password: ${RCLONE_RC_PASSWORD:}
+    remoto: ${RCLONE_REMOTO:lifetime:}
+    punto-montaggio: ${RCLONE_PUNTO_MONTAGGIO:/cloud}
+    # false: dopo ogni riavvio resta smontato finché un admin non lo monta.
+    monta-all-avvio: ${RCLONE_MONTA_ALL_AVVIO:false}

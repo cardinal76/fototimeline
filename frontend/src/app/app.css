@@ -414,3 +414,76 @@ progress {
     padding-inline: 0.6rem;
   }
 }
+
+/* ---------------------------------------------------------- cloud e utente */
+.cloud,
+.utente {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--testo-tenue);
+  white-space: nowrap;
+}
+.spia {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pericolo);
+}
+.cloud.montato .spia {
+  background: #3fb950;
+}
+.smontato {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--pericolo) 16%, var(--superficie));
+  border-bottom: 1px solid var(--bordo);
+  font-size: 0.9rem;
+}
+.smontato .link {
+  margin-left: 0.5rem;
+}
+.bottone.spento {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.barra button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.navigatore {
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+.navigatore .percorso {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+  overflow-wrap: anywhere;
+}
+.navigatore ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.navigatore li button {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.navigatore li button:hover,
+.navigatore li button:focus-visible {
+  background: var(--superficie-2);
+}
+.navigatore p {
+  margin: 0.4rem 0 0;
+}

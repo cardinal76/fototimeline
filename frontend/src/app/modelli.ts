@@ -60,7 +60,33 @@ export interface Importazione {
   importate: number;
   duplicate: number;
   errori: number;
+  /** Originali tolti dalla cartella di origine (importazione con "sposta"). */
+  rimossi: number;
   messaggi: string[];
+}
+
+/** Chi è collegato. Con il login spento (il PC) si è admin. */
+export interface Io {
+  login: boolean;
+  nome?: string;
+  admin: boolean;
+  /** Sotto quale cartella si può importare; null = ovunque (il PC). */
+  radiceImportazione?: string;
+}
+
+export interface StatoCloud {
+  /** False sul PC: l'archivio è un disco, sempre disponibile. */
+  gestito: boolean;
+  montato: boolean;
+  remoto?: string;
+  errore?: string;
+}
+
+export interface Cartella {
+  percorso: string;
+  padre?: string;
+  sottocartelle: string[];
+  immagini: number;
 }
 
 export interface Modifica {

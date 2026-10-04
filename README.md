@@ -39,8 +39,9 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
 - **Caricamento** col bottone o trascinando le foto nella finestra, con
   avanzamento. **Niente doppioni**: una foto con lo stesso contenuto
   (SHA-256) non entra due volte.
-- **Importa cartella**: il server legge una cartella del PC e le
-  sottocartelle; volendo, il nome della sottocartella diventa l'album.
+- **Importa cartella**: con un navigatore di cartelle si sceglie da dove
+  importare (sottocartelle comprese); volendo, il nome della sottocartella
+  diventa l'album, e con "sposta" gli originali vengono tolti dall'origine.
 - **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
   informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
   tag, album, data; si scarica l'originale o si elimina.
@@ -52,7 +53,14 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
 
 Formati: JPEG, PNG, GIF, BMP, WebP. HEIC (iPhone) no: va convertito prima.
 
-## Avvio
+## Sul server
+
+Su server2 FotoTimeline gira dietro HTTPS con il login del Keycloak di presenze
+(realm `fototimeline`), e gli originali stanno su LifetimeCloud, montato con
+rclone solo quando un amministratore lo chiede dall'app. Tutto in
+[DEPLOY.md](DEPLOY.md).
+
+## Avvio sul PC
 
 Serve MongoDB su `localhost:27017`:
 
@@ -92,11 +100,15 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_ARCHIVIO` | `~/FotoTimeline`                          | Cartella di originali e miniature    |
 | `MONGODB_URI`           | `mongodb://localhost:27017/fototimeline`  | Database dei metadati                |
 | `FOTOTIMELINE_INDIRIZZO`| `127.0.0.1`                               | Indirizzo su cui ascolta il server   |
+| `FOTOTIMELINE_MINIATURE`| `<archivio>/.miniature`                   | Cartella delle miniature             |
+| `FOTOTIMELINE_IMPORTAZIONE` | (ovunque)                             | Radice consentita per "Importa cartella" |
+| `FOTOTIMELINE_LOGIN`    | `false`                                   | Login Keycloak (acceso dal profilo `server`) |
+| `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
 
-Il server ascolta solo su `127.0.0.1` di proposito: non c'è login e
-*Importa cartella* legge qualunque cartella del PC. Prima di aprirlo alla rete
-di casa (`FOTOTIMELINE_INDIRIZZO=0.0.0.0`) va aggiunta un'autenticazione
-(per esempio Keycloak).
+Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
+cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
+l'app si rifiuta di partire; per aprirla in rete si usa il profilo `server`
+(login Keycloak), come su server2.
 
 **WSL**: se il backend gira in WSL, le cartelle di Windows si importano con il
 percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
@@ -108,7 +120,11 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
-| POST   | `/api/importa`               | `{ "cartella": "...", "albumDaCartella": true }`           |
+| POST   | `/api/importa`               | `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
+| GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
+| GET    | `/api/io`                    | Utente collegato, se è admin, radice di importazione       |
+| GET    | `/api/cloud`                 | Cloud montato o no                                         |
+| POST   | `/api/cloud/monta`, `/smonta`| Monta o smonta il cloud (ruolo `fototimeline-admin`)       |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |

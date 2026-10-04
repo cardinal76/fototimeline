@@ -14,7 +14,8 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Foto, Importazione } from './modelli';
+import { Cartella, Foto, Importazione } from './modelli';
+import { esci } from './sessione';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
 
@@ -46,8 +47,10 @@ export class App {
   protected readonly dialogoImporta = signal(false);
   protected readonly importazione = signal<Importazione | null>(null);
   protected readonly importando = signal(false);
-  protected cartella = '';
+  protected readonly cartellaAperta = signal<Cartella | null>(null);
   protected albumDaCartella = true;
+  /** Sul server (cartella del cloud) si sposta, come deciso; sul PC si copia. */
+  protected sposta = false;
   protected ricerca = '';
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
@@ -209,16 +212,41 @@ export class App {
 
   // ------------------------------------------------------------ importazione
 
+  protected apriImporta(): void {
+    this.sposta = !!this.galleria.io()?.radiceImportazione;
+    this.importazione.set(null);
+    this.dialogoImporta.set(true);
+    this.naviga();
+  }
+
+  protected naviga(percorso?: string): void {
+    this.api.cartelle(percorso).subscribe({
+      next: (c) => this.cartellaAperta.set(c),
+      error: (e: unknown) => this.galleria.avvisa(dettaglio(e) ?? 'Cartella non leggibile'),
+    });
+  }
+
+  protected entra(nome: string): void {
+    const c = this.cartellaAperta();
+    if (c) {
+      this.naviga(`${c.percorso.replace(/[\\/]$/, '')}/${nome}`);
+    }
+  }
+
   protected async importa(): Promise<void> {
-    if (!this.cartella.trim()) return;
+    const cartella = this.cartellaAperta()?.percorso;
+    if (!cartella) return;
+    if (this.sposta && !confirm(`Le foto di "${cartella}" verranno spostate nell'archivio e tolte da lì. Continuare?`)) {
+      return;
+    }
     this.importando.set(true);
     this.importazione.set(null);
     try {
-      this.importazione.set(await firstValueFrom(this.api.importa(this.cartella, this.albumDaCartella)));
+      this.importazione.set(await firstValueFrom(this.api.importa(cartella, this.albumDaCartella, this.sposta)));
       this.galleria.ricarica();
+      this.naviga(cartella);
     } catch (e: unknown) {
-      const dettaglio = (e as { error?: { detail?: string } }).error?.detail;
-      this.galleria.avvisa(dettaglio ?? 'Importazione non riuscita');
+      this.galleria.avvisa(dettaglio(e) ?? 'Importazione non riuscita');
     } finally {
       this.importando.set(false);
     }
@@ -228,4 +256,12 @@ export class App {
     this.dialogoImporta.set(false);
     this.importazione.set(null);
   }
+
+  protected logout(): void {
+    esci();
+  }
+}
+
+function dettaglio(e: unknown): string | undefined {
+  return (e as { error?: { detail?: string } }).error?.detail;
 }

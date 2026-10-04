@@ -3,7 +3,7 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { Caricamento, Filtro, Foto, Giorno, Modifica, Operazione, VoceMese } from './modelli';
+import { Caricamento, Filtro, Foto, Giorno, Io, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** File per richiesta di caricamento: richieste piccole, avanzamento leggibile. */
@@ -35,6 +35,14 @@ export class Galleria {
   readonly selezionate = signal<ReadonlySet<string>>(new Set());
   readonly caricamento = signal<StatoCaricamento | null>(null);
   readonly avviso = signal<string | null>(null);
+  readonly io = signal<Io | null>(null);
+  readonly cloud = signal<StatoCloud | null>(null);
+  readonly cambioCloud = signal(false);
+  /** Originali raggiungibili: sul PC sempre, sul server solo col cloud montato. */
+  readonly archivioDisponibile = computed(() => {
+    const c = this.cloud();
+    return !c || !c.gestito || c.montato;
+  });
 
   readonly giorni = computed<Giorno[]>(() => {
     const giorni: Giorno[] = [];
@@ -70,7 +78,28 @@ export class Galleria {
   private avvisoTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
+    this.api.io().subscribe((io) => this.io.set(io));
+    this.aggiornaCloud();
     this.ricarica();
+  }
+
+  aggiornaCloud(): void {
+    this.api.cloud().subscribe({ next: (c) => this.cloud.set(c), error: () => this.cloud.set(null) });
+  }
+
+  async commutaCloud(): Promise<void> {
+    const montato = this.cloud()?.montato;
+    this.cambioCloud.set(true);
+    try {
+      const stato = await firstValueFrom(montato ? this.api.smonta() : this.api.monta());
+      this.cloud.set(stato);
+      this.avvisa(stato.montato ? 'Cloud montato' : 'Cloud smontato: gli originali non sono più raggiungibili');
+    } catch {
+      this.avvisa(montato ? 'Smontaggio non riuscito' : 'Montaggio non riuscito: controlla rclone');
+      this.aggiornaCloud();
+    } finally {
+      this.cambioCloud.set(false);
+    }
   }
 
   imposta(modifica: Partial<Filtro>): void {
@@ -204,8 +233,9 @@ export class Galleria {
           else if (e.esito === 'DUPLICATA') stato.duplicate++;
           else stato.errori.push(`${e.nome}: ${e.messaggio ?? 'errore'}`);
         }
-      } catch {
-        gruppo.forEach((f) => stato.errori.push(`${f.name}: invio non riuscito`));
+      } catch (e) {
+        const smontato = (e as { status?: number }).status === 503;
+        gruppo.forEach((f) => stato.errori.push(`${f.name}: ${smontato ? 'archivio smontato' : 'invio non riuscito'}`));
       }
       stato.fatti += gruppo.length;
       stato.gruppo = 0;

@@ -38,16 +38,46 @@
   </div>
 
   <div class="azioni">
+    @if (galleria.cloud(); as c) {
+      @if (c.gestito) {
+        <span class="cloud" [class.montato]="c.montato" [title]="c.errore ?? ''">
+          <span class="spia" aria-hidden="true"></span>
+          {{ c.montato ? 'Cloud montato' : 'Cloud smontato' }}
+          @if (galleria.io()?.admin) {
+            <button type="button" class="link" [disabled]="galleria.cambioCloud()" (click)="galleria.commutaCloud()">
+              {{ galleria.cambioCloud() ? '…' : c.montato ? 'Smonta' : 'Monta' }}
+            </button>
+          }
+        </span>
+      }
+    }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
     </button>
-    <button type="button" (click)="dialogoImporta.set(true)">Importa cartella</button>
-    <label class="bottone primario">
+    <button type="button" [disabled]="!galleria.archivioDisponibile()" (click)="apriImporta()">Importa cartella</button>
+    <label class="bottone primario" [class.spento]="!galleria.archivioDisponibile()">
       Carica foto
-      <input #scelta type="file" accept="image/*" multiple hidden (change)="scegliFile(scelta)" />
+      <input #scelta type="file" accept="image/*" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
     </label>
+    @if (galleria.io()?.login) {
+      <span class="utente">
+        {{ galleria.io()?.nome }}
+        <button type="button" class="link" (click)="logout()">Esci</button>
+      </span>
+    }
   </div>
 </header>
+
+@if (!galleria.archivioDisponibile()) {
+  <p class="smontato" role="status">
+    Il cloud è smontato: la timeline si vede, ma originali, caricamenti e importazioni aspettano.
+    @if (galleria.io()?.admin) {
+      <button type="button" class="link" [disabled]="galleria.cambioCloud()" (click)="galleria.commutaCloud()">Monta adesso</button>
+    } @else {
+      Chiedi a un amministratore di montarlo.
+    }
+  </p>
+}
 
 <div class="corpo">
   <main #scorrimento (scroll)="scorri()">
@@ -165,20 +195,43 @@
     <form class="dialogo" role="dialog" aria-labelledby="titolo-importa" (click)="$event.stopPropagation()" (ngSubmit)="importa()">
       <h2 id="titolo-importa">Importa una cartella</h2>
       <p class="tenue">
-        Il server legge la cartella e le sottocartelle di questo PC e copia le immagini nell'archivio.
+        Scegli la cartella: le immagini sue e delle sottocartelle entrano nell'archivio, nelle cartelle anno/mese/giorno.
         Le foto già presenti vengono saltate.
       </p>
-      <label>
-        Percorso
-        <input name="cartella" [(ngModel)]="cartella" placeholder="/home/marco/Immagini oppure C:\Users\Marco\Pictures" required autofocus />
-      </label>
+
+      @if (cartellaAperta(); as c) {
+        <div class="navigatore">
+          <div class="percorso">
+            @if (c.padre) {
+              <button type="button" class="link" (click)="naviga(c.padre)">↑ Su</button>
+            }
+            <code>{{ c.percorso }}</code>
+          </div>
+          <ul>
+            @for (n of c.sottocartelle; track n) {
+              <li><button type="button" (click)="entra(n)">📁 {{ n }}</button></li>
+            } @empty {
+              <li class="tenue">Nessuna sottocartella</li>
+            }
+          </ul>
+          <p class="tenue">{{ c.immagini }} immagini direttamente in questa cartella</p>
+        </div>
+      }
+
       <label class="spunta-riga">
         <input type="checkbox" name="albumDaCartella" [(ngModel)]="albumDaCartella" />
         Usa il nome delle sottocartelle come album
       </label>
+      <label class="spunta-riga">
+        <input type="checkbox" name="sposta" [(ngModel)]="sposta" />
+        Sposta: dopo l'importazione toglie le foto dalla cartella di origine (niente doppioni)
+      </label>
       @if (importazione(); as r) {
         <p class="esito">
           Trovate <b>{{ r.trovate }}</b> · importate <b>{{ r.importate }}</b> · già presenti {{ r.duplicate }}
+          @if (r.rimossi) {
+            · tolte dall'origine {{ r.rimossi }}
+          }
           @if (r.errori) {
             · <span class="errore">{{ r.errori }} errori</span>
           }
@@ -193,8 +246,8 @@
       }
       <div class="piede">
         <button type="button" (click)="chiudiImporta()">Chiudi</button>
-        <button type="submit" class="primario" [disabled]="importando()">
-          {{ importando() ? 'Importo… (può volerci un po\')' : 'Importa' }}
+        <button type="submit" class="primario" [disabled]="importando() || !cartellaAperta()">
+          {{ importando() ? 'Importo… (può volerci un po\')' : sposta ? 'Importa e sposta' : 'Importa' }}
         </button>
       </div>
     </form>
