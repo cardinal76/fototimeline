@@ -1,0 +1,5 @@
+backend/target/
+# Build di Angular copiata nel backend: si rigenera con "npm run build".
+backend/src/main/resources/static/
+frontend/node_modules/
+frontend/.angular/

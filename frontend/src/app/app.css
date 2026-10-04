@@ -1,0 +1,416 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ---------------------------------------------------------- barra */
+.barra {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 1rem;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--bordo);
+}
+.barra .marchio {
+  all: unset;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.logo {
+  color: var(--accento);
+  font-size: 1.4rem;
+}
+.filtri,
+.azioni {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.filtri {
+  flex: 1;
+}
+.cerca {
+  flex: 1;
+  min-width: 180px;
+  max-width: 360px;
+}
+input:not([type='checkbox']),
+select,
+.barra button,
+.bottone,
+.barra-selezione button,
+.dialogo button,
+.vuoto button {
+  color: var(--testo);
+  background: var(--superficie-2);
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+}
+.barra button,
+.bottone,
+.barra-selezione button,
+.dialogo button,
+.vuoto button {
+  cursor: pointer;
+  white-space: nowrap;
+}
+.barra button:hover,
+.bottone:hover,
+.barra-selezione button:hover {
+  border-color: var(--testo-tenue);
+}
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+.bottone:focus-within {
+  outline: 2px solid var(--accento);
+  outline-offset: 1px;
+}
+[aria-pressed='true'] {
+  background: var(--accento-tenue) !important;
+  border-color: var(--accento) !important;
+  color: var(--accento-forte) !important;
+}
+.primario,
+.dialogo .primario {
+  background: var(--accento);
+  border-color: var(--accento);
+  color: #fff;
+  font-weight: 600;
+}
+.bottone.primario:hover {
+  border-color: var(--accento-forte);
+  filter: brightness(1.1);
+}
+.link,
+.barra .link {
+  all: unset;
+  cursor: pointer;
+  color: var(--accento);
+  font-size: 0.9em;
+}
+.link:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------- corpo */
+.corpo {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 1.25rem 2rem;
+}
+.laterale {
+  width: 230px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 1rem 0.5rem;
+  border-left: 1px solid var(--bordo);
+  background: var(--superficie);
+}
+.salto {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--accento-tenue);
+}
+.salto .link {
+  margin-left: 0.5rem;
+}
+.mese {
+  position: sticky;
+  top: -0.5rem;
+  z-index: 2;
+  margin: 1.25rem -1.25rem 0;
+  padding: 0.6rem 1.25rem;
+  font-size: 1.35rem;
+  text-transform: capitalize;
+  background: color-mix(in srgb, var(--sfondo) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+.giorno h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 1rem 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.giorno h3 span:first-child::first-letter {
+  text-transform: uppercase;
+}
+.giorno h3 small {
+  color: var(--testo-tenue);
+  font-weight: 400;
+}
+
+/* Griglia "giustificata": ogni tassello cresce in proporzione al suo formato. */
+.griglia {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.griglia::after {
+  content: '';
+  flex-grow: 999;
+}
+.tassello {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: var(--superficie-2);
+  cursor: zoom-in;
+  overflow: hidden;
+  max-height: 340px;
+}
+.tassello img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.25s, opacity 0.2s;
+}
+.tassello:hover img {
+  transform: scale(1.03);
+}
+.tassello[aria-pressed] {
+  cursor: pointer;
+}
+.tassello.scelto img {
+  transform: scale(0.88);
+  border-radius: 6px;
+}
+.tassello.scelto {
+  background: var(--accento-tenue);
+}
+.stella {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  color: #ffc94d;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+}
+.spunta {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  color: transparent;
+  background: rgb(0 0 0 / 0.25);
+}
+.scelto .spunta {
+  background: var(--accento);
+  border-color: var(--accento);
+  color: #fff;
+}
+.didascalia {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 1.2rem 0.5rem 0.35rem;
+  font-size: 0.8rem;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.65));
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.tassello:hover .didascalia {
+  opacity: 1;
+}
+.vuoto {
+  margin: 12vh auto 0;
+  max-width: 460px;
+  text-align: center;
+  line-height: 1.5;
+}
+.grande {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+.tenue {
+  color: var(--testo-tenue);
+  font-size: 0.9rem;
+}
+.fondo {
+  display: grid;
+  place-items: center;
+  min-height: 80px;
+}
+.rotella {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--bordo);
+  border-top-color: var(--accento);
+  border-radius: 50%;
+  animation: gira 0.8s linear infinite;
+}
+@keyframes gira {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* ---------------------------------------------------------- pannelli flottanti */
+.barra-selezione,
+.avanzamento,
+.avviso {
+  position: fixed;
+  z-index: 20;
+  background: var(--superficie);
+  border: 1px solid var(--bordo);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+.barra-selezione {
+  left: 50%;
+  bottom: 1.25rem;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.9rem;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+}
+.barra-selezione b {
+  margin-right: 0.5rem;
+}
+.barra-selezione .link {
+  all: unset;
+  cursor: pointer;
+  color: var(--accento);
+  padding: 0 0.25rem;
+}
+.barra-selezione .link:hover {
+  text-decoration: underline;
+}
+.pericolo:hover {
+  background: var(--pericolo) !important;
+  border-color: var(--pericolo) !important;
+  color: #fff !important;
+}
+.avanzamento {
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 320px;
+  padding: 0.8rem 1rem;
+}
+.avanzamento .riga {
+  display: flex;
+  justify-content: space-between;
+}
+.avanzamento p {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--testo-tenue);
+}
+progress {
+  width: 100%;
+  margin-top: 0.5rem;
+  accent-color: var(--accento);
+}
+.errore {
+  color: var(--pericolo);
+}
+.errori {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  color: var(--testo-tenue);
+}
+.avviso {
+  left: 50%;
+  top: 1rem;
+  translate: -50% 0;
+  padding: 0.6rem 1rem;
+  z-index: 60;
+}
+
+/* ---------------------------------------------------------- dialogo */
+.velo {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.55);
+}
+.dialogo {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 0.9rem;
+  padding: 1.4rem;
+  background: var(--superficie);
+  border: 1px solid var(--bordo);
+  border-radius: 14px;
+}
+.dialogo h2 {
+  margin: 0;
+}
+.dialogo p {
+  margin: 0;
+}
+.dialogo label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+.dialogo .spunta-riga {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.piede {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.rilascio {
+  position: fixed;
+  inset: 0.75rem;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--accento);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--sfondo) 75%, transparent);
+  font-size: 1.5rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+@media (max-width: 800px) {
+  .laterale {
+    display: none;
+  }
+  main {
+    padding: 0.5rem 0.6rem 2rem;
+  }
+  .mese {
+    margin-inline: -0.6rem;
+    padding-inline: 0.6rem;
+  }
+}

@@ -1,0 +1,21 @@
+server:
+  port: 8080
+  # Solo da questo PC: l'importazione legge cartelle locali.
+  address: ${FOTOTIMELINE_INDIRIZZO:127.0.0.1}
+
+spring:
+  application:
+    name: fototimeline
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/fototimeline}
+      auto-index-creation: true
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 2GB
+
+fototimeline:
+  # Dove finiscono originali e miniature.
+  archivio: ${FOTOTIMELINE_ARCHIVIO:${user.home}/FotoTimeline}
+  miniatura-lato: 480

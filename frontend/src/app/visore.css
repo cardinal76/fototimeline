@@ -1,0 +1,200 @@
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  background: #000;
+  color: #eee;
+}
+.scena {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.sfondo {
+  position: absolute;
+  inset: -40px;
+  width: calc(100% + 80px);
+  height: calc(100% + 80px);
+  object-fit: cover;
+  filter: blur(40px) brightness(0.35);
+}
+.immagine {
+  grid-area: 1 / 1;
+  position: relative;
+  max-width: 100%;
+  max-height: 100vh;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.immagine.pronta,
+.immagine.segnaposto {
+  opacity: 1;
+}
+.segnaposto {
+  width: min(100%, 900px);
+  filter: blur(2px);
+}
+.freccia {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  width: 3rem;
+  height: 5rem;
+  font-size: 2.5rem;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.35);
+  cursor: pointer;
+}
+.freccia:hover {
+  background: rgb(0 0 0 / 0.6);
+}
+.sx {
+  left: 1rem;
+}
+.dx {
+  right: 1rem;
+}
+.comandi {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  gap: 0.25rem;
+}
+.comandi > * {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.45);
+  color: #fff;
+  font-size: 1.2rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.comandi > *:hover {
+  background: rgb(0 0 0 / 0.75);
+}
+.comandi [aria-pressed='true'] {
+  color: #ffc94d;
+}
+.pannello {
+  width: 340px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 1.25rem;
+  background: #16181d;
+  border-left: 1px solid #2a2d35;
+}
+.quando {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.quando::first-letter {
+  text-transform: uppercase;
+}
+.ora {
+  margin: 0.2rem 0 1.25rem;
+  color: #9aa0ab;
+  font-size: 0.85rem;
+}
+form {
+  display: grid;
+  gap: 0.8rem;
+}
+label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: #9aa0ab;
+}
+small {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+input,
+textarea {
+  font: inherit;
+  font-size: 0.95rem;
+  color: #eee;
+  background: #0e1014;
+  border: 1px solid #2f333c;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  color-scheme: dark;
+}
+input:focus,
+textarea:focus {
+  outline: 2px solid #4f8cff;
+  border-color: transparent;
+}
+.azioni {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.25rem;
+}
+.azioni button {
+  font: inherit;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #2f333c;
+  background: #22252c;
+  color: #eee;
+  cursor: pointer;
+}
+.azioni .primario {
+  background: #4f8cff;
+  border-color: #4f8cff;
+  color: #fff;
+}
+.azioni .primario:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.azioni .pericolo:hover {
+  background: #5c1f24;
+  border-color: #a33a44;
+}
+dl {
+  margin: 1.5rem 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+}
+dt {
+  color: #9aa0ab;
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+dd a {
+  color: #7eaaff;
+}
+.scorciatoie {
+  margin-top: 1.5rem;
+  font-size: 0.75rem;
+  color: #6c727e;
+}
+@media (max-width: 800px) {
+  :host {
+    flex-direction: column;
+  }
+  .pannello {
+    width: auto;
+    max-height: 45vh;
+    border-left: 0;
+    border-top: 1px solid #2a2d35;
+  }
+}

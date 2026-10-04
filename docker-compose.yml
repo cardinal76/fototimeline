@@ -1,0 +1,13 @@
+# Solo MongoDB: il backend gira con Maven (o java -jar) sul PC.
+services:
+  mongo:
+    image: mongo:7
+    container_name: fototimeline-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-dati:/data/db
+
+volumes:
+  mongo-dati:

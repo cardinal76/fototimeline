@@ -1,0 +1,83 @@
+:host {
+  display: block;
+  font-size: 0.9rem;
+}
+.testa {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 0.5rem 0.75rem;
+  color: var(--testo-tenue);
+}
+.anno {
+  border-left: 2px solid var(--bordo);
+  margin-left: 0.5rem;
+}
+.anno.attivo {
+  border-left-color: var(--accento);
+}
+button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+}
+button:hover {
+  background: var(--superficie-2);
+}
+button:focus-visible {
+  outline: 2px solid var(--accento);
+}
+.anno-titolo {
+  font-weight: 600;
+  font-size: 1rem;
+  justify-content: space-between;
+}
+small {
+  color: var(--testo-tenue);
+  font-variant-numeric: tabular-nums;
+}
+ol {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0 0 0 0.5rem;
+}
+ol button span:first-child {
+  width: 2.2rem;
+}
+ol button.attivo {
+  background: var(--accento-tenue);
+  color: var(--accento-forte);
+  font-weight: 600;
+}
+.barra {
+  flex: 1;
+  height: 4px;
+  background: var(--superficie-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.barra i {
+  display: block;
+  height: 100%;
+  background: var(--accento);
+  opacity: 0.6;
+}
+.link {
+  width: auto;
+  padding: 0;
+  color: var(--accento);
+}
+.link:hover {
+  background: none;
+  text-decoration: underline;
+}
+.vuoto {
+  color: var(--testo-tenue);
+  padding: 0 0.5rem;
+}

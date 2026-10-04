@@ -1,0 +1,127 @@
+# FotoTimeline
+
+Gestore di foto con timeline, da usare in locale sul proprio PC.
+
+- **Backend**: Spring Boot 3.5, Java 21, Maven, MongoDB (solo metadati).
+- **Frontend**: Angular 20 standalone, zoneless, signals; nessuna libreria UI.
+- **File**: gli originali stanno su disco in `~/FotoTimeline`, in una
+  cartella per anno, mese e giorno di scatto, col loro nome:
+
+  ```
+  FotoTimeline/
+  ├── 2024/
+  │   └── 08/
+  │       ├── 15/
+  │       │   ├── IMG_0001.jpg
+  │       │   └── IMG_0001 (2).jpg   ← stesso nome, foto diversa
+  │       └── 16/
+  │           └── DSC_4410.jpg
+  └── .miniature/                  ← anteprime, si rigenerano
+  ```
+
+  Così l'archivio si sfoglia anche da Esplora risorse e si salva con un
+  normale backup.
+
+## Cosa fa
+
+- **Timeline** per mese e per giorno, con scorrimento infinito e griglia
+  "giustificata" che rispetta il formato di ogni foto.
+- **Colonna degli anni/mesi** a destra con il numero di foto: un clic salta
+  a quel mese, e si evidenzia il mese che si sta guardando.
+- **Data di scatto dall'EXIF** (DateTimeOriginal); se manca, la data del file
+  (importazione) o quella di caricamento. Si può correggere a mano.
+- **Cartelle sempre in ordine**: se cambi la data di una foto, il file si
+  sposta nella cartella del nuovo giorno; le cartelle rimaste vuote spariscono.
+  All'avvio il server rimette nella cartella giusta ogni foto fuori posto
+  (anche gli archivi delle versioni precedenti).
+- Dall'EXIF anche **fotocamera, posizione GPS** (link a OpenStreetMap) e
+  **orientamento**: le miniature escono già dritte.
+- **Caricamento** col bottone o trascinando le foto nella finestra, con
+  avanzamento. **Niente doppioni**: una foto con lo stesso contenuto
+  (SHA-256) non entra due volte.
+- **Importa cartella**: il server legge una cartella del PC e le
+  sottocartelle; volendo, il nome della sottocartella diventa l'album.
+- **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
+  informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
+  tag, album, data; si scarica l'originale o si elimina.
+- **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
+  fotocamera), tag, album, solo preferite.
+- **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
+  tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
+  prendere un giorno intero.
+
+Formati: JPEG, PNG, GIF, BMP, WebP. HEIC (iPhone) no: va convertito prima.
+
+## Avvio
+
+Serve MongoDB su `localhost:27017`:
+
+```bash
+docker compose up -d        # oppure un mongod già installato
+```
+
+Poi il backend, che serve anche l'interfaccia già compilata:
+
+```bash
+cd backend
+./mvnw spring-boot:run      # o: mvn spring-boot:run
+```
+
+e si apre <http://localhost:8080>.
+
+### Sviluppo del frontend
+
+```bash
+cd frontend
+npm install
+npm start                   # http://localhost:4200, /api va al backend sulla 8080
+npm run build               # ricompila dentro backend/src/main/resources/static
+```
+
+### Un solo jar
+
+```bash
+cd frontend && npm run build && cd ../backend && mvn package
+java -jar target/fototimeline-1.0.0.jar
+```
+
+## Configurazione
+
+| Variabile               | Predefinito                               | A cosa serve                         |
+|-------------------------|-------------------------------------------|--------------------------------------|
+| `FOTOTIMELINE_ARCHIVIO` | `~/FotoTimeline`                          | Cartella di originali e miniature    |
+| `MONGODB_URI`           | `mongodb://localhost:27017/fototimeline`  | Database dei metadati                |
+| `FOTOTIMELINE_INDIRIZZO`| `127.0.0.1`                               | Indirizzo su cui ascolta il server   |
+
+Il server ascolta solo su `127.0.0.1` di proposito: non c'è login e
+*Importa cartella* legge qualunque cartella del PC. Prima di aprirlo alla rete
+di casa (`FOTOTIMELINE_INDIRIZZO=0.0.0.0`) va aggiunta un'autenticazione
+(per esempio Keycloak).
+
+**WSL**: se il backend gira in WSL, le cartelle di Windows si importano con il
+percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
+
+## API
+
+| Metodo | Percorso                     | Cosa fa                                                    |
+|--------|------------------------------|------------------------------------------------------------|
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
+| POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
+| POST   | `/api/importa`               | `{ "cartella": "...", "albumDaCartella": true }`           |
+| GET    | `/api/foto/{id}`             | Una foto                                                   |
+| PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
+| DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
+| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto                  |
+| GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
+| GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo)                 |
+| GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
+
+## Test
+
+```bash
+cd backend && mvn test
+```
+
+I test girano su un MongoDB embedded (flapdoodle): la prima volta scaricano
+il binario di MongoDB.

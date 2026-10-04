@@ -1,0 +1,241 @@
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { HttpEventType } from '@angular/common/http';
+import { Subscription, firstValueFrom } from 'rxjs';
+
+import { FotoApi } from './foto-api';
+import { Caricamento, Filtro, Foto, Giorno, Modifica, Operazione, VoceMese } from './modelli';
+
+const DIMENSIONE_PAGINA = 80;
+/** File per richiesta di caricamento: richieste piccole, avanzamento leggibile. */
+const FILE_PER_RICHIESTA = 6;
+
+export interface StatoCaricamento {
+  totale: number;
+  fatti: number;
+  caricate: number;
+  duplicate: number;
+  errori: string[];
+  /** Avanzamento in byte del gruppo in corso, 0..1. */
+  gruppo: number;
+}
+
+/** Lo stato della timeline: filtri, foto caricate finora, mesi, selezione. */
+@Injectable({ providedIn: 'root' })
+export class Galleria {
+  private readonly api = inject(FotoApi);
+
+  readonly filtro = signal<Filtro>({});
+  readonly foto = signal<Foto[]>([]);
+  readonly totale = signal(0);
+  readonly altre = signal(false);
+  readonly inCaricamento = signal(false);
+  readonly mesi = signal<VoceMese[]>([]);
+  readonly tag = signal<string[]>([]);
+  readonly album = signal<string[]>([]);
+  readonly selezionate = signal<ReadonlySet<string>>(new Set());
+  readonly caricamento = signal<StatoCaricamento | null>(null);
+  readonly avviso = signal<string | null>(null);
+
+  readonly giorni = computed<Giorno[]>(() => {
+    const giorni: Giorno[] = [];
+    for (const f of this.foto()) {
+      const ultimo = giorni.at(-1);
+      if (ultimo?.giorno === f.giorno) {
+        ultimo.foto.push(f);
+      } else {
+        giorni.push({ giorno: f.giorno, nuovoMese: ultimo?.giorno.slice(0, 7) !== f.giorno.slice(0, 7), foto: [f] });
+      }
+    }
+    return giorni;
+  });
+
+  readonly anni = computed(() => {
+    const anni: { anno: number; conteggio: number; mesi: VoceMese[] }[] = [];
+    for (const m of this.mesi()) {
+      let a = anni.at(-1);
+      if (a?.anno !== m.anno) {
+        a = { anno: m.anno, conteggio: 0, mesi: [] };
+        anni.push(a);
+      }
+      a.conteggio += m.conteggio;
+      a.mesi.push(m);
+    }
+    return anni;
+  });
+
+  readonly totaleArchivio = computed(() => this.mesi().reduce((s, m) => s + m.conteggio, 0));
+
+  private pagina = 0;
+  private richiesta?: Subscription;
+  private avvisoTimer?: ReturnType<typeof setTimeout>;
+
+  constructor() {
+    this.ricarica();
+  }
+
+  imposta(modifica: Partial<Filtro>): void {
+    this.filtro.update((f) => ({ ...f, ...modifica }));
+    this.ricarica();
+  }
+
+  /** Salta a un mese: la lista riparte dall'ultimo giorno di quel mese. */
+  salta(anno: number, mese: number): void {
+    const ultimo = new Date(Date.UTC(anno, mese, 0)).toISOString().slice(0, 10);
+    this.imposta({ al: ultimo });
+  }
+
+  ricarica(): void {
+    this.richiesta?.unsubscribe();
+    this.pagina = 0;
+    this.foto.set([]);
+    this.altre.set(false);
+    this.selezionate.set(new Set());
+    this.prossimaPagina(true);
+    this.api.timeline(this.filtro()).subscribe((m) => this.mesi.set(m));
+    this.api.tag().subscribe((t) => this.tag.set(t));
+    this.api.album().subscribe((a) => this.album.set(a));
+  }
+
+  prossimaPagina(primaPagina = false): void {
+    if (this.inCaricamento() || (!primaPagina && !this.altre())) {
+      return;
+    }
+    this.inCaricamento.set(true);
+    this.richiesta = this.api.cerca(this.filtro(), this.pagina, DIMENSIONE_PAGINA).subscribe({
+      next: (p) => {
+        this.foto.update((f) => [...f, ...p.foto]);
+        this.totale.set(p.totale);
+        this.altre.set(p.altre);
+        this.pagina++;
+        this.inCaricamento.set(false);
+      },
+      error: () => {
+        this.inCaricamento.set(false);
+        this.avvisa('Il server non risponde: è acceso?');
+      },
+    });
+  }
+
+  // ------------------------------------------------------------ modifiche
+
+  async salva(foto: Foto, modifica: Modifica): Promise<Foto> {
+    const aggiornata = await firstValueFrom(this.api.modifica(foto.id, modifica));
+    const dataCambiata = aggiornata.scattataIl !== foto.scattataIl;
+    if (dataCambiata) {
+      // Cambia posto nella timeline: si riordina tutto.
+      this.ricarica();
+    } else {
+      this.foto.update((lista) => lista.map((f) => (f.id === foto.id ? aggiornata : f)));
+      this.api.tag().subscribe((t) => this.tag.set(t));
+      this.api.album().subscribe((a) => this.album.set(a));
+    }
+    return aggiornata;
+  }
+
+  async elimina(foto: Foto): Promise<void> {
+    await firstValueFrom(this.api.elimina(foto.id));
+    this.togliDallaLista([foto.id]);
+  }
+
+  async operazione(operazione: Operazione, valore?: string): Promise<void> {
+    const ids = [...this.selezionate()];
+    if (!ids.length) {
+      return;
+    }
+    const { modificate } = await firstValueFrom(this.api.multipla(ids, operazione, valore));
+    if (operazione === 'ELIMINA') {
+      this.togliDallaLista(ids);
+      this.avvisa(`${modificate} foto eliminate`);
+    } else {
+      this.avvisa(`${modificate} foto aggiornate`);
+      this.ricarica();
+    }
+  }
+
+  private togliDallaLista(ids: string[]): void {
+    const via = new Set(ids);
+    this.foto.update((lista) => lista.filter((f) => !via.has(f.id)));
+    this.totale.update((t) => t - ids.length);
+    this.selezionate.set(new Set());
+    this.api.timeline(this.filtro()).subscribe((m) => this.mesi.set(m));
+  }
+
+  // ------------------------------------------------------------ selezione
+
+  commuta(id: string): void {
+    this.selezionate.update((s) => {
+      const n = new Set(s);
+      if (!n.delete(id)) {
+        n.add(id);
+      }
+      return n;
+    });
+  }
+
+  selezionaGiorno(g: Giorno): void {
+    this.selezionate.update((s) => {
+      const n = new Set(s);
+      const tutte = g.foto.every((f) => n.has(f.id));
+      g.foto.forEach((f) => (tutte ? n.delete(f.id) : n.add(f.id)));
+      return n;
+    });
+  }
+
+  deseleziona(): void {
+    this.selezionate.set(new Set());
+  }
+
+  // ------------------------------------------------------------ caricamento
+
+  async carica(file: File[]): Promise<void> {
+    const immagini = file.filter((f) => /\.(jpe?g|png|gif|bmp|webp)$/i.test(f.name));
+    if (!immagini.length) {
+      this.avvisa('Nessuna immagine supportata (JPEG, PNG, GIF, BMP, WebP)');
+      return;
+    }
+    const stato: StatoCaricamento = { totale: immagini.length, fatti: 0, caricate: 0, duplicate: 0, errori: [], gruppo: 0 };
+    this.caricamento.set({ ...stato });
+    for (let i = 0; i < immagini.length; i += FILE_PER_RICHIESTA) {
+      const gruppo = immagini.slice(i, i + FILE_PER_RICHIESTA);
+      try {
+        const esiti = await this.caricaGruppo(gruppo, stato);
+        for (const e of esiti) {
+          if (e.esito === 'CARICATA') stato.caricate++;
+          else if (e.esito === 'DUPLICATA') stato.duplicate++;
+          else stato.errori.push(`${e.nome}: ${e.messaggio ?? 'errore'}`);
+        }
+      } catch {
+        gruppo.forEach((f) => stato.errori.push(`${f.name}: invio non riuscito`));
+      }
+      stato.fatti += gruppo.length;
+      stato.gruppo = 0;
+      this.caricamento.set({ ...stato, errori: [...stato.errori] });
+    }
+    this.ricarica();
+  }
+
+  private caricaGruppo(gruppo: File[], stato: StatoCaricamento): Promise<Caricamento[]> {
+    return new Promise((risolvi, rifiuta) => {
+      this.api.carica(gruppo, this.filtro().album).subscribe({
+        next: (evento) => {
+          if (evento.type === HttpEventType.UploadProgress && evento.total) {
+            this.caricamento.set({ ...stato, errori: [...stato.errori], gruppo: evento.loaded / evento.total });
+          } else if (evento.type === HttpEventType.Response) {
+            risolvi(evento.body ?? []);
+          }
+        },
+        error: rifiuta,
+      });
+    });
+  }
+
+  chiudiCaricamento(): void {
+    this.caricamento.set(null);
+  }
+
+  avvisa(testo: string): void {
+    clearTimeout(this.avvisoTimer);
+    this.avviso.set(testo);
+    this.avvisoTimer = setTimeout(() => this.avviso.set(null), 4000);
+  }
+}

@@ -1,0 +1,83 @@
+export type OrigineData = 'EXIF' | 'FILE' | 'CARICAMENTO' | 'MANUALE';
+
+export interface Foto {
+  id: string;
+  nomeOriginale: string;
+  contentType: string;
+  dimensione: number;
+  larghezza?: number;
+  altezza?: number;
+  /** Ora locale di scatto, "2024-05-17T14:03:22". */
+  scattataIl: string;
+  giorno: string;
+  origineData: OrigineData;
+  caricataIl: string;
+  titolo?: string;
+  descrizione?: string;
+  tag: string[];
+  album?: string;
+  preferita: boolean;
+  fotocamera?: string;
+  latitudine?: number;
+  longitudine?: number;
+  /** Dove sta l'originale nell'archivio: "2024/08/15/IMG_0001.jpg". */
+  percorso: string;
+}
+
+export interface PaginaFoto {
+  foto: Foto[];
+  totale: number;
+  pagina: number;
+  altre: boolean;
+}
+
+export interface VoceMese {
+  anno: number;
+  mese: number;
+  conteggio: number;
+}
+
+export interface Filtro {
+  q?: string;
+  tag?: string;
+  album?: string;
+  preferite?: boolean;
+  /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
+  al?: string;
+}
+
+export type Esito = 'CARICATA' | 'DUPLICATA' | 'ERRORE';
+
+export interface Caricamento {
+  nome: string;
+  esito: Esito;
+  foto?: Foto;
+  messaggio?: string;
+}
+
+export interface Importazione {
+  trovate: number;
+  importate: number;
+  duplicate: number;
+  errori: number;
+  messaggi: string[];
+}
+
+export interface Modifica {
+  titolo?: string;
+  descrizione?: string;
+  tag: string[];
+  album?: string;
+  preferita: boolean;
+  scattataIl?: string;
+}
+
+export type Operazione = 'ELIMINA' | 'AGGIUNGI_TAG' | 'TOGLI_TAG' | 'IMPOSTA_ALBUM' | 'PREFERITA' | 'NON_PREFERITA';
+
+/** Giorno della timeline: le foto scattate quel giorno, in ordine. */
+export interface Giorno {
+  giorno: string;
+  /** Prima voce di un nuovo mese: la timeline ci mette l'intestazione del mese. */
+  nuovoMese: boolean;
+  foto: Foto[];
+}

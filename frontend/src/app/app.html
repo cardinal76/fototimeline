@@ -1,0 +1,214 @@
+<header class="barra">
+  <button type="button" class="marchio" (click)="azzera(); inizio()">
+    <span class="logo" aria-hidden="true">◐</span> FotoTimeline
+  </button>
+
+  <div class="filtri">
+    <input
+      type="search"
+      class="cerca"
+      placeholder="Cerca titolo, tag, album, file…"
+      aria-label="Cerca"
+      [(ngModel)]="ricerca"
+      (ngModelChange)="cerca()"
+    />
+    <select aria-label="Tag" [ngModel]="galleria.filtro().tag ?? ''" (ngModelChange)="scegliTag($event)">
+      <option value="">Tutti i tag</option>
+      @for (t of galleria.tag(); track t) {
+        <option [value]="t">#{{ t }}</option>
+      }
+    </select>
+    <select aria-label="Album" [ngModel]="galleria.filtro().album ?? ''" (ngModelChange)="scegliAlbum($event)">
+      <option value="">Tutti gli album</option>
+      @for (a of galleria.album(); track a) {
+        <option [value]="a">{{ a }}</option>
+      }
+    </select>
+    <button
+      type="button"
+      class="interruttore"
+      [attr.aria-pressed]="!!galleria.filtro().preferite"
+      (click)="galleria.imposta({ preferite: !galleria.filtro().preferite })"
+    >
+      ★ Preferite
+    </button>
+    @if (filtriAttivi()) {
+      <button type="button" class="link" (click)="azzera()">Azzera filtri</button>
+    }
+  </div>
+
+  <div class="azioni">
+    <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
+      {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
+    </button>
+    <button type="button" (click)="dialogoImporta.set(true)">Importa cartella</button>
+    <label class="bottone primario">
+      Carica foto
+      <input #scelta type="file" accept="image/*" multiple hidden (change)="scegliFile(scelta)" />
+    </label>
+  </div>
+</header>
+
+<div class="corpo">
+  <main #scorrimento (scroll)="scorri()">
+    @if (galleria.filtro().al; as al) {
+      <p class="salto">
+        Foto fino a {{ al | date: 'MMMM y' }}
+        <button type="button" class="link" (click)="galleria.imposta({ al: undefined })">torna alle più recenti</button>
+      </p>
+    }
+
+    @for (g of galleria.giorni(); track g.giorno) {
+      @if (g.nuovoMese) {
+        <h2 class="mese">{{ g.giorno | date: 'MMMM y' }}</h2>
+      }
+      <section class="giorno" [attr.data-giorno]="g.giorno">
+        <h3>
+          <span>{{ g.giorno | date: 'EEEE d MMMM' }}</span>
+          <small>{{ g.foto.length }} foto</small>
+          @if (selezione()) {
+            <button type="button" class="link" (click)="galleria.selezionaGiorno(g)">seleziona giorno</button>
+          }
+        </h3>
+        <div class="griglia">
+          @for (f of g.foto; track f.id) {
+            <button
+              type="button"
+              class="tassello"
+              [class.scelto]="galleria.selezionate().has(f.id)"
+              [style.flex-grow]="rapporto(f)"
+              [style.flex-basis.px]="base(f)"
+              [attr.aria-pressed]="selezione() ? galleria.selezionate().has(f.id) : null"
+              [attr.aria-label]="f.titolo || f.nomeOriginale"
+              (click)="clic(f, $event)"
+            >
+              <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" loading="lazy" decoding="async" alt="" />
+              @if (f.preferita) {
+                <span class="stella" aria-label="Preferita">★</span>
+              }
+              @if (selezione()) {
+                <span class="spunta" aria-hidden="true">✓</span>
+              }
+              @if (f.titolo) {
+                <span class="didascalia">{{ f.titolo }}</span>
+              }
+            </button>
+          }
+        </div>
+      </section>
+    } @empty {
+      @if (!galleria.inCaricamento()) {
+        <div class="vuoto">
+          @if (filtriAttivi()) {
+            <p>Nessuna foto con questi filtri.</p>
+            <button type="button" (click)="azzera()">Azzera filtri</button>
+          } @else {
+            <p class="grande">L'archivio è vuoto</p>
+            <p>Trascina qui le foto, usa <b>Carica foto</b> o importa una cartella del PC.</p>
+            <p class="tenue">La data di scatto viene dai dati EXIF: le foto si mettono in ordine da sole.</p>
+          }
+        </div>
+      }
+    }
+
+    <div #fondo class="fondo">
+      @if (galleria.inCaricamento()) {
+        <span class="rotella" aria-label="Caricamento"></span>
+      } @else if (galleria.foto().length && !galleria.altre()) {
+        <span class="tenue">{{ galleria.totale() }} foto · fine della timeline</span>
+      }
+    </div>
+  </main>
+
+  <app-timeline-nav class="laterale" [attivo]="meseAttivo()" />
+</div>
+
+@if (selezione() && galleria.selezionate().size) {
+  <div class="barra-selezione" role="toolbar" aria-label="Azioni sulle foto selezionate">
+    <b>{{ galleria.selezionate().size }} selezionate</b>
+    <button type="button" (click)="operazione('AGGIUNGI_TAG')">+ Tag</button>
+    <button type="button" (click)="operazione('TOGLI_TAG')">− Tag</button>
+    <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
+    <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
+    <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
+    <button type="button" class="link" (click)="galleria.deseleziona()">Deseleziona</button>
+  </div>
+}
+
+@if (galleria.caricamento(); as c) {
+  <div class="avanzamento" role="status">
+    <div class="riga">
+      <b>{{ c.fatti < c.totale ? 'Carico ' + c.totale + ' foto…' : 'Caricamento finito' }}</b>
+      @if (c.fatti === c.totale) {
+        <button type="button" class="link" (click)="galleria.chiudiCaricamento()">Chiudi</button>
+      }
+    </div>
+    <progress [value]="percentuale()" max="100"></progress>
+    <p>
+      {{ c.caricate }} nuove · {{ c.duplicate }} già presenti
+      @if (c.errori.length) {
+        · <span class="errore">{{ c.errori.length }} errori</span>
+      }
+    </p>
+    @if (c.errori.length && c.fatti === c.totale) {
+      <ul class="errori">
+        @for (e of c.errori.slice(0, 8); track $index) {
+          <li>{{ e }}</li>
+        }
+      </ul>
+    }
+  </div>
+}
+
+@if (dialogoImporta()) {
+  <div class="velo" (click)="chiudiImporta()">
+    <form class="dialogo" role="dialog" aria-labelledby="titolo-importa" (click)="$event.stopPropagation()" (ngSubmit)="importa()">
+      <h2 id="titolo-importa">Importa una cartella</h2>
+      <p class="tenue">
+        Il server legge la cartella e le sottocartelle di questo PC e copia le immagini nell'archivio.
+        Le foto già presenti vengono saltate.
+      </p>
+      <label>
+        Percorso
+        <input name="cartella" [(ngModel)]="cartella" placeholder="/home/marco/Immagini oppure C:\Users\Marco\Pictures" required autofocus />
+      </label>
+      <label class="spunta-riga">
+        <input type="checkbox" name="albumDaCartella" [(ngModel)]="albumDaCartella" />
+        Usa il nome delle sottocartelle come album
+      </label>
+      @if (importazione(); as r) {
+        <p class="esito">
+          Trovate <b>{{ r.trovate }}</b> · importate <b>{{ r.importate }}</b> · già presenti {{ r.duplicate }}
+          @if (r.errori) {
+            · <span class="errore">{{ r.errori }} errori</span>
+          }
+        </p>
+        @if (r.messaggi.length) {
+          <ul class="errori">
+            @for (m of r.messaggi; track $index) {
+              <li>{{ m }}</li>
+            }
+          </ul>
+        }
+      }
+      <div class="piede">
+        <button type="button" (click)="chiudiImporta()">Chiudi</button>
+        <button type="submit" class="primario" [disabled]="importando()">
+          {{ importando() ? 'Importo… (può volerci un po\')' : 'Importa' }}
+        </button>
+      </div>
+    </form>
+  </div>
+}
+
+@if (trascinando()) {
+  <div class="rilascio" aria-hidden="true"><p>Rilascia per caricare le foto</p></div>
+}
+
+@if (aperta(); as f) {
+  <app-visore [foto]="f" (chiudi)="aperta.set(null)" (cambia)="aperta.set($event)" />
+}
+
+@if (galleria.avviso(); as a) {
+  <div class="avviso" role="status">{{ a }}</div>
+}

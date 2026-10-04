@@ -1,0 +1,110 @@
+<div class="scena" (click)="chiudi.emit()">
+  <img class="sfondo" [src]="anteprima()" alt="" aria-hidden="true" />
+  <img
+    class="immagine"
+    [class.pronta]="caricata()"
+    [src]="src()"
+    [alt]="foto().titolo || foto().nomeOriginale"
+    (load)="caricata.set(true)"
+    (click)="$event.stopPropagation()"
+  />
+  @if (!caricata()) {
+    <img class="immagine segnaposto" [src]="anteprima()" alt="" aria-hidden="true" (click)="$event.stopPropagation()" />
+  }
+
+  @if (haPrecedente()) {
+    <button type="button" class="freccia sx" aria-label="Foto precedente" (click)="$event.stopPropagation(); vai(-1)">‹</button>
+  }
+  @if (haSuccessiva()) {
+    <button type="button" class="freccia dx" aria-label="Foto successiva" (click)="$event.stopPropagation(); vai(1)">›</button>
+  }
+
+  <div class="comandi" (click)="$event.stopPropagation()">
+    <button type="button" (click)="preferita()" [attr.aria-pressed]="foto().preferita" title="Preferita (F)">
+      {{ foto().preferita ? '★' : '☆' }}
+    </button>
+    <a [href]="scarica()" title="Scarica l'originale">⤓</a>
+    <button type="button" (click)="pannello.set(!pannello())" [attr.aria-pressed]="pannello()" title="Informazioni (I)">ⓘ</button>
+    <button type="button" (click)="chiudi.emit()" title="Chiudi (Esc)">✕</button>
+  </div>
+</div>
+
+@if (pannello()) {
+  <aside class="pannello">
+    <header>
+      <p class="quando">{{ foto().scattataIl | date: 'EEEE d MMMM y' }}</p>
+      <p class="ora">
+        {{ foto().scattataIl | date: 'HH:mm:ss' }} · <span [title]="'Data ' + origine()">{{ origine() }}</span>
+      </p>
+    </header>
+
+    <form (ngSubmit)="salva()" (input)="modificata.set(true)" (change)="modificata.set(true)">
+      <label>
+        Titolo
+        <input name="titolo" [(ngModel)]="bozza.titolo" placeholder="Senza titolo" />
+      </label>
+      <label>
+        Descrizione
+        <textarea name="descrizione" rows="3" [(ngModel)]="bozza.descrizione"></textarea>
+      </label>
+      <label>
+        Tag <small>separati da virgola</small>
+        <input name="tag" [(ngModel)]="bozza.tag" list="tag-noti" placeholder="mare, famiglia" />
+        <datalist id="tag-noti">
+          @for (t of tagNoti(); track t) {
+            <option [value]="t"></option>
+          }
+        </datalist>
+      </label>
+      <label>
+        Album
+        <input name="album" [(ngModel)]="bozza.album" list="album-noti" />
+        <datalist id="album-noti">
+          @for (a of album(); track a) {
+            <option [value]="a"></option>
+          }
+        </datalist>
+      </label>
+      <label>
+        Data e ora di scatto
+        <input name="scattataIl" type="datetime-local" step="1" [(ngModel)]="bozza.scattataIl" required />
+      </label>
+      <div class="azioni">
+        <button type="submit" class="primario" [disabled]="!modificata() || salvataggio()">
+          {{ salvataggio() ? 'Salvo…' : 'Salva' }}
+        </button>
+        <button type="button" class="pericolo" (click)="elimina()">Elimina</button>
+      </div>
+    </form>
+
+    <dl>
+      <dt>File</dt>
+      <dd>{{ foto().percorso }}</dd>
+      @if (foto().larghezza) {
+        <dt>Dimensioni</dt>
+        <dd>
+          {{ foto().larghezza }} × {{ foto().altezza }}
+          @if (megapixel(foto()); as mp) {
+            ({{ mp | number: '1.1-1' }} MP)
+          }
+          · {{ peso(foto().dimensione) }}
+        </dd>
+      }
+      @if (foto().fotocamera) {
+        <dt>Fotocamera</dt>
+        <dd>{{ foto().fotocamera }}</dd>
+      }
+      @if (mappa(); as m) {
+        <dt>Posizione</dt>
+        <dd>
+          <a [href]="m" target="_blank" rel="noopener">
+            {{ foto().latitudine | number: '1.4-4' }}, {{ foto().longitudine | number: '1.4-4' }}
+          </a>
+        </dd>
+      }
+      <dt>Caricata</dt>
+      <dd>{{ foto().caricataIl | date: 'd MMM y, HH:mm' }}</dd>
+    </dl>
+    <p class="scorciatoie">← → scorri · F preferita · I informazioni · Esc chiudi</p>
+  </aside>
+}
