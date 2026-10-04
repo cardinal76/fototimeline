@@ -499,3 +499,8 @@ progress {
   color: #fff;
   background: rgb(0 0 0 / 0.55);
 }
+
+/* Con caricamento e importazione insieme, l'importazione sale sopra. */
+.avanzamento.importazione.sopra {
+  bottom: 9.5rem;
+}

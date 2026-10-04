@@ -42,6 +42,9 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
 - **Importa cartella**: con un navigatore di cartelle si sceglie da dove
   importare (sottocartelle comprese); volendo, il nome della sottocartella
   diventa l'album, e con "sposta" gli originali vengono tolti dall'origine.
+  Gira in sottofondo con la barra di avanzamento e si può annullare.
+- **Importazione automatica**: una cartella (per esempio quella dove il
+  telefono carica nel cloud) che ogni 15 minuti si svuota nell'archivio.
 - **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
   informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
   tag, album, data; si scarica l'originale o si elimina.
@@ -114,6 +117,8 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_IMPORTAZIONE` | (ovunque)                             | Radice consentita per "Importa cartella" |
 | `FOTOTIMELINE_LOGIN`    | `false`                                   | Login Keycloak (acceso dal profilo `server`) |
 | `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
+| `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
+| `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -130,7 +135,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
-| POST   | `/api/importa`               | `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
+| POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
+| GET    | `/api/importazioni/corrente` | Importazione in corso o ultima finita (204 se nessuna)     |
+| POST   | `/api/importazioni/annulla`  | Ferma quella in corso                                      |
 | GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
 | GET    | `/api/io`                    | Utente collegato, se è admin, radice di importazione       |
 | GET    | `/api/cloud`                 | Cloud montato o no                                         |

@@ -76,6 +76,28 @@ export interface Io {
   admin: boolean;
   /** Sotto quale cartella si può importare; null = ovunque (il PC). */
   radiceImportazione?: string;
+  /** Cartella svuotata da sola nell'archivio, se impostata. */
+  cartellaAutomatica?: string;
+}
+
+export type StatoImportazione = 'IN_CORSO' | 'FINITA' | 'ANNULLATA' | 'FALLITA';
+
+/** Importazione in sottofondo, manuale o dalla cartella automatica. */
+export interface LavoroImportazione {
+  id: string;
+  cartella: string;
+  origine: 'MANUALE' | 'AUTOMATICA';
+  stato: StatoImportazione;
+  iniziatoIl: string;
+  finitoIl?: string;
+  trovate: number;
+  fatte: number;
+  importate: number;
+  duplicate: number;
+  errori: number;
+  rimossi: number;
+  messaggi: string[];
+  errore?: string;
 }
 
 export interface StatoCloud {

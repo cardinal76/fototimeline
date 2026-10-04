@@ -193,6 +193,46 @@
   </div>
 }
 
+@if (galleria.importazione(); as l) {
+  <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
+    <div class="riga">
+      <b>
+        @switch (l.stato) {
+          @case ('IN_CORSO') { {{ l.origine === 'AUTOMATICA' ? 'Importazione automatica' : 'Importo' }} da {{ l.cartella }}… }
+          @case ('FINITA') { Importazione finita }
+          @case ('ANNULLATA') { Importazione annullata }
+          @case ('FALLITA') { Importazione non riuscita }
+        }
+      </b>
+      @if (l.stato === 'IN_CORSO') {
+        <button type="button" class="link" (click)="galleria.annullaImportazione()">Annulla</button>
+      } @else {
+        <button type="button" class="link" (click)="galleria.chiudiImportazione()">Chiudi</button>
+      }
+    </div>
+    <progress [value]="percentualeImportazione()" max="100"></progress>
+    <p>
+      {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
+      @if (l.rimossi) {
+        · {{ l.rimossi }} tolte dall'origine
+      }
+      @if (l.errori) {
+        · <span class="errore">{{ l.errori }} errori</span>
+      }
+    </p>
+    @if (l.errore) {
+      <p class="errore">{{ l.errore }}</p>
+    }
+    @if (l.messaggi.length && l.stato !== 'IN_CORSO') {
+      <ul class="errori">
+        @for (m of l.messaggi.slice(0, 8); track $index) {
+          <li>{{ m }}</li>
+        }
+      </ul>
+    }
+  </div>
+}
+
 @if (dialogoImporta()) {
   <div class="velo" (click)="chiudiImporta()">
     <form class="dialogo" role="dialog" aria-labelledby="titolo-importa" (click)="$event.stopPropagation()" (ngSubmit)="importa()">
@@ -229,28 +269,23 @@
         <input type="checkbox" name="sposta" [(ngModel)]="sposta" />
         Sposta: dopo l'importazione toglie le foto dalla cartella di origine (niente doppioni)
       </label>
-      @if (importazione(); as r) {
-        <p class="esito">
-          Trovate <b>{{ r.trovate }}</b> · importate <b>{{ r.importate }}</b> · già presenti {{ r.duplicate }}
-          @if (r.rimossi) {
-            · tolte dall'origine {{ r.rimossi }}
-          }
-          @if (r.errori) {
-            · <span class="errore">{{ r.errori }} errori</span>
-          }
+      @if (galleria.io()?.cartellaAutomatica; as auto) {
+        <p class="tenue">
+          Le foto che finiscono in <code>{{ auto }}</code> (per esempio dal telefono) entrano da sole ogni 15 minuti,
+          quando il cloud è montato.
         </p>
-        @if (r.messaggi.length) {
-          <ul class="errori">
-            @for (m of r.messaggi; track $index) {
-              <li>{{ m }}</li>
-            }
-          </ul>
-        }
+      }
+      @if (galleria.importazione()?.stato === 'IN_CORSO') {
+        <p class="errore">C'è già un'importazione in corso: aspetta che finisca.</p>
       }
       <div class="piede">
         <button type="button" (click)="chiudiImporta()">Chiudi</button>
-        <button type="submit" class="primario" [disabled]="importando() || !cartellaAperta()">
-          {{ importando() ? 'Importo… (può volerci un po\')' : sposta ? 'Importa e sposta' : 'Importa' }}
+        <button
+          type="submit"
+          class="primario"
+          [disabled]="importando() || !cartellaAperta() || galleria.importazione()?.stato === 'IN_CORSO'"
+        >
+          {{ sposta ? 'Importa e sposta' : 'Importa' }}
         </button>
       </div>
     </form>

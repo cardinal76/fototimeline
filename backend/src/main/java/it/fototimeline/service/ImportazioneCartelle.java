@@ -53,6 +53,26 @@ public class ImportazioneCartelle {
      *               contenuto) si tolgono anche loro: il contenuto è identico.
      */
     public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta) throws IOException {
+        return importa(cartella, albumDaCartella, sposta, Avanzamento.NESSUNO);
+    }
+
+    /** Chi segue l'importazione: avanzamento e annullamento (LavoriImportazione). */
+    public interface Avanzamento {
+        Avanzamento NESSUNO = new Avanzamento() { };
+
+        default void inizio(int totale) {
+        }
+
+        default void fatta(Path file, Caricamento esito, boolean rimossa) {
+        }
+
+        default boolean annullata() {
+            return false;
+        }
+    }
+
+    public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta, Avanzamento avanzamento)
+            throws IOException {
         archivio.verificaDisponibile();
         Path base = consentita(cartella);
         if (!Files.isDirectory(base)) {
@@ -75,7 +95,11 @@ public class ImportazioneCartelle {
         int errori = 0;
         int rimossi = 0;
         List<String> messaggi = new ArrayList<>();
+        avanzamento.inizio(file.size());
         for (Path p : file) {
+            if (avanzamento.annullata()) {
+                break;
+            }
             Caricamento esito;
             try {
                 String album = albumDaCartella && !p.getParent().equals(base)
@@ -96,14 +120,17 @@ public class ImportazioneCartelle {
                     }
                 }
             }
+            boolean rimossa = false;
             if (sposta && esito.esito() != Risultati.Esito.ERRORE && inArchivio(esito.foto())) {
                 try {
                     Files.delete(p);
                     rimossi++;
+                    rimossa = true;
                 } catch (IOException e) {
                     log.warn("Importata ma non riesco a togliere {}: {}", p, e.getMessage());
                 }
             }
+            avanzamento.fatta(p, esito, rimossa);
         }
         if (sposta) {
             pulisciSottocartelleVuote(base);
@@ -141,7 +168,7 @@ public class ImportazioneCartelle {
     }
 
     /** Normalizza e controlla che stia sotto la radice consentita. */
-    Path consentita(Path cartella) {
+    public Path consentita(Path cartella) {
         Path c = cartella.toAbsolutePath().normalize();
         if (radice != null && !c.startsWith(radice)) {
             throw new IllegalArgumentException("Si può importare solo da " + radice);
@@ -149,7 +176,7 @@ public class ImportazioneCartelle {
         return c;
     }
 
-    private boolean dentroArchivio(Path p) {
+    boolean dentroArchivio(Path p) {
         Path n = p.toAbsolutePath().normalize();
         return n.startsWith(archivio.radice()) || n.startsWith(archivio.cartellaMiniature());
     }
@@ -158,7 +185,7 @@ public class ImportazioneCartelle {
         return foto != null && foto.getPercorso() != null && Files.exists(fotoService.fileOriginale(foto));
     }
 
-    private String relativo(Path p) {
+    String relativo(Path p) {
         return radice != null && p.startsWith(radice) ? radice.relativize(p).toString() : p.toString();
     }
 

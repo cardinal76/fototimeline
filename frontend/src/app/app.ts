@@ -14,7 +14,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, Importazione } from './modelli';
+import { Cartella, Foto } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { TimelineNav } from './timeline-nav';
@@ -46,7 +46,6 @@ export class App {
   protected readonly meseAttivo = computed(() => this.meseInCima() ?? this.galleria.foto()[0]?.giorno.slice(0, 7) ?? null);
   protected readonly trascinando = signal(false);
   protected readonly dialogoImporta = signal(false);
-  protected readonly importazione = signal<Importazione | null>(null);
   protected readonly importando = signal(false);
   protected readonly cartellaAperta = signal<Cartella | null>(null);
   protected albumDaCartella = true;
@@ -219,7 +218,6 @@ export class App {
 
   protected apriImporta(): void {
     this.sposta = !!this.galleria.io()?.radiceImportazione;
-    this.importazione.set(null);
     this.dialogoImporta.set(true);
     this.naviga();
   }
@@ -245,11 +243,10 @@ export class App {
       return;
     }
     this.importando.set(true);
-    this.importazione.set(null);
     try {
-      this.importazione.set(await firstValueFrom(this.api.importa(cartella, this.albumDaCartella, this.sposta)));
-      this.galleria.ricarica();
-      this.naviga(cartella);
+      await this.galleria.avviaImportazione(cartella, this.albumDaCartella, this.sposta);
+      // Va avanti in sottofondo: la barra resta in basso a destra.
+      this.chiudiImporta();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Importazione non riuscita');
     } finally {
@@ -257,9 +254,13 @@ export class App {
     }
   }
 
+  protected percentualeImportazione(): number {
+    const l = this.galleria.importazione();
+    return l && l.trovate ? Math.round((l.fatte / l.trovate) * 100) : 0;
+  }
+
   protected chiudiImporta(): void {
     this.dialogoImporta.set(false);
-    this.importazione.set(null);
   }
 
   protected logout(): void {

@@ -3,7 +3,7 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { Caricamento, Filtro, Foto, Giorno, Io, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
+import { Caricamento, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** Le estensioni che il backend accetta (FotoService.TIPI). */
@@ -40,6 +40,8 @@ export class Galleria {
   readonly io = signal<Io | null>(null);
   readonly cloud = signal<StatoCloud | null>(null);
   readonly cambioCloud = signal(false);
+  /** Importazione da seguire con la barra; null quando non ce n'è una da mostrare. */
+  readonly importazione = signal<LavoroImportazione | null>(null);
   /** Originali raggiungibili: sul PC sempre, sul server solo col cloud montato. */
   readonly archivioDisponibile = computed(() => {
     const c = this.cloud();
@@ -76,6 +78,9 @@ export class Galleria {
   readonly totaleArchivio = computed(() => this.mesi().reduce((s, m) => s + m.conteggio, 0));
 
   private pagina = 0;
+  private importazioneTimer?: ReturnType<typeof setTimeout>;
+  /** L'ultima importazione già vista finita: non la si riannuncia. */
+  private importazioneVista?: string;
   private richiesta?: Subscription;
   private avvisoTimer?: ReturnType<typeof setTimeout>;
 
@@ -83,6 +88,54 @@ export class Galleria {
     this.api.io().subscribe((io) => this.io.set(io));
     this.aggiornaCloud();
     this.ricarica();
+    // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
+    this.api.importazioneCorrente().subscribe((l) => {
+      if (l && l.stato !== 'IN_CORSO') {
+        this.importazioneVista = l.id;
+      }
+      this.seguiImportazione();
+    });
+  }
+
+  // ------------------------------------------------------------ importazioni in sottofondo
+
+  async avviaImportazione(cartella: string, albumDaCartella: boolean, sposta: boolean): Promise<void> {
+    const lavoro = await firstValueFrom(this.api.importa(cartella, albumDaCartella, sposta));
+    this.importazione.set(lavoro);
+    this.seguiImportazione();
+  }
+
+  annullaImportazione(): void {
+    this.api.annullaImportazione().subscribe(() => this.seguiImportazione());
+  }
+
+  chiudiImportazione(): void {
+    const l = this.importazione();
+    if (l) {
+      this.importazioneVista = l.id;
+    }
+    this.importazione.set(null);
+  }
+
+  /**
+   * Chiede lo stato: ogni secondo mentre un'importazione è in corso, ogni
+   * minuto altrimenti, per accorgersi di quelle partite dalla cartella automatica.
+   */
+  private seguiImportazione(): void {
+    clearTimeout(this.importazioneTimer);
+    this.api.importazioneCorrente().subscribe({
+      next: (l) => {
+        const prima = this.importazione();
+        if (l && (l.stato === 'IN_CORSO' || l.id !== this.importazioneVista)) {
+          this.importazione.set(l);
+          if (l.stato !== 'IN_CORSO' && prima?.stato === 'IN_CORSO') {
+            this.ricarica();
+          }
+        }
+        this.importazioneTimer = setTimeout(() => this.seguiImportazione(), l?.stato === 'IN_CORSO' ? 1000 : 60000);
+      },
+      error: () => (this.importazioneTimer = setTimeout(() => this.seguiImportazione(), 60000)),
+    });
   }
 
   aggiornaCloud(): void {
