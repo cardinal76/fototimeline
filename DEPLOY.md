@@ -43,7 +43,7 @@ sulla rete interna di Docker e con password.
 
 ### 1. DNS e porte
 
-Un record `A` per il dominio (per esempio `foto.footballer.it`) con l'IP di
+Un record `A` per il dominio (per esempio `foto.marcocardinali.it`) con l'IP di
 server2. Su server2 le porte **80** e **443** devono essere aperte (Caddy
 chiede il certificato a Let's Encrypt al primo avvio):
 
@@ -89,7 +89,7 @@ produzione:
 ```bash
 cd ~/presenze && set -a && . ./.env.prod && set +a
 KC="docker exec presenze-keycloak /opt/keycloak/bin/kcadm.sh"
-DOMINIO=foto.footballer.it
+DOMINIO=foto.marcocardinali.it
 
 $KC config credentials --server http://localhost:8080/auth --realm master \
   --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"
