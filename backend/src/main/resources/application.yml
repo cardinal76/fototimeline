@@ -35,6 +35,11 @@ fototimeline:
   # "Importa cartella" accetta solo cartelle sotto questa; vuoto = qualunque
   # (va bene solo sul PC).
   importazione: ${FOTOTIMELINE_IMPORTAZIONE:}
+  # Cartella svuotata da sola nell'archivio (le foto si spostano), per esempio
+  # quella dove il telefono carica nel cloud. Vuota = spenta.
+  importazione-automatica:
+    cartella: ${FOTOTIMELINE_CARTELLA_AUTOMATICA:}
+    intervallo: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:PT15M}
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

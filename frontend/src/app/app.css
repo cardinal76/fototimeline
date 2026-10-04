@@ -487,3 +487,8 @@ progress {
 .navigatore p {
   margin: 0.4rem 0 0;
 }
+
+/* Con caricamento e importazione insieme, l'importazione sale sopra. */
+.avanzamento.importazione.sopra {
+  bottom: 9.5rem;
+}

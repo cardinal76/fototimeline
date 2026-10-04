@@ -162,7 +162,17 @@ l'app sia sana. Poi:
    contenuto è identico).
 
 Un'importazione grande richiede tempo: ogni foto passa da LifetimeCloud a
-server2 e torna indietro. Meglio una cartella alla volta.
+server2 e torna indietro. Gira in sottofondo, una alla volta: la barra in basso
+a destra mostra l'avanzamento, si può chiudere la finestra e si può annullare.
+
+### Importazione automatica dal telefono
+
+Con `FOTOTIMELINE_CARTELLA_AUTOMATICA` nel `.env` (per esempio
+`/cloud/Da importare`), ogni `FOTOTIMELINE_INTERVALLO_AUTOMATICO` (15 minuti)
+l'app guarda in quella cartella di LifetimeCloud e, se ci sono foto, le sposta
+nell'archivio, con le sottocartelle come album. Solo quando il cloud è montato.
+Basta far caricare all'app di LifetimeCloud sul telefono le foto in quella
+cartella.
 
 ## Comandi utili su server2
 
