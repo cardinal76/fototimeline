@@ -62,6 +62,17 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - Nei test con Playwright non usare `page.clock.setFixedTime`: ferma i timer
   e Leaflet non si disegna.
 
+## Backup dei metadati
+
+- `BackupMetadati` scrive `<archivio>/.backup/fototimeline-*.json.gz`: un
+  documento della collezione `foto` per riga, Extended JSON relaxed (si
+  ripristina con `mongoimport --mode upsert`, DEPLOY.md). Prima un file
+  `.parziale`, poi lo spostamento: mai un backup a metà col nome buono.
+- Ogni ora controlla se l'ultimo è più vecchio dell'intervallo: col cloud
+  smontato salta e recupera appena montato. `POST /api/backup` è da admin.
+- Un campo nuovo in `Foto` finisce nel backup da solo (si copia il documento
+  grezzo): non serve toccare il backup.
+
 ## Comandi
 
 ```bash

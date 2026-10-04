@@ -194,13 +194,28 @@ Il workflow di rilascio lo fa da solo.
 - Gli **originali** sono su LifetimeCloud: dal sito o dall'app ogni file
   sovrascritto resta come versione per un anno; via WebDAV le ultime 3 versioni
   per 30 giorni.
-- I **metadati** (date corrette a mano, titoli, tag, album) sono solo in
-  MongoDB su server2. Un dump ogni tanto, salvato fuori da server2:
+- I **metadati** (date corrette a mano, titoli, tag, album) stanno in MongoDB
+  su server2, e l'app ne fa una copia **da sola** nel cloud, accanto alle foto:
+  `FotoTimeline/.backup/fototimeline-AAAA-MM-GG-HHmmss.json.gz`. Una al giorno
+  (`FOTOTIMELINE_BACKUP_INTERVALLO`), le ultime 30 (`FOTOTIMELINE_BACKUP_TENERE`).
+  Serve il cloud montato: se di notte è smontato, la copia si fa entro un'ora
+  da quando lo si monta. Gli admin la possono fare subito con **Backup** in
+  alto a destra.
+- Le **miniature** non servono nel backup: l'app le rifà dagli originali.
+
+### Ripristino dei metadati
+
+Su server2, con il cloud montato. Il file è un documento per riga in Extended
+JSON, che `mongoimport` rimette così com'è (`upsert`: le foto già presenti si
+sovrascrivono con la versione del backup, le altre restano):
 
 ```bash
-docker exec fototimeline-mongo-1 sh -c \
-  'mongodump --quiet --archive --gzip -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db fototimeline' \
-  > fototimeline-$(date +%F).archive.gz
+cd ~/fototimeline
+B=$(ls -1 cloud/FotoTimeline/.backup/fototimeline-*.json.gz | tail -1); echo "$B"
+gunzip -c "$B" | docker exec -i fototimeline-mongo-1 sh -c \
+  'mongoimport --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" \
+   --authenticationDatabase admin --db fototimeline --collection foto --mode upsert'
 ```
 
-- Le **miniature** non servono nel backup: l'app le rifà dagli originali.
+Per ripartire da zero (per esempio su un server nuovo) prima si svuota la
+collezione: `docker exec fototimeline-mongo-1 mongosh -u ... -p ... --authenticationDatabase admin fototimeline --eval 'db.foto.drop()'`.

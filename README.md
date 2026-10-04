@@ -54,6 +54,8 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
   anni passati ("3 anni fa"); si chiude fino al giorno dopo.
 - **App sul telefono**: dal browser "Aggiungi a schermata Home" / "Installa
   app" (manifest, icone, service worker); si apre a schermo intero.
+- **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
+  nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
@@ -137,6 +139,8 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
 | GET    | `/api/io`                    | Utente collegato, se è admin, radice di importazione       |
 | GET    | `/api/cloud`                 | Cloud montato o no                                         |
+| GET    | `/api/backup`                | Backup dei metadati presenti                               |
+| POST   | `/api/backup`                | Fa subito un backup (ruolo `fototimeline-admin`)           |
 | POST   | `/api/cloud/monta`, `/smonta`| Monta o smonta il cloud (ruolo `fototimeline-admin`)       |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |

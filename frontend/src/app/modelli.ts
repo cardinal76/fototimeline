@@ -145,3 +145,10 @@ export interface Ricordo {
   anniFa: number;
   foto: Foto[];
 }
+
+/** Un backup dei metadati, nella cartella .backup dell'archivio. */
+export interface CopiaBackup {
+  nome: string;
+  dimensione: number;
+  fattoIl: string;
+}

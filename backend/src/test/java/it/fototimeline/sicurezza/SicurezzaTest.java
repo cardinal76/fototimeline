@@ -72,6 +72,8 @@ class SicurezzaTest {
                 .andExpect(jsonPath("$.login").value(true))
                 .andExpect(jsonPath("$.admin").value(false));
         mvc.perform(post("/api/cloud/smonta").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/backup").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/backup").with(oidcLogin())).andExpect(status().isOk());
     }
 
     @Test
