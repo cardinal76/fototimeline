@@ -6,6 +6,8 @@ import { FotoApi } from './foto-api';
 import { Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
+/** Le estensioni che il backend accetta (FotoService.TIPI). */
+const FORMATI = /\.(jpe?g|png|gif|bmp|webp|heic|heif|mp4|m4v|mov)$/i;
 /** File per richiesta di caricamento: richieste piccole, avanzamento leggibile. */
 const FILE_PER_RICHIESTA = 6;
 
@@ -296,9 +298,9 @@ export class Galleria {
   // ------------------------------------------------------------ caricamento
 
   async carica(file: File[]): Promise<void> {
-    const immagini = file.filter((f) => /\.(jpe?g|png|gif|bmp|webp)$/i.test(f.name));
+    const immagini = file.filter((f) => FORMATI.test(f.name));
     if (!immagini.length) {
-      this.avvisa('Nessuna immagine supportata (JPEG, PNG, GIF, BMP, WebP)');
+      this.avvisa('Nessun file supportato (JPEG, PNG, GIF, BMP, WebP, HEIC, MP4, MOV)');
       return;
     }
     const stato: StatoCaricamento = { totale: immagini.length, fatti: 0, caricate: 0, duplicate: 0, errori: [], gruppo: 0 };

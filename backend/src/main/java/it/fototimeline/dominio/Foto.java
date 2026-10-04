@@ -49,6 +49,11 @@ public class Foto {
     /** Percorso dell'originale, relativo alla cartella dell'archivio. */
     private String percorso;
 
+    /** Un video (MP4, MOV) invece di una foto. */
+    private boolean video;
+    /** Durata del video, in secondi. */
+    private Double durata;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -111,4 +116,10 @@ public class Foto {
 
     public String getPercorso() { return percorso; }
     public void setPercorso(String percorso) { this.percorso = percorso; }
+
+    public boolean isVideo() { return video; }
+    public void setVideo(boolean video) { this.video = video; }
+
+    public Double getDurata() { return durata; }
+    public void setDurata(Double durata) { this.durata = durata; }
 }

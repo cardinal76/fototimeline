@@ -21,8 +21,10 @@ spring:
       read-timeout: 60s
   servlet:
     multipart:
-      max-file-size: 200MB
-      max-request-size: 2GB
+      # I video del telefono possono pesare gigabyte: vanno su disco, non in memoria.
+      max-file-size: 8GB
+      max-request-size: 8GB
+      file-size-threshold: 1MB
 
 fototimeline:
   # Dove finiscono gli originali (AAAA/MM/GG/nome). Sul server è una cartella
@@ -35,6 +37,11 @@ fototimeline:
   # "Importa cartella" accetta solo cartelle sotto questa; vuoto = qualunque
   # (va bene solo sul PC).
   importazione: ${FOTOTIMELINE_IMPORTAZIONE:}
+  # Programmi per HEIC e video (nel container ci sono; sul PC servono installati).
+  media:
+    heif-convert: ${FOTOTIMELINE_HEIF_CONVERT:heif-convert}
+    ffmpeg: ${FOTOTIMELINE_FFMPEG:ffmpeg}
+    ffprobe: ${FOTOTIMELINE_FFPROBE:ffprobe}
   # Copia dei metadati (MongoDB) accanto alle foto: <archivio>/.backup.
   backup:
     cartella: ${FOTOTIMELINE_BACKUP_CARTELLA:}

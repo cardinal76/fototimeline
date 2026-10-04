@@ -2,6 +2,7 @@ package it.fototimeline.web;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -89,7 +90,14 @@ public class FotoController {
             @RequestParam(required = false) String album) throws IOException {
         var esiti = new java.util.ArrayList<Caricamento>();
         for (MultipartFile f : file) {
-            esiti.add(service.importa(f.getOriginalFilename(), f.getBytes(), null, album));
+            // Su file e non in memoria: un video può pesare gigabyte.
+            Path temporaneo = Files.createTempFile("fototimeline-caricamento-", "");
+            try {
+                f.transferTo(temporaneo);
+                esiti.add(service.importa(f.getOriginalFilename(), temporaneo, null, album));
+            } finally {
+                Files.deleteIfExists(temporaneo);
+            }
         }
         return esiti;
     }
@@ -162,6 +170,18 @@ public class FotoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    /** Quello che il browser sa mostrare: per gli HEIC un JPEG, per il resto l'originale. */
+    @GetMapping("/foto/{id}/vista")
+    public ResponseEntity<Resource> vista(@PathVariable String id) {
+        return service.trova(id)
+                .map(foto -> ResponseEntity.ok()
+                        .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
+                        .contentType(MediaType.parseMediaType(service.contentTypeVista(foto)))
+                        .<Resource>body(new FileSystemResource(service.fileVista(foto))))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** L'originale; con Range (i video nel browser) risponde a pezzi. */
     @GetMapping("/foto/{id}/file")
     public ResponseEntity<Resource> file(@PathVariable String id,
             @RequestParam(defaultValue = "false") boolean scarica) {
