@@ -2,6 +2,7 @@ package it.fototimeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -22,6 +23,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import it.fototimeline.dominio.Foto;
+import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.LavoriImportazione;
@@ -49,6 +52,9 @@ class LavoriImportazioneTest {
 
     @Autowired
     FotoRepository repository;
+
+    @Autowired
+    StrumentiMedia media;
 
     @BeforeEach
     void svuota() throws Exception {
@@ -107,6 +113,31 @@ class LavoriImportazioneTest {
         // Vuota: il controllo successivo non fa partire niente.
         lavori.controllaCartellaAutomatica();
         assertThat(lavori.corrente().orElseThrow().id()).isEqualTo(fine.id());
+    }
+
+    @Test
+    void laCartellaAutomaticaPrendeAncheHeicEVideo() throws Exception {
+        assumeTrue(media.heicDisponibile(), "heif-convert non installato");
+        assumeTrue(media.videoDisponibile(), "ffmpeg/ffprobe non installati");
+        Path telefono = disco.resolve("telefono");
+        copia("/foto.heic", telefono.resolve("IMG_0001.HEIC"));
+        copia("/video.mp4", telefono.resolve("IMG_0002.mp4"));
+
+        lavori.controllaCartellaAutomatica();
+        StatoLavoro fine = aspettaFine();
+
+        assertThat(fine.stato()).isEqualTo(Stato.FINITA);
+        assertThat(fine.messaggi()).isEmpty();
+        assertThat(fine.importate()).isEqualTo(2);
+        assertThat(fine.rimossi()).isEqualTo(2);
+        assertThat(telefono).isEmptyDirectory();
+        assertThat(repository.findAll()).extracting(Foto::isVideo).containsExactlyInAnyOrder(true, false);
+    }
+
+    private void copia(String risorsa, Path dove) throws IOException {
+        try (var in = getClass().getResourceAsStream(risorsa)) {
+            Files.copy(in, dove);
+        }
     }
 
     private StatoLavoro aspettaFine() throws InterruptedException {

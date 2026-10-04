@@ -105,7 +105,7 @@ public class ImportazioneCartelle {
                 String album = albumDaCartella && !p.getParent().equals(base)
                         ? p.getParent().getFileName().toString()
                         : null;
-                esito = fotoService.importa(p.getFileName().toString(), Files.readAllBytes(p),
+                esito = fotoService.importa(p.getFileName().toString(), p,
                         Files.getLastModifiedTime(p).toInstant(), album);
             } catch (IOException e) {
                 esito = new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, e.getMessage());

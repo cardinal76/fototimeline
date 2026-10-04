@@ -22,6 +22,10 @@ export interface Foto {
   longitudine?: number;
   /** Dove sta l'originale nell'archivio: "2024/08/15/IMG_0001.jpg". */
   percorso: string;
+  /** Un video (MP4, MOV) invece di una foto. */
+  video: boolean;
+  /** Durata del video, in secondi. */
+  durata?: number;
 }
 
 export interface PaginaFoto {
@@ -137,6 +141,7 @@ export interface PuntoMappa {
   lon: number;
   giorno: string;
   titolo?: string;
+  video: boolean;
 }
 
 /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */

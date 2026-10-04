@@ -120,6 +120,11 @@ export class FotoApi {
     return `/api/foto/${f.id}/miniatura`;
   }
 
+  /** Quello che il browser sa mostrare: per gli HEIC un JPEG, per il resto l'originale. */
+  static vista(f: Foto): string {
+    return `/api/foto/${f.id}/vista`;
+  }
+
   static originale(f: Foto, scarica = false): string {
     return `/api/foto/${f.id}/file${scarica ? '?scarica=true' : ''}`;
   }

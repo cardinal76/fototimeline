@@ -49,6 +49,22 @@ import { PuntoMappa } from './modelli';
       box-shadow: 0 2px 6px rgb(0 0 0 / 0.5);
       background: var(--superficie-2) center / cover no-repeat;
     }
+    :host ::ng-deep .segno.video {
+      position: relative;
+    }
+    :host ::ng-deep .segno.video::after {
+      content: '▶';
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding-left: 2px;
+      font-size: 16px;
+      color: #fff;
+      text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+      background: rgb(0 0 0 / 0.25);
+      border-radius: 50%;
+    }
     :host ::ng-deep .leaflet-popup-content {
       margin: 8px;
       text-align: center;
@@ -126,7 +142,7 @@ export class Mappa implements OnDestroy {
     const segno = L.marker([p.lat, p.lon], {
       icon: L.divIcon({
         className: '',
-        html: `<div class="segno" style="background-image:url('${miniatura}')"></div>`,
+        html: `<div class="segno${p.video ? ' video' : ''}" style="background-image:url('${miniatura}')"></div>`,
         iconSize: [44, 44],
         iconAnchor: [22, 22],
       }),
@@ -139,7 +155,7 @@ export class Mappa implements OnDestroy {
     img.alt = p.titolo ?? '';
     img.addEventListener('click', () => this.apri.emit(p.id));
     const didascalia = document.createElement('div');
-    didascalia.textContent = [p.titolo, new Date(p.giorno).toLocaleDateString('it-IT', { dateStyle: 'long' })]
+    didascalia.textContent = [p.video ? '▶ Video' : null, p.titolo, new Date(p.giorno).toLocaleDateString('it-IT', { dateStyle: 'long' })]
       .filter(Boolean)
       .join(' · ');
     contenuto.append(img, didascalia);

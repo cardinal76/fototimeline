@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
+import { durata } from './formati';
 import { Foto } from './modelli';
 
 interface Bozza {
@@ -49,7 +50,8 @@ export class Visore {
   protected readonly caricata = signal(false);
   protected bozza: Bozza = vuota();
 
-  protected readonly src = computed(() => FotoApi.originale(this.foto()));
+  /** Le foto dalla "vista" (gli HEIC diventano JPEG), i video dall'originale. */
+  protected readonly src = computed(() => (this.foto().video ? FotoApi.originale(this.foto()) : FotoApi.vista(this.foto())));
   protected readonly scarica = computed(() => FotoApi.originale(this.foto(), true));
   protected readonly anteprima = computed(() => FotoApi.miniatura(this.foto()));
   protected readonly origine = computed(() => ORIGINI[this.foto().origineData]);
@@ -180,6 +182,10 @@ export class Visore {
 
   protected megapixel(f: Foto): number | null {
     return f.larghezza && f.altezza ? (f.larghezza * f.altezza) / 1_000_000 : null;
+  }
+
+  protected durata(secondi?: number): string {
+    return durata(secondi);
   }
 
   protected peso(byte: number): string {

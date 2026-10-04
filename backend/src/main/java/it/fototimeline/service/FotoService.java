@@ -1,10 +1,11 @@
 package it.fototimeline.service;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -42,6 +43,8 @@ import org.springframework.stereotype.Service;
 
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
+import it.fototimeline.media.InfoVideo;
+import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
@@ -56,86 +59,169 @@ public class FotoService {
 
     private static final Logger log = LoggerFactory.getLogger(FotoService.class);
 
-    static final Map<String, String> TIPI = Map.of(
-            "jpg", "image/jpeg",
-            "jpeg", "image/jpeg",
-            "png", "image/png",
-            "gif", "image/gif",
-            "bmp", "image/bmp",
-            "webp", "image/webp");
+    static final Map<String, String> TIPI = Map.ofEntries(
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("png", "image/png"),
+            Map.entry("gif", "image/gif"),
+            Map.entry("bmp", "image/bmp"),
+            Map.entry("webp", "image/webp"),
+            Map.entry("heic", "image/heic"),
+            Map.entry("heif", "image/heif"),
+            Map.entry("mp4", "video/mp4"),
+            Map.entry("m4v", "video/mp4"),
+            Map.entry("mov", "video/quicktime"));
+
+    /** Come si legge un file: le foto con Java, HEIC e video con programmi esterni (StrumentiMedia). */
+    enum Genere { FOTO, HEIC, VIDEO }
+
+    static Genere genere(String estensione) {
+        return switch (estensione) {
+            case "jpg", "jpeg", "png", "gif", "bmp", "webp" -> Genere.FOTO;
+            case "heic", "heif" -> Genere.HEIC;
+            case "mp4", "m4v", "mov" -> Genere.VIDEO;
+            default -> null;
+        };
+    }
 
     private final FotoRepository repository;
     private final MongoTemplate mongo;
     private final ArchivioFile archivio;
     private final EstrattoreMetadati estrattore;
+    private final StrumentiMedia media;
     private final Clock clock;
 
     public FotoService(FotoRepository repository, MongoTemplate mongo, ArchivioFile archivio,
-            EstrattoreMetadati estrattore, Optional<Clock> clock) {
+            EstrattoreMetadati estrattore, StrumentiMedia media, Optional<Clock> clock) {
         this.repository = repository;
         this.mongo = mongo;
         this.archivio = archivio;
         this.estrattore = estrattore;
+        this.media = media;
         this.clock = clock.orElse(Clock.systemDefaultZone());
     }
 
     // ---------------------------------------------------------------- ingresso
 
-    /**
-     * Mette in archivio una foto. Se c'è già (stesso SHA-256) non la duplica;
-     * se il file non è un'immagine leggibile risponde con un errore senza lanciare.
-     */
+    /** Come {@link #importa(String, Path, Instant, String)}, da byte in memoria (test, file piccoli). */
     public Caricamento importa(String nome, byte[] contenuto, Instant ultimaModifica, String album) {
+        Path temporaneo = null;
+        try {
+            temporaneo = Files.createTempFile("fototimeline-", "." + estensione(nome));
+            Files.write(temporaneo, contenuto);
+            return importa(nome, temporaneo, ultimaModifica, album);
+        } catch (IOException e) {
+            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+        } finally {
+            eliminaSilenzioso(temporaneo);
+        }
+    }
+
+    /**
+     * Mette in archivio una foto o un video, leggendo il file senza caricarlo
+     * tutto in memoria (un video può pesare gigabyte). Se c'è già (stesso
+     * SHA-256) non lo duplica; se il file non è leggibile risponde con un
+     * errore senza lanciare.
+     */
+    public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album) {
         archivio.verificaDisponibile();
         String estensione = estensione(nome);
-        if (!TIPI.containsKey(estensione)) {
+        Genere genere = genere(estensione);
+        if (genere == null) {
             return new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato");
         }
+        if (genere == Genere.HEIC && !media.heicDisponibile()) {
+            return new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server");
+        }
+        if (genere == Genere.VIDEO && !media.videoDisponibile()) {
+            return new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server");
+        }
 
-        String hash = sha256(contenuto);
+        String hash;
+        long dimensione;
+        try {
+            hash = sha256(file);
+            dimensione = Files.size(file);
+        } catch (IOException e) {
+            return new Caricamento(nome, Esito.ERRORE, null, "File illeggibile");
+        }
         Optional<Foto> esistente = repository.findByHash(hash);
         if (esistente.isPresent()) {
             return new Caricamento(nome, Esito.DUPLICATA, esistente.get(), "Già in archivio");
         }
 
-        int[] dimensioni;
-        try {
-            dimensioni = dimensioni(contenuto);
-        } catch (IOException e) {
-            return new Caricamento(nome, Esito.ERRORE, null, "Immagine illeggibile");
-        }
-
-        MetadatiFoto metadati = estrattore.estrai(contenuto);
         Foto foto = new Foto();
         foto.setId(UUID.randomUUID().toString());
         foto.setNomeOriginale(nome);
         foto.setContentType(TIPI.get(estensione));
-        foto.setDimensione(contenuto.length);
+        foto.setDimensione(dimensione);
         foto.setHash(hash);
         foto.setCaricataIl(clock.instant());
-        if (dimensioni != null) {
-            foto.setLarghezza(metadati.ruotata90() ? dimensioni[1] : dimensioni[0]);
-            foto.setAltezza(metadati.ruotata90() ? dimensioni[0] : dimensioni[1]);
-        }
-        if (metadati.scattataIl() != null) {
-            foto.setScattataIl(metadati.scattataIl());
-            foto.setOrigineData(OrigineData.EXIF);
-        } else if (ultimaModifica != null) {
-            foto.setScattataIl(LocalDateTime.ofInstant(ultimaModifica, clock.getZone()));
-            foto.setOrigineData(OrigineData.FILE);
-        } else {
-            foto.setScattataIl(LocalDateTime.now(clock));
-            foto.setOrigineData(OrigineData.CARICAMENTO);
-        }
-        foto.setFotocamera(metadati.fotocamera());
-        foto.setLatitudine(metadati.latitudine());
-        foto.setLongitudine(metadati.longitudine());
         foto.setAlbum(pulisciAlbum(album));
+        foto.setVideo(genere == Genere.VIDEO);
+
+        // Il JPEG da cui fare la miniatura (e per gli HEIC la vista): per le foto normali è il file stesso.
+        Path anteprima = null;
+        try {
+            LocalDateTime data;
+            switch (genere) {
+                case FOTO -> {
+                    int[] dimensioni = dimensioni(file);
+                    MetadatiFoto metadati = estrattore.estrai(file);
+                    foto.setLarghezza(metadati.ruotata90() ? dimensioni[1] : dimensioni[0]);
+                    foto.setAltezza(metadati.ruotata90() ? dimensioni[0] : dimensioni[1]);
+                    applica(foto, metadati);
+                    data = metadati.scattataIl();
+                }
+                case HEIC -> {
+                    anteprima = Files.createTempFile("fototimeline-", ".jpg");
+                    media.heicInJpeg(file, anteprima);
+                    // heif-convert lo scrive già dritto: le dimensioni sono quelle del JPEG.
+                    int[] dimensioni = dimensioni(anteprima);
+                    foto.setLarghezza(dimensioni[0]);
+                    foto.setAltezza(dimensioni[1]);
+                    MetadatiFoto metadati = estrattore.estrai(file);
+                    applica(foto, metadati);
+                    data = metadati.scattataIl();
+                }
+                case VIDEO -> {
+                    InfoVideo info = media.leggiVideo(file, clock.getZone());
+                    foto.setLarghezza(info.larghezza());
+                    foto.setAltezza(info.altezza());
+                    foto.setDurata(info.durata());
+                    foto.setFotocamera(info.fotocamera());
+                    foto.setLatitudine(info.latitudine());
+                    foto.setLongitudine(info.longitudine());
+                    anteprima = Files.createTempFile("fototimeline-", ".jpg");
+                    media.fotogramma(file, info.durata(), anteprima);
+                    data = info.ripresoIl();
+                }
+                default -> throw new IllegalStateException(genere.name());
+            }
+            if (data != null) {
+                foto.setScattataIl(data);
+                foto.setOrigineData(OrigineData.EXIF);
+            } else if (ultimaModifica != null) {
+                foto.setScattataIl(LocalDateTime.ofInstant(ultimaModifica, clock.getZone()));
+                foto.setOrigineData(OrigineData.FILE);
+            } else {
+                foto.setScattataIl(LocalDateTime.now(clock));
+                foto.setOrigineData(OrigineData.CARICAMENTO);
+            }
+        } catch (Exception e) {
+            eliminaSilenzioso(anteprima);
+            log.debug("{} illeggibile: {}", nome, e.getMessage());
+            return new Caricamento(nome, Esito.ERRORE, null,
+                    genere == Genere.VIDEO ? "Video illeggibile" : "Immagine illeggibile");
+        }
 
         try {
             foto.setPercorso(archivio.salvaOriginale(
-                    nome, foto.getId(), estensione, foto.getScattataIl().toLocalDate(), contenuto));
-            archivio.creaMiniatura(foto.getId(), contenuto);
+                    nome, foto.getId(), estensione, foto.getScattataIl().toLocalDate(), file));
+            archivio.creaMiniatura(foto.getId(), anteprima != null ? anteprima : file, anteprima == null);
+            if (genere == Genere.HEIC) {
+                archivio.salvaVista(foto.getId(), anteprima);
+            }
             return new Caricamento(nome, Esito.CARICATA, repository.insert(foto), null);
         } catch (DuplicateKeyException e) {
             // Stesso file caricato in parallelo: ha vinto l'altro.
@@ -145,6 +231,24 @@ public class FotoService {
             log.warn("Importazione di {} fallita", nome, e);
             archivio.elimina(foto.getId(), foto.getPercorso());
             return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+        } finally {
+            eliminaSilenzioso(anteprima);
+        }
+    }
+
+    private static void applica(Foto foto, MetadatiFoto metadati) {
+        foto.setFotocamera(metadati.fotocamera());
+        foto.setLatitudine(metadati.latitudine());
+        foto.setLongitudine(metadati.longitudine());
+    }
+
+    private static void eliminaSilenzioso(Path p) {
+        if (p != null) {
+            try {
+                Files.deleteIfExists(p);
+            } catch (IOException e) {
+                log.debug("Non riesco a togliere il temporaneo {}", p);
+            }
         }
     }
 
@@ -183,10 +287,10 @@ public class FotoService {
                 criteri(filtro),
                 Criteria.where("latitudine").ne(null),
                 Criteria.where("longitudine").ne(null)));
-        query.fields().include("latitudine", "longitudine", "giorno", "titolo");
+        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video");
         return mongo.find(query, Foto.class).stream()
                 .map(f -> new PuntoMappa(f.getId(), f.getLatitudine(), f.getLongitudine(), f.getGiorno(),
-                        f.getTitolo()))
+                        f.getTitolo(), f.isVideo()))
                 .toList();
     }
 
@@ -244,13 +348,54 @@ public class FotoService {
     public Path fileMiniatura(Foto foto) {
         Path miniatura = archivio.miniatura(foto.getId());
         if (!Files.exists(miniatura)) {
-            try {
-                archivio.creaMiniatura(foto.getId(), Files.readAllBytes(fileOriginale(foto)));
-            } catch (IOException e) {
-                throw new UncheckedIOException("Non riesco a rifare la miniatura di " + foto.getPercorso(), e);
-            }
+            rifaiAnteprime(foto);
         }
         return miniatura;
+    }
+
+    /**
+     * Quello che il browser sa mostrare: per gli HEIC la vista JPEG (rifatta se
+     * manca), per il resto l'originale.
+     */
+    public Path fileVista(Foto foto) {
+        if (genere(estensione(foto.getPercorso())) != Genere.HEIC) {
+            return fileOriginale(foto);
+        }
+        Path vista = archivio.vista(foto.getId());
+        if (!Files.exists(vista)) {
+            rifaiAnteprime(foto);
+        }
+        return vista;
+    }
+
+    public String contentTypeVista(Foto foto) {
+        return genere(estensione(foto.getPercorso())) == Genere.HEIC ? "image/jpeg" : foto.getContentType();
+    }
+
+    private void rifaiAnteprime(Foto foto) {
+        Path originale = fileOriginale(foto);
+        Path anteprima = null;
+        try {
+            switch (genere(estensione(foto.getPercorso()))) {
+                case HEIC -> {
+                    anteprima = Files.createTempFile("fototimeline-", ".jpg");
+                    media.heicInJpeg(originale, anteprima);
+                    archivio.salvaVista(foto.getId(), anteprima);
+                }
+                case VIDEO -> {
+                    anteprima = Files.createTempFile("fototimeline-", ".jpg");
+                    media.fotogramma(originale, foto.getDurata(), anteprima);
+                }
+                case null, default -> {
+                    // FOTO: si legge direttamente.
+                }
+            }
+            archivio.creaMiniatura(foto.getId(), anteprima != null ? anteprima : originale, anteprima == null);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Non riesco a rifare la miniatura di " + foto.getPercorso(), e);
+        } finally {
+            eliminaSilenzioso(anteprima);
+        }
     }
 
     // ---------------------------------------------------------------- modifica
@@ -419,8 +564,8 @@ public class FotoService {
     }
 
     /** Larghezza e altezza grezze (prima dell'orientamento EXIF), senza decodificare tutta l'immagine. */
-    private static int[] dimensioni(byte[] contenuto) throws IOException {
-        try (var in = ImageIO.createImageInputStream(new ByteArrayInputStream(contenuto))) {
+    private static int[] dimensioni(Path file) throws IOException {
+        try (var in = ImageIO.createImageInputStream(file.toFile())) {
             var lettori = in == null ? null : ImageIO.getImageReaders(in);
             if (lettori == null || !lettori.hasNext()) {
                 throw new IOException("Nessun lettore per questa immagine");
@@ -435,9 +580,10 @@ public class FotoService {
         }
     }
 
-    private static String sha256(byte[] contenuto) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(contenuto));
+    private static String sha256(Path file) throws IOException {
+        try (var in = new DigestInputStream(Files.newInputStream(file), MessageDigest.getInstance("SHA-256"))) {
+            in.transferTo(OutputStream.nullOutputStream());
+            return HexFormat.of().formatHex(in.getMessageDigest().digest());
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }

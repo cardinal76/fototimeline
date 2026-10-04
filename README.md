@@ -62,7 +62,17 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
 
-Formati: JPEG, PNG, GIF, BMP, WebP. HEIC (iPhone) no: va convertito prima.
+Formati: JPEG, PNG, GIF, BMP, WebP, **HEIC** (iPhone) e **video** MP4/MOV.
+HEIC e video richiedono programmi esterni, che nel container ci sono: sul PC
+servono `heif-convert` (pacchetti `libheif-examples` e
+`libheif-plugin-libde265`) e `ffmpeg`. Senza, l'app funziona lo stesso e
+rifiuta solo quei formati.
+
+- Gli **HEIC** restano HEIC nell'archivio; al browser arriva una "vista" JPEG.
+- I **video** prendono data, posizione e durata dal file; l'anteprima è un
+  fotogramma. Si riproducono nel browser così come sono: H.264 ovunque, HEVC
+  (i MOV recenti dell'iPhone) solo dove il browser lo supporta (Safari, Chrome
+  con accelerazione hardware).
 
 ## Sul server
 
@@ -147,7 +157,8 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
 | POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto                  |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
-| GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo)                 |
+| GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo); con `Range` per i video |
+| GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
 | GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline)                |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |

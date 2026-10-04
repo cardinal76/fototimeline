@@ -1,6 +1,7 @@
 package it.fototimeline.service;
 
 import java.io.ByteArrayInputStream;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Date;
@@ -24,14 +25,25 @@ public class EstrattoreMetadati {
     private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
 
     public MetadatiFoto estrai(byte[] contenuto) {
-        Metadata metadata;
         try {
-            metadata = ImageMetadataReader.readMetadata(new ByteArrayInputStream(contenuto), contenuto.length);
+            return estrai(ImageMetadataReader.readMetadata(new ByteArrayInputStream(contenuto), contenuto.length));
         } catch (Exception e) {
             log.debug("Metadati illeggibili: {}", e.getMessage());
             return MetadatiFoto.VUOTI;
         }
+    }
 
+    /** Anche HEIC: metadata-extractor legge l'EXIF dentro i file HEIF. */
+    public MetadatiFoto estrai(Path file) {
+        try {
+            return estrai(ImageMetadataReader.readMetadata(file.toFile()));
+        } catch (Exception e) {
+            log.debug("Metadati illeggibili: {}", e.getMessage());
+            return MetadatiFoto.VUOTI;
+        }
+    }
+
+    private MetadatiFoto estrai(Metadata metadata) {
         var ifd0 = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
         var sub = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
         var gps = metadata.getFirstDirectoryOfType(GpsDirectory.class);

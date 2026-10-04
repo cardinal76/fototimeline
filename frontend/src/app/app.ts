@@ -15,6 +15,7 @@ import { firstValueFrom } from 'rxjs';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { Cartella, Foto } from './modelli';
+import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { Ricordi } from './ricordi';
@@ -87,6 +88,10 @@ export class App {
   /** Dalla mappa arriva solo l'id. */
   protected apriDaId(id: string): void {
     this.api.foto(id).subscribe((f) => this.aperta.set(f));
+  }
+
+  protected durata(secondi?: number): string {
+    return durata(secondi);
   }
 
   protected clic(f: Foto, e: MouseEvent): void {

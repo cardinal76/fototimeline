@@ -28,6 +28,26 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   cartella del suo giorno: ogni cambio alla struttura delle cartelle deve
   passare anche da lì, così gli archivi esistenti si migrano da soli.
 
+## Formati: foto, HEIC, video
+
+- `FotoService.importa(nome, Path, ...)` lavora su file, mai con tutto il
+  contenuto in memoria: i video pesano gigabyte e la JVM sul server ha 384 MB.
+  Anche i caricamenti dal browser passano da un file temporaneo
+  (`transferTo`). Non tornare a `byte[]` / `readAllBytes`.
+- `Genere`: FOTO (ImageIO + metadata-extractor), HEIC (`heif-convert` →
+  JPEG per miniatura e "vista"), VIDEO (`ffprobe` per dimensioni, durata,
+  data e GPS; `ffmpeg` per un fotogramma). Tutto in `StrumentiMedia`; se un
+  programma manca quel formato viene rifiutato, il resto funziona.
+- Per leggere gli HEIC serve anche `libheif-plugin-libde265` (decoder HEVC):
+  senza, `heif-convert` dice "Unsupported codec".
+- Le date dei video: `com.apple.quicktime.creationdate` ha il fuso ed è già
+  ora locale; `creation_time` è UTC e si converte nel fuso della JVM (nel
+  container `TZ=Europe/Rome`). Le date prima del 1990 sono "sconosciuta".
+- Il browser riceve `/vista` (JPEG per gli HEIC, l'originale per il resto) e
+  per i video `/file`, che risponde a pezzi con `Range`.
+- Nei test i casi HEIC e video si saltano dove i programmi mancano
+  (`assumeTrue`): i file di prova sono in `src/test/resources`.
+
 ## Date
 
 - `scattataIl` è un `LocalDateTime` senza fuso, come lo scrive la fotocamera
@@ -51,7 +71,8 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - La mappa (`mappa.ts`, Leaflet + leaflet.markercluster) si carica con
   `@defer` solo quando la si apre. markercluster si aggancia alla `L` globale:
   `window.L = L` prima di `import('leaflet.markercluster')`. I marker sono
-  `divIcon` con la miniatura (niente immagini di Leaflet da copiare).
+  `divIcon` con la miniatura (niente immagini di Leaflet da copiare); i video
+  (`PuntoMappa.video`) hanno un ▶ sopra la miniatura e nel popup.
 - "Accadde oggi" (`ricordi.ts`, `GET /api/ricordi`) cerca `giorno` che finisce
   con `-MM-GG` negli anni prima di quello corrente.
 - PWA: `public/manifest.webmanifest`, `public/icone/`, `public/sw.js` (solo
@@ -139,6 +160,8 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - La cartella automatica (`fototimeline.importazione-automatica.cartella`) la
   controlla un `@Scheduled`: solo col cloud montato e nessuna importazione in
   corso; importa spostando, con le sottocartelle come album.
+- Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
+  entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
 
 ## Git e CI
 

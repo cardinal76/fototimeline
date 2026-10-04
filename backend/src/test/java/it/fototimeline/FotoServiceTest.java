@@ -250,6 +250,7 @@ class FotoServiceTest {
             assertThat(p.lat()).isEqualTo(41.9);
             assertThat(p.lon()).isEqualTo(12.5);
             assertThat(p.giorno()).isEqualTo("2021-07-14");
+            assertThat(p.video()).isFalse();
         });
         assertThat(service.mappa(new FiltroFoto(null, null, "Altro", null, null, null))).isEmpty();
     }
