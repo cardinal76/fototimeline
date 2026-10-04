@@ -51,6 +51,17 @@
         </span>
       }
     }
+    @if (galleria.io()?.admin) {
+      <button
+        type="button"
+        class="link"
+        [disabled]="galleria.backupInCorso() || !galleria.archivioDisponibile()"
+        [title]="galleria.ultimoBackup() ? 'Ultimo backup dei metadati: ' + (galleria.ultimoBackup()!.fattoIl | date: 'd MMM y, HH:mm') : 'Nessun backup dei metadati'"
+        (click)="galleria.faiBackup()"
+      >
+        {{ galleria.backupInCorso() ? 'Backup…' : 'Backup' }}
+      </button>
+    }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
     </button>
