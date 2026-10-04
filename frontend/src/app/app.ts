@@ -16,6 +16,8 @@ import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { Cartella, Foto, Importazione } from './modelli';
 import { esci } from './sessione';
+import { Mappa } from './mappa';
+import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
 
@@ -25,7 +27,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, TimelineNav, Visore],
+  imports: [DatePipe, FormsModule, Mappa, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -39,6 +41,7 @@ export class App {
   private readonly api = inject(FotoApi);
 
   protected readonly aperta = signal<Foto | null>(null);
+  protected readonly vista = signal<'timeline' | 'mappa'>('timeline');
   protected readonly selezione = signal(false);
   private readonly meseInCima = signal<string | null>(null);
   /** Mese visibile in cima alla lista, "yyyy-MM"; prima di scorrere è quello della prima foto. */
@@ -80,6 +83,11 @@ export class App {
 
   protected miniatura(f: Foto): string {
     return FotoApi.miniatura(f);
+  }
+
+  /** Dalla mappa arriva solo l'id. */
+  protected apriDaId(id: string): void {
+    this.api.foto(id).subscribe((f) => this.aperta.set(f));
   }
 
   protected clic(f: Foto, e: MouseEvent): void {

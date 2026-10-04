@@ -46,6 +46,22 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - `hash` (SHA-256 del file) ha un indice unico: è così che la stessa foto non
   entra due volte, anche con due caricamenti in parallelo.
 
+## Mappa, ricordi, PWA
+
+- La mappa (`mappa.ts`, Leaflet + leaflet.markercluster) si carica con
+  `@defer` solo quando la si apre. markercluster si aggancia alla `L` globale:
+  `window.L = L` prima di `import('leaflet.markercluster')`. I marker sono
+  `divIcon` con la miniatura (niente immagini di Leaflet da copiare).
+- "Accadde oggi" (`ricordi.ts`, `GET /api/ricordi`) cerca `giorno` che finisce
+  con `-MM-GG` negli anni prima di quello corrente.
+- PWA: `public/manifest.webmanifest`, `public/icone/`, `public/sw.js` (solo
+  pagina offline, non mette in cache foto né API: sono private). Questi file
+  sono `permitAll` in `ConfigurazioneSicurezza`, perché il browser li chiede
+  senza cookie; `ConfigurazioneWeb` dà al manifest il tipo
+  `application/manifest+json`.
+- Nei test con Playwright non usare `page.clock.setFixedTime`: ferma i timer
+  e Leaflet non si disegna.
+
 ## Comandi
 
 ```bash

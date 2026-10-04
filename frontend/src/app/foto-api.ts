@@ -2,7 +2,7 @@ import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { Caricamento, Cartella, Filtro, Foto, Importazione, Io, Modifica, Operazione, PaginaFoto, StatoCloud, VoceMese } from './modelli';
+import { Caricamento, Cartella, Filtro, Foto, Importazione, Io, Modifica, Operazione, PaginaFoto, PuntoMappa, Ricordo, StatoCloud, VoceMese } from './modelli';
 
 @Injectable({ providedIn: 'root' })
 export class FotoApi {
@@ -15,6 +15,19 @@ export class FotoApi {
   timeline(filtro: Filtro): Observable<VoceMese[]> {
     const { al: _, ...senzaSalto } = filtro;
     return this.http.get<VoceMese[]>('/api/timeline', { params: parametri(senzaSalto) });
+  }
+
+  mappa(filtro: Filtro): Observable<PuntoMappa[]> {
+    const { al: _, ...senzaSalto } = filtro;
+    return this.http.get<PuntoMappa[]>('/api/mappa', { params: parametri(senzaSalto) });
+  }
+
+  ricordi(): Observable<Ricordo[]> {
+    return this.http.get<Ricordo[]>('/api/ricordi');
+  }
+
+  foto(id: string): Observable<Foto> {
+    return this.http.get<Foto>(`/api/foto/${id}`);
   }
 
   tag(): Observable<string[]> {

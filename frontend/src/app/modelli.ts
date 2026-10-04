@@ -107,3 +107,19 @@ export interface Giorno {
   nuovoMese: boolean;
   foto: Foto[];
 }
+
+/** Una foto sulla mappa. */
+export interface PuntoMappa {
+  id: string;
+  lat: number;
+  lon: number;
+  giorno: string;
+  titolo?: string;
+}
+
+/** "Accadde oggi": le foto di un anno passato nello stesso giorno. */
+export interface Ricordo {
+  anno: number;
+  anniFa: number;
+  foto: Foto[];
+}

@@ -239,6 +239,37 @@ class FotoServiceTest {
         assertThat(service.riordinaArchivio()).isZero();
     }
 
+    @Test
+    void mappaSoloConPosizioneEConIFiltri() throws IOException {
+        byte[] jpg = getClass().getResourceAsStream("/con-exif.jpg").readAllBytes();
+        var conGps = service.importa("gps.jpg", jpg, null, "Roma").foto();
+        importa(Color.RED, "2024-05-03T10:00:00Z");
+
+        assertThat(service.mappa(TUTTO)).singleElement().satisfies(p -> {
+            assertThat(p.id()).isEqualTo(conGps.getId());
+            assertThat(p.lat()).isEqualTo(41.9);
+            assertThat(p.lon()).isEqualTo(12.5);
+            assertThat(p.giorno()).isEqualTo("2021-07-14");
+        });
+        assertThat(service.mappa(new FiltroFoto(null, null, "Altro", null, null, null))).isEmpty();
+    }
+
+    @Test
+    void ricordiDelloStessoGiornoNegliAnniPassati() throws IOException {
+        importa(Color.RED, "2023-10-04T10:00:00Z");
+        importa(Color.GREEN, "2023-10-04T15:00:00Z");
+        importa(Color.BLUE, "2020-10-04T09:00:00Z");
+        importa(Color.ORANGE, "2023-10-05T10:00:00Z");   // giorno dopo: no
+        importa(Color.PINK, "2026-10-04T08:00:00Z");     // quest'anno: no
+
+        var ricordi = service.ricordi(java.time.LocalDate.of(2026, 10, 4), 12);
+
+        assertThat(ricordi).extracting(r -> r.anno()).containsExactly(2023, 2020);
+        assertThat(ricordi.getFirst().anniFa()).isEqualTo(3);
+        assertThat(ricordi.getFirst().foto()).hasSize(2);
+        assertThat(service.ricordi(java.time.LocalDate.of(2026, 10, 4), 1).getFirst().foto()).hasSize(1);
+    }
+
     private String importa(Color colore, String quando) throws IOException {
         return service.importa("foto.png", immagine(colore, "png"), Instant.parse(quando), null).foto().getId();
     }

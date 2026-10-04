@@ -3,6 +3,11 @@
     <span class="logo" aria-hidden="true">◐</span> FotoTimeline
   </button>
 
+  <div class="viste" role="tablist" aria-label="Vista">
+    <button type="button" role="tab" [attr.aria-selected]="vista() === 'timeline'" (click)="vista.set('timeline')">Timeline</button>
+    <button type="button" role="tab" [attr.aria-selected]="vista() === 'mappa'" (click)="vista.set('mappa')">Mappa</button>
+  </div>
+
   <div class="filtri">
     <input
       type="search"
@@ -80,7 +85,19 @@
 }
 
 <div class="corpo">
-  <main #scorrimento (scroll)="scorri()">
+  @if (vista() === 'mappa') {
+    @defer {
+      <app-mappa class="vista-mappa" (apri)="apriDaId($event)" />
+    } @placeholder {
+      <div class="vista-mappa"></div>
+    } @loading (minimum 200ms) {
+      <div class="vista-mappa caricamento"><span class="rotella" aria-label="Caricamento"></span></div>
+    }
+  }
+  <main #scorrimento (scroll)="scorri()" [hidden]="vista() === 'mappa'">
+    @if (!filtriAttivi()) {
+      <app-ricordi (apri)="aperta.set($event)" />
+    }
     @if (galleria.filtro().al; as al) {
       <p class="salto">
         Foto fino a {{ al | date: 'MMMM y' }}
@@ -150,7 +167,9 @@
     </div>
   </main>
 
-  <app-timeline-nav class="laterale" [attivo]="meseAttivo()" />
+  @if (vista() === 'timeline') {
+    <app-timeline-nav class="laterale" [attivo]="meseAttivo()" />
+  }
 </div>
 
 @if (selezione() && galleria.selezionate().size) {

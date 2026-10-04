@@ -58,6 +58,9 @@ class SicurezzaTest {
         mvc.perform(get("/")).andExpect(status().isFound())
                 .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
         mvc.perform(get("/salute")).andExpect(status().isOk());
+        // I file della PWA non chiedono il login (nei test non ci sono: 404, non il redirect).
+        mvc.perform(get("/manifest.webmanifest")).andExpect(status().isNotFound());
+        mvc.perform(get("/icone/icona-192.png")).andExpect(status().isNotFound());
     }
 
     @Test
