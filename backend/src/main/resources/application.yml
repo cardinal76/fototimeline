@@ -42,6 +42,11 @@ fototimeline:
     heif-convert: ${FOTOTIMELINE_HEIF_CONVERT:heif-convert}
     ffmpeg: ${FOTOTIMELINE_FFMPEG:ffmpeg}
     ffprobe: ${FOTOTIMELINE_FFPROBE:ffprobe}
+  # Copia dei metadati (MongoDB) accanto alle foto: <archivio>/.backup.
+  backup:
+    cartella: ${FOTOTIMELINE_BACKUP_CARTELLA:}
+    intervallo: ${FOTOTIMELINE_BACKUP_INTERVALLO:P1D}
+    tenere: ${FOTOTIMELINE_BACKUP_TENERE:30}
   # Cartella svuotata da sola nell'archivio (le foto si spostano), per esempio
   # quella dove il telefono carica nel cloud. Vuota = spenta.
   importazione-automatica:

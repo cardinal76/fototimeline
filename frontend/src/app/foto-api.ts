@@ -5,6 +5,7 @@ import { Observable } from 'rxjs';
 import {
   Caricamento,
   Cartella,
+  CopiaBackup,
   Filtro,
   Foto,
   Io,
@@ -66,6 +67,14 @@ export class FotoApi {
 
   io(): Observable<Io> {
     return this.http.get<Io>('/api/io');
+  }
+
+  backup(): Observable<CopiaBackup[]> {
+    return this.http.get<CopiaBackup[]>('/api/backup');
+  }
+
+  faiBackup(): Observable<CopiaBackup> {
+    return this.http.post<CopiaBackup>('/api/backup', {});
   }
 
   cloud(): Observable<StatoCloud> {

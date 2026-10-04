@@ -62,7 +62,7 @@ public class ConfigurazioneSicurezza {
         String autorizzazioneApi = login.richiedeRuolo() ? "ROLE_" + login.ruolo() : null;
         http.authorizeHttpRequests(a -> {
             a.requestMatchers("/salute", "/error").permitAll();
-            a.requestMatchers(HttpMethod.POST, "/api/cloud/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup").hasAuthority("ROLE_" + login.ruoloAdmin());
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {
