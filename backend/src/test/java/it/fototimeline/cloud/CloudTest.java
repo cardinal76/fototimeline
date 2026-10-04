@@ -12,6 +12,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -23,6 +24,10 @@ class CloudTest {
     private static final String NESSUNO = "{\"mountPoints\":[]}";
     private static final String MONTATO = "{\"mountPoints\":[{\"Fs\":\"lifetime\",\"MountPoint\":\"/cloud\"}]}";
 
+    // Credenziali finte: costruite qui, non scritte già codificate.
+    private static final String UTENTE = "fototimeline";
+    private static final String PASSWORD = "password-di-prova";
+
     private MockRestServiceServer rclone;
     private Cloud cloud;
 
@@ -30,14 +35,15 @@ class CloudTest {
     void prepara() {
         var builder = RestClient.builder();
         rclone = MockRestServiceServer.bindTo(builder).build();
-        cloud = new Cloud(new CloudProperties("http://rclone:5572", "fototimeline", "segreta", "lifetime:", "/cloud", false, 0),
+        cloud = new Cloud(new CloudProperties("http://rclone:5572", UTENTE, PASSWORD, "lifetime:", "/cloud", false, 0),
                 builder, Optional.empty());
     }
 
     @Test
     void montaSeNonEMontatoEPoiRisultaDisponibile() {
         rclone.expect(requestTo("http://rclone:5572/mount/listmounts"))
-                .andExpect(header("Authorization", "Basic Zm90b3RpbWVsaW5lOnNlZ3JldGE="))
+                .andExpect(header("Authorization", HttpHeaders.encodeBasicAuth(UTENTE, PASSWORD, null)
+                        .transform("Basic "::concat)))
                 .andRespond(withSuccess(NESSUNO, MediaType.TEXT_PLAIN));
         rclone.expect(requestTo("http://rclone:5572/mount/mount"))
                 .andExpect(content().json("""
