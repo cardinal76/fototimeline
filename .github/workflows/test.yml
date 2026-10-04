@@ -12,7 +12,7 @@ concurrency:
 jobs:
   backend:
     name: Backend (Maven)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fototimeline-build]
     defaults:
       run:
         working-directory: backend
@@ -38,7 +38,7 @@ jobs:
 
   frontend:
     name: Frontend (build Angular)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fototimeline-build]
     defaults:
       run:
         working-directory: frontend
