@@ -3,7 +3,7 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { Caricamento, Filtro, Foto, Giorno, Io, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
+import { Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** File per richiesta di caricamento: richieste piccole, avanzamento leggibile. */
@@ -38,6 +38,9 @@ export class Galleria {
   readonly io = signal<Io | null>(null);
   readonly cloud = signal<StatoCloud | null>(null);
   readonly cambioCloud = signal(false);
+  /** Ultimo backup dei metadati (solo per gli admin). */
+  readonly ultimoBackup = signal<CopiaBackup | null>(null);
+  readonly backupInCorso = signal(false);
   /** Originali raggiungibili: sul PC sempre, sul server solo col cloud montato. */
   readonly archivioDisponibile = computed(() => {
     const c = this.cloud();
@@ -78,9 +81,32 @@ export class Galleria {
   private avvisoTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
-    this.api.io().subscribe((io) => this.io.set(io));
+    this.api.io().subscribe((io) => {
+      this.io.set(io);
+      if (io.admin) {
+        this.aggiornaBackup();
+      }
+    });
     this.aggiornaCloud();
     this.ricarica();
+  }
+
+  aggiornaBackup(): void {
+    this.api.backup().subscribe({ next: (b) => this.ultimoBackup.set(b[0] ?? null), error: () => {} });
+  }
+
+  async faiBackup(): Promise<void> {
+    this.backupInCorso.set(true);
+    try {
+      const copia = await firstValueFrom(this.api.faiBackup());
+      this.ultimoBackup.set(copia);
+      this.avvisa(`Backup dei metadati fatto (${Math.max(1, Math.round(copia.dimensione / 1024))} KB)`);
+    } catch (e) {
+      const smontato = (e as { status?: number }).status === 503;
+      this.avvisa(smontato ? 'Backup non possibile: il cloud è smontato' : 'Backup non riuscito');
+    } finally {
+      this.backupInCorso.set(false);
+    }
   }
 
   aggiornaCloud(): void {

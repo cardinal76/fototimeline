@@ -2,7 +2,7 @@ import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { Caricamento, Cartella, Filtro, Foto, Importazione, Io, Modifica, Operazione, PaginaFoto, StatoCloud, VoceMese } from './modelli';
+import { Caricamento, Cartella, CopiaBackup, Filtro, Foto, Importazione, Io, Modifica, Operazione, PaginaFoto, StatoCloud, VoceMese } from './modelli';
 
 @Injectable({ providedIn: 'root' })
 export class FotoApi {
@@ -44,6 +44,14 @@ export class FotoApi {
 
   io(): Observable<Io> {
     return this.http.get<Io>('/api/io');
+  }
+
+  backup(): Observable<CopiaBackup[]> {
+    return this.http.get<CopiaBackup[]>('/api/backup');
+  }
+
+  faiBackup(): Observable<CopiaBackup> {
+    return this.http.post<CopiaBackup>('/api/backup', {});
   }
 
   cloud(): Observable<StatoCloud> {

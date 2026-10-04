@@ -35,6 +35,11 @@ fototimeline:
   # "Importa cartella" accetta solo cartelle sotto questa; vuoto = qualunque
   # (va bene solo sul PC).
   importazione: ${FOTOTIMELINE_IMPORTAZIONE:}
+  # Copia dei metadati (MongoDB) accanto alle foto: <archivio>/.backup.
+  backup:
+    cartella: ${FOTOTIMELINE_BACKUP_CARTELLA:}
+    intervallo: ${FOTOTIMELINE_BACKUP_INTERVALLO:P1D}
+    tenere: ${FOTOTIMELINE_BACKUP_TENERE:30}
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.
