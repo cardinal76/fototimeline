@@ -125,3 +125,34 @@ cd backend && mvn test
 
 I test girano su un MongoDB embedded (flapdoodle): la prima volta scaricano
 il binario di MongoDB.
+
+## CI su server2
+
+La GitHub Action `.github/workflows/test.yml` (test del backend e build del
+frontend, a ogni push su `main` e su ogni pull request) gira sul runner
+self-hosted di **server2**, la macchina che fa già le build di TrovaCampo e
+presenze.
+
+Un runner self-hosted su un account personale vale per un solo repository,
+quindi quelli di TrovaCampo e presenze non vedono i job di FotoTimeline: ne
+serve uno suo, in una cartella sua. Una volta sola, su server2:
+
+1. **Settings → Actions → Runners → New self-hosted runner** di
+   `cardinal76/fototimeline`, sistema Linux x64.
+2. Seguire le righe proposte in una cartella nuova, per esempio
+   `~/actions-runner-fototimeline`; a `./config.sh` dare il nome
+   `server2-fototimeline` e l'etichetta:
+
+   ```
+   fototimeline-build
+   ```
+
+3. Installarlo come servizio, perché sopravviva a un riavvio:
+
+   ```bash
+   sudo ./svc.sh install && sudo ./svc.sh start
+   ```
+
+Java 21 e Node 22 li scaricano le azioni `setup-java` e `setup-node` nella
+cache del runner; non serve Docker. Finché il runner non è registrato e
+acceso, i job restano in coda.
