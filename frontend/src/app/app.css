@@ -516,3 +516,8 @@ progress {
 main[hidden] {
   display: none;
 }
+
+/* Con caricamento e importazione insieme, l'importazione sale sopra. */
+.avanzamento.importazione.sopra {
+  bottom: 9.5rem;
+}
