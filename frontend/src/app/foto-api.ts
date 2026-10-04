@@ -2,7 +2,20 @@ import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { Caricamento, Cartella, CopiaBackup, Filtro, Foto, Importazione, Io, Modifica, Operazione, PaginaFoto, StatoCloud, VoceMese } from './modelli';
+import {
+  Caricamento,
+  Cartella,
+  CopiaBackup,
+  Filtro,
+  Foto,
+  Io,
+  LavoroImportazione,
+  Modifica,
+  Operazione,
+  PaginaFoto,
+  StatoCloud,
+  VoceMese,
+} from './modelli';
 
 @Injectable({ providedIn: 'root' })
 export class FotoApi {
@@ -34,8 +47,18 @@ export class FotoApi {
     return this.http.post<Caricamento[]>('/api/foto', dati, { reportProgress: true, observe: 'events' });
   }
 
-  importa(cartella: string, albumDaCartella: boolean, sposta: boolean): Observable<Importazione> {
-    return this.http.post<Importazione>('/api/importa', { cartella, albumDaCartella, sposta });
+  /** Avvia l'importazione in sottofondo. */
+  importa(cartella: string, albumDaCartella: boolean, sposta: boolean): Observable<LavoroImportazione> {
+    return this.http.post<LavoroImportazione>('/api/importa', { cartella, albumDaCartella, sposta });
+  }
+
+  /** L'importazione in corso o l'ultima finita; null se non ce ne sono state. */
+  importazioneCorrente(): Observable<LavoroImportazione | null> {
+    return this.http.get<LavoroImportazione | null>('/api/importazioni/corrente');
+  }
+
+  annullaImportazione(): Observable<void> {
+    return this.http.post<void>('/api/importazioni/annulla', {});
   }
 
   cartelle(percorso?: string): Observable<Cartella> {

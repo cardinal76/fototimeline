@@ -112,6 +112,18 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `FotoService.fileMiniatura` rifà una miniatura mancante dall'originale.
 - Dopo un riavvio il cloud è smontato, salvo `RCLONE_MONTA_ALL_AVVIO=true`.
 
+## Importazioni
+
+- Le importazioni da cartella girano in sottofondo in `LavoriImportazione`, una
+  alla volta su un solo thread: `POST /api/importa` risponde 202 con lo stato,
+  il frontend lo segue con `GET /api/importazioni/corrente` (ogni secondo
+  mentre è in corso, ogni minuto altrimenti, per vedere quelle automatiche).
+- `ImportazioneCartelle.importa` resta sincrona e riceve un `Avanzamento`
+  (avanzamento e annullamento): i test la usano direttamente.
+- La cartella automatica (`fototimeline.importazione-automatica.cartella`) la
+  controlla un `@Scheduled`: solo col cloud montato e nessuna importazione in
+  corso; importa spostando, con le sottocartelle come album.
+
 ## Git e CI
 
 - Lavora su un branch e apri una pull request verso `main`; la GitHub Action
