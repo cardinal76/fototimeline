@@ -7,14 +7,16 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutionException;
 
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
@@ -50,6 +52,8 @@ public class SincronizzazioneTelefono {
     static final String ID = "sincronizzazione-telefono";
     private static final int MAX_MESSAGGI = 20;
     private static final int MAX_ORE = 168;
+    /** Copie insieme: con tante foto piccole il tempo va nell'attesa per file, non nella banda. */
+    static final int COPIE_IN_PARALLELO = 6;
 
     private final Rclone rclone;
     private final CloudProperties cloud;
@@ -62,6 +66,9 @@ public class SincronizzazioneTelefono {
         return t;
     });
     private final AtomicBoolean inCorso = new AtomicBoolean();
+    /** Il giro che sta girando, per mostrarne i contatori prima che finisca. */
+    private volatile Contatori corrente;
+    private volatile Instant inizioCorrente;
 
     public SincronizzazioneTelefono(Rclone rclone, CloudProperties cloud, ImportazioneAutomaticaProperties automatica,
             MongoTemplate mongo, Optional<Clock> clock) {
@@ -75,7 +82,7 @@ public class SincronizzazioneTelefono {
     /** Impostazioni e stato, per l'API. {@code motivo} dice perché non si può attivare. */
     public record Stato(boolean attiva, String sorgente, int intervalloOre, int giorniPrimaDiCancellare,
             boolean disponibile, String motivo, String destinazione, boolean inCorso, Giro ultimoGiro,
-            Instant prossimoGiroIl) {
+            Instant prossimoGiroIl, Giro giroInCorso) {
     }
 
     /** Quello che si cambia dalla pagina; un campo null resta com'è. */
@@ -95,8 +102,12 @@ public class SincronizzazioneTelefono {
             prossimo = i.ultimoGiro() == null ? clock.instant()
                     : i.ultimoGiro().iniziatoIl().plus(Duration.ofHours(i.intervalloOre()));
         }
+        Contatori c = corrente;
+        Instant inizio = inizioCorrente;
+        Giro giroInCorso = c != null && inizio != null ? c.giro(inizio, null, null, "In corso") : null;
         return new Stato(i.attiva(), i.sorgente(), i.intervalloOre(), i.giorniPrimaDiCancellare(), motivo == null,
-                motivo, motivo == null ? nelCloud(destinazione()) : null, inCorso.get(), i.ultimoGiro(), prossimo);
+                motivo, motivo == null ? nelCloud(destinazione()) : null, inCorso.get(), i.ultimoGiro(), prossimo,
+                giroInCorso);
     }
 
     /** Salva le impostazioni; valori fuori misura → IllegalArgumentException (400). */
@@ -230,6 +241,8 @@ public class SincronizzazioneTelefono {
         Instant inizio = clock.instant();
         ImpostazioniTelefono i = impostazioni();
         Contatori c = new Contatori();
+        inizioCorrente = inizio;
+        corrente = c;
         Esito esito;
         String messaggio;
         try {
@@ -238,15 +251,17 @@ public class SincronizzazioneTelefono {
             if (i.giorniPrimaDiCancellare() > 0) {
                 cancella(inizio.minus(Duration.ofDays(i.giorniPrimaDiCancellare())), inizio, c);
             }
-            esito = c.errori == 0 ? Esito.OK : Esito.ERRORE;
-            messaggio = c.errori == 0 ? "Fatto" : c.errori + " file non riusciti";
+            int errori = c.errori();
+            esito = errori == 0 ? Esito.OK : Esito.ERRORE;
+            messaggio = errori == 0 ? "Fatto" : errori + " file non riusciti";
         } catch (RuntimeException e) {
             log.warn("Sincronizzazione del telefono non riuscita: {}", e.getMessage());
             esito = Esito.ERRORE;
             messaggio = e.getMessage();
         }
-        Giro giro = new Giro(inizio, clock.instant(), esito, messaggio, c.trovati, c.copiati, c.giaCopiati,
-                c.cancellati, c.errori, List.copyOf(c.messaggi));
+        Giro giro = c.giro(inizio, clock.instant(), esito, messaggio);
+        corrente = null;
+        inizioCorrente = null;
         ImpostazioniTelefono p = ImpostazioniTelefono.predefinite();
         mongo.upsert(Query.query(Criteria.where("_id").is(ID)), new Update()
                 .set("ultimoGiro", giro)
@@ -255,7 +270,7 @@ public class SincronizzazioneTelefono {
                 .setOnInsert("intervalloOre", p.intervalloOre())
                 .setOnInsert("giorniPrimaDiCancellare", p.giorniPrimaDiCancellare()), ImpostazioniTelefono.class);
         log.info("Sincronizzazione del telefono {}: {} trovati, {} copiati, {} già copiati, {} tolti dalla sorgente, {} errori",
-                esito, c.trovati, c.copiati, c.giaCopiati, c.cancellati, c.errori);
+                esito, giro.trovati(), giro.copiati(), giro.giaCopiati(), giro.cancellati(), giro.errori());
         return giro;
     }
 
@@ -265,7 +280,7 @@ public class SincronizzazioneTelefono {
                 "fs", sorgente.fs(),
                 "remote", sorgente.percorso(),
                 "opt", Map.of("recurse", true, "filesOnly", true)));
-        Set<String> registrate = new HashSet<>();
+        Set<String> registrate = ConcurrentHashMap.newKeySet();
         for (CopiaTelefono copia : mongo.find(Query.query(Criteria.where("sorgente").is(sorgente.testo())),
                 CopiaTelefono.class)) {
             registrate.add(chiave(copia.percorso(), copia.dimensione()));
@@ -273,31 +288,55 @@ public class SincronizzazioneTelefono {
         if (!(risposta.get("list") instanceof List<?> lista)) {
             throw new IllegalStateException("operations/list: risposta di rclone senza elenco");
         }
-        for (Object o : lista) {
-            if (!(o instanceof Map<?, ?> voce) || Boolean.TRUE.equals(voce.get("IsDir"))
-                    || !(voce.get("Path") instanceof String path)) {
-                continue;
+        // I nomi presi in questo giro: due copie in parallelo non devono scegliere lo stesso.
+        Set<String> prenotati = ConcurrentHashMap.newKeySet();
+        ExecutorService copie = Executors.newFixedThreadPool(COPIE_IN_PARALLELO, r -> {
+            Thread t = new Thread(r, "telefono-copia");
+            t.setDaemon(true);
+            return t;
+        });
+        List<Future<?>> lavori = new ArrayList<>();
+        try {
+            for (Object o : lista) {
+                if (!(o instanceof Map<?, ?> voce) || Boolean.TRUE.equals(voce.get("IsDir"))
+                        || !(voce.get("Path") instanceof String path)) {
+                    continue;
+                }
+                String relativo = sorgente.relativo(path);
+                String nome = relativo.substring(relativo.lastIndexOf('/') + 1);
+                if (nome.startsWith(".") || !FotoService.eMedia(nome)) {
+                    continue;
+                }
+                c.trovato();
+                long dimensione = numero(voce.get("Size"));
+                if (registrate.contains(chiave(relativo, dimensione))) {
+                    c.giaCopiato();
+                    continue;
+                }
+                lavori.add(copie.submit(() -> {
+                    try {
+                        String destinazione = copiaFile(sorgente, relativo, dimensione, cartella, prenotati);
+                        mongo.insert(new CopiaTelefono(new ObjectId().toHexString(), sorgente.testo(), relativo,
+                                dimensione, data(voce.get("ModTime")), destinazione, adesso, null));
+                        registrate.add(chiave(relativo, dimensione));
+                        if (c.copiato() % 100 == 0) {
+                            log.info("Sincronizzazione del telefono: {} copiati finora", c.copiati());
+                        }
+                    } catch (RuntimeException e) {
+                        c.errore(relativo, e);
+                    }
+                }));
             }
-            String relativo = sorgente.relativo(path);
-            String nome = relativo.substring(relativo.lastIndexOf('/') + 1);
-            if (nome.startsWith(".") || !FotoService.eMedia(nome)) {
-                continue;
+            for (Future<?> lavoro : lavori) {
+                lavoro.get();
             }
-            c.trovati++;
-            long dimensione = numero(voce.get("Size"));
-            if (registrate.contains(chiave(relativo, dimensione))) {
-                c.giaCopiati++;
-                continue;
-            }
-            try {
-                String destinazione = copiaFile(sorgente, relativo, dimensione, cartella);
-                mongo.insert(new CopiaTelefono(new ObjectId().toHexString(), sorgente.testo(), relativo, dimensione,
-                        data(voce.get("ModTime")), destinazione, adesso, null));
-                registrate.add(chiave(relativo, dimensione));
-                c.copiati++;
-            } catch (RuntimeException e) {
-                c.errore(relativo, e);
-            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("sincronizzazione interrotta");
+        } catch (ExecutionException e) {
+            throw new IllegalStateException(e.getCause().getMessage(), e.getCause());
+        } finally {
+            copie.shutdownNow();
         }
     }
 
@@ -306,8 +345,9 @@ public class SincronizzazioneTelefono {
      * in destinazione (diventerebbero album coi nomi dei dispositivi):
      * {@code Pixel 8/IMG_1.jpg} → {@code telefono/Pixel 8 - IMG_1.jpg}.
      */
-    private String copiaFile(Sorgente sorgente, String relativo, long dimensione, String cartella) {
-        String destinazione = libero(cartella + "/" + relativo.replace("/", " - "));
+    private String copiaFile(Sorgente sorgente, String relativo, long dimensione, String cartella,
+            Set<String> prenotati) {
+        String destinazione = libero(cartella + "/" + relativo.replace("/", " - "), prenotati);
         rclone.chiama("operations/copyfile", Map.of(
                 "srcFs", sorgente.fs(),
                 "srcRemote", sorgente.dentro(relativo),
@@ -330,12 +370,12 @@ public class SincronizzazioneTelefono {
     }
 
     /** Il nome se è libero, altrimenti "nome (2).ext", "nome (3).ext"...: non si sovrascrive mai. */
-    private String libero(String voluto) {
+    private String libero(String voluto, Set<String> prenotati) {
         int punto = voluto.lastIndexOf('.');
         String base = punto > voluto.lastIndexOf('/') ? voluto.substring(0, punto) : voluto;
         String estensione = voluto.substring(base.length());
         String nome = voluto;
-        for (int n = 2; stat(cloud.remoto(), nome) != null; n++) {
+        for (int n = 2; !prenotati.add(nome) || stat(cloud.remoto(), nome) != null; n++) {
             if (n > 1000) {
                 throw new IllegalStateException("troppi file con il nome " + voluto);
             }
@@ -362,7 +402,7 @@ public class SincronizzazioneTelefono {
                 // Un file con lo stesso nome ma un'altra dimensione è un altro file: resta.
                 if (originale != null && numero(originale.get("Size")) == copia.dimensione()) {
                     rclone.chiama("operations/deletefile", Map.of("fs", sorgente.fs(), "remote", remoto));
-                    c.cancellati++;
+                    c.cancellato();
                 }
                 mongo.updateFirst(Query.query(Criteria.where("_id").is(copia.id())),
                         Update.update("cancellatoIl", adesso), CopiaTelefono.class);
@@ -425,20 +465,50 @@ public class SincronizzazioneTelefono {
         }
     }
 
+    /** Si aggiornano dalle copie in parallelo e si leggono dall'API mentre il giro gira. */
     private static final class Contatori {
-        int trovati;
-        int copiati;
-        int giaCopiati;
-        int cancellati;
-        int errori;
-        final List<String> messaggi = new ArrayList<>();
+        private int trovati;
+        private int copiati;
+        private int giaCopiati;
+        private int cancellati;
+        private int errori;
+        private final List<String> messaggi = new ArrayList<>();
 
-        void errore(String file, RuntimeException e) {
+        synchronized void trovato() {
+            trovati++;
+        }
+
+        synchronized void giaCopiato() {
+            giaCopiati++;
+        }
+
+        synchronized int copiato() {
+            return ++copiati;
+        }
+
+        synchronized int copiati() {
+            return copiati;
+        }
+
+        synchronized void cancellato() {
+            cancellati++;
+        }
+
+        synchronized int errori() {
+            return errori;
+        }
+
+        synchronized void errore(String file, RuntimeException e) {
             errori++;
             log.warn("Telefono, {}: {}", file, e.getMessage());
             if (messaggi.size() < MAX_MESSAGGI) {
                 messaggi.add(file + ": " + e.getMessage());
             }
+        }
+
+        synchronized Giro giro(Instant inizio, Instant fine, Esito esito, String messaggio) {
+            return new Giro(inizio, fine, esito, messaggio, trovati, copiati, giaCopiati, cancellati, errori,
+                    List.copyOf(messaggi));
         }
     }
 }
