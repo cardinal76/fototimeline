@@ -209,7 +209,8 @@ class QuasiUgualiTest {
     }
 
     private CalcoloImpronte.StatoCalcolo aspetta(CalcoloImpronte.StatoCalcolo avviato) throws InterruptedException {
-        assertThat(avviato.stato()).isEqualTo(Stato.IN_CORSO);
+        // Con poche foto (o nessuna) il calcolo può essere già finito quando avvia() risponde.
+        assertThat(avviato.stato()).isIn(Stato.IN_CORSO, Stato.FINITO);
         long limite = System.nanoTime() + Duration.ofSeconds(20).toNanos();
         var stato = calcolo.stato();
         while (stato.stato() == Stato.IN_CORSO && System.nanoTime() < limite) {
