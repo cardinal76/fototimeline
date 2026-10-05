@@ -133,6 +133,13 @@ metti_in_ordinate() {
     done < <(find "$giro" -type f -print0 | sort -z)
 }
 
+# ARCHIVIO è una cartella sua: né la radice né una cartella che la contiene.
+controlla_archivio() {
+    case "$RADICE/" in
+        "$ARCHIVIO"/*) errore "ARCHIVIO ($ARCHIVIO) non può essere la radice o contenerla: usa una cartella nuova, per esempio '$RADICE/Archivio foto'" ;;
+    esac
+}
+
 salva_impostazioni() {
     printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nDESTINAZIONE=%q\nGIORNI=%q\n' \
         "$RADICE" "$ARCHIVIO" "$ESCLUDI" "$DESTINAZIONE" "$GIORNI" > "$IMPOSTAZIONI"
@@ -144,6 +151,7 @@ anteprima() {
     [ "$RADICE" != / ] && RADICE="${RADICE%/}"
     ARCHIVIO="${ARCHIVIO%/}"
     [ -d "$RADICE" ] || errore "$RADICE non c'è (pCloud montato? sudo mount -t drvfs P: /mnt/p)"
+    controlla_archivio
     salva_impostazioni
     echo "Cerco in $RADICE (può volerci qualche minuto)…"
     echo "Salto: ${ARCHIVIO#"$RADICE"/}, Crypto Folder, cartelle di sistema${ESCLUDI:+, $ESCLUDI}"
@@ -186,6 +194,7 @@ raccogli() {
     if [ ! -f "$LAVORO/anteprima.ok" ]; then
         errore "prima: $0 anteprima (per vedere cosa prenderebbe ed escludere le cartelle di documenti)"
     fi
+    controlla_archivio
     [ -f "$LAVORO/fase-archivia.ok" ] && errore "questo giro è già archiviato: per uno nuovo usa un altro LAVORO=..."
     salva_impostazioni
     touch "$RADICI"
