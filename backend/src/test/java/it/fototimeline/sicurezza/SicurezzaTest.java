@@ -2,6 +2,7 @@ package it.fototimeline.sicurezza;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.oneOf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -171,8 +172,9 @@ class SicurezzaTest {
 
         var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
         mvc.perform(post("/api/quasi-uguali/calcola").with(admin)).andExpect(status().isForbidden());
+        // Senza foto il calcolo può già essere finito quando arriva la risposta.
         mvc.perform(post("/api/quasi-uguali/calcola").with(admin).with(csrf())).andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.stato").value("IN_CORSO"));
+                .andExpect(jsonPath("$.stato").value(oneOf("IN_CORSO", "FINITO")));
     }
 
     private static final OidcLoginRequestPostProcessor ANNA = oidcLogin()
