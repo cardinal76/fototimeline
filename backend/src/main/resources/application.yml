@@ -64,6 +64,22 @@ fototimeline:
     finestra-token-sbagliati: PT15M
     massimo-foto: 2000
     lato-vista: 2048
+  # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
+  # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
+  quasi-uguali:
+    soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
+    finestra-raffica: PT10S
+    soglia-raffica: 12
+  # Avvisi su Telegram quando una voce della pagina "Salute" cambia stato.
+  # Token del bot (BotFather) e chat id: vuoti = avvisi spenti, la pagina c'è lo stesso.
+  telegram:
+    token: ${FOTOTIMELINE_TELEGRAM_TOKEN:}
+    chat: ${FOTOTIMELINE_TELEGRAM_CHAT:}
+    # Anche quando una voce diventa gialla (per esempio il cloud smontato).
+    avvisa-attenzione: ${FOTOTIMELINE_TELEGRAM_ATTENZIONE:false}
+    controllo: ${FOTOTIMELINE_TELEGRAM_CONTROLLO:PT15M}
+    # Il link all'app nei messaggi; vuoto = senza link.
+    indirizzo-app: ${FOTOTIMELINE_DOMINIO:}
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.
