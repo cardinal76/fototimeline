@@ -188,6 +188,10 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
+  ce l'hanno; quelle nuove lo prendono da sole. Non serve il cloud montato, 150 mila foto in meno
+  di un minuto. Dopo il primo rilascio con i luoghi va lanciato una volta; poi il filtro
+  **📍 Luogo** nella barra sceglie nazione, regione o paese (o lo cerca per nome).
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.

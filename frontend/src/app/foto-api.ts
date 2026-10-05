@@ -6,6 +6,7 @@ import {
   Caricamento,
   Cartella,
   CopiaBackup,
+  ElencoLuoghi,
   Filtro,
   Foto,
   Io,
@@ -53,6 +54,16 @@ export class FotoApi {
 
   album(): Observable<string[]> {
     return this.http.get<string[]>('/api/album');
+  }
+
+  /** Nazioni, regioni e luoghi con i conteggi, per il filtro "Luogo". */
+  luoghi(): Observable<ElencoLuoghi> {
+    return this.http.get<ElencoLuoghi>('/api/luoghi');
+  }
+
+  /** "Calcola luoghi" in sottofondo (solo admin); tutte = anche quelle che il luogo ce l'hanno. */
+  calcolaLuoghi(tutte: boolean): Observable<LavoroImportazione> {
+    return this.http.post<LavoroImportazione>('/api/archivio/luoghi', {}, { params: tutte ? { tutte } : {} });
   }
 
   carica(file: File[], album?: string): Observable<HttpEvent<Caricamento[]>> {

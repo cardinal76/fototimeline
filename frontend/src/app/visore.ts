@@ -59,6 +59,13 @@ export class Visore {
   protected readonly indice = computed(() => this.galleria.foto().findIndex((f) => f.id === this.foto().id));
   protected readonly album = this.galleria.album;
   protected readonly tagNoti = this.galleria.tag;
+  /** "Sperlonga, Lazio · Italia"; senza ripetere (Tokyo, Tokyo). */
+  protected readonly luogo = computed(() => {
+    const f = this.foto();
+    if (!f.luogo) return null;
+    const dove = f.regione && f.regione !== f.luogo ? `${f.luogo}, ${f.regione}` : f.luogo;
+    return f.nazione ? `${dove} · ${f.nazione}` : dove;
+  });
   protected readonly mappa = computed(() => {
     const f = this.foto();
     return f.latitudine != null && f.longitudine != null
@@ -80,6 +87,13 @@ export class Visore {
       this.modificata.set(false);
       this.caricata.set(false);
     });
+  }
+
+  /** Dal luogo della foto al filtro della timeline. */
+  protected filtraLuogo(): void {
+    const f = this.foto();
+    this.galleria.imposta({ nazione: f.codiceNazione, regione: f.regione, luogo: f.luogo });
+    this.chiudi.emit();
   }
 
   protected vai(passo: number): void {

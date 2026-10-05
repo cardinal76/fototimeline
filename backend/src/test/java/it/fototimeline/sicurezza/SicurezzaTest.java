@@ -76,6 +76,8 @@ class SicurezzaTest {
         mvc.perform(post("/api/cloud/smonta").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/backup").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/indicizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/archivio/luoghi").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/luoghi").with(oidcLogin())).andExpect(status().isOk());
         mvc.perform(get("/api/backup").with(oidcLogin())).andExpect(status().isOk());
         // La sincronizzazione del telefono non si vede nemmeno.
         mvc.perform(get("/api/telefono").with(oidcLogin())).andExpect(status().isForbidden());
@@ -119,6 +121,9 @@ class SicurezzaTest {
         mvc.perform(post("/api/cloud/smonta").with(admin)).andExpect(status().isForbidden());
         // Passa la sicurezza; qui non c'è rclone, quindi 409.
         mvc.perform(post("/api/cloud/smonta").with(admin).with(csrf())).andExpect(status().isConflict());
+        // Qui non c'è il dataset di GeoNames: "Calcola luoghi" passa la sicurezza ma non parte.
+        mvc.perform(post("/api/archivio/luoghi").with(admin).with(csrf())).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("GeoNames")));
         // L'archivio qui è un disco, sempre disponibile: l'indicizzazione parte.
         mvc.perform(post("/api/archivio/indicizza").with(admin)).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/indicizza").with(admin).with(csrf())).andExpect(status().isAccepted())

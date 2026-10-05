@@ -43,6 +43,7 @@ import org.springframework.stereotype.Service;
 
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
+import it.fototimeline.luoghi.GeocodificaInversa;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.repository.FotoRepository;
@@ -89,15 +90,17 @@ public class FotoService {
     private final ArchivioFile archivio;
     private final EstrattoreMetadati estrattore;
     private final StrumentiMedia media;
+    private final GeocodificaInversa luoghi;
     private final Clock clock;
 
     public FotoService(FotoRepository repository, MongoTemplate mongo, ArchivioFile archivio,
-            EstrattoreMetadati estrattore, StrumentiMedia media, Optional<Clock> clock) {
+            EstrattoreMetadati estrattore, StrumentiMedia media, GeocodificaInversa luoghi, Optional<Clock> clock) {
         this.repository = repository;
         this.mongo = mongo;
         this.archivio = archivio;
         this.estrattore = estrattore;
         this.media = media;
+        this.luoghi = luoghi;
         this.clock = clock.orElse(Clock.systemDefaultZone());
     }
 
@@ -313,6 +316,8 @@ public class FotoService {
                 }
                 default -> throw new IllegalStateException(genere.name());
             }
+            // Dal GPS il nome del luogo: in memoria, niente rete.
+            luoghi.applica(foto);
             return new Letto(foto, genere, estensione, anteprima, data);
         } catch (Exception e) {
             eliminaSilenzioso(anteprima);
@@ -394,10 +399,10 @@ public class FotoService {
                 criteri(filtro),
                 Criteria.where("latitudine").ne(null),
                 Criteria.where("longitudine").ne(null)));
-        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video");
+        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video", "luogo");
         return mongo.find(query, Foto.class).stream()
                 .map(f -> new PuntoMappa(f.getId(), f.getLatitudine(), f.getLongitudine(), f.getGiorno(),
-                        f.getTitolo(), f.isVideo()))
+                        f.getTitolo(), f.isVideo(), f.getLuogo()))
                 .toList();
     }
 
@@ -618,13 +623,26 @@ public class FotoService {
                     Criteria.where("nomeOriginale").regex(p),
                     Criteria.where("album").regex(p),
                     Criteria.where("fotocamera").regex(p),
-                    Criteria.where("tag").regex(p)));
+                    Criteria.where("tag").regex(p),
+                    Criteria.where("luogo").regex(p),
+                    Criteria.where("regione").regex(p),
+                    Criteria.where("nazione").regex(p)));
         }
         if (f.tag() != null && !f.tag().isBlank()) {
             e.add(Criteria.where("tag").is(f.tag().trim().toLowerCase(Locale.ROOT)));
         }
         if (f.album() != null && !f.album().isBlank()) {
             e.add(Criteria.where("album").is(f.album().trim()));
+        }
+        // Il luogo scelto dall'elenco (/api/luoghi): nazione, poi regione e luogo dentro di lei.
+        if (f.nazione() != null && !f.nazione().isBlank()) {
+            e.add(Criteria.where("codiceNazione").is(f.nazione().trim().toUpperCase(Locale.ROOT)));
+        }
+        if (f.regione() != null && !f.regione().isBlank()) {
+            e.add(Criteria.where("regione").is(f.regione().trim()));
+        }
+        if (f.luogo() != null && !f.luogo().isBlank()) {
+            e.add(Criteria.where("luogo").is(f.luogo().trim()));
         }
         if (Boolean.TRUE.equals(f.preferite())) {
             e.add(Criteria.where("preferita").is(true));

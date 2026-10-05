@@ -20,6 +20,13 @@ export interface Foto {
   fotocamera?: string;
   latitudine?: number;
   longitudine?: number;
+  /** Dal GPS (GeoNames): il centro abitato più vicino, "Sperlonga". */
+  luogo?: string;
+  regione?: string;
+  /** In italiano: "Francia". */
+  nazione?: string;
+  /** ISO: "FR". */
+  codiceNazione?: string;
   /** Dove sta l'originale nell'archivio: "2024/08/15/IMG_0001.jpg". */
   percorso: string;
   /** Un video (MP4, MOV) invece di una foto. */
@@ -46,6 +53,10 @@ export interface Filtro {
   tag?: string;
   album?: string;
   preferite?: boolean;
+  /** Codice ISO della nazione ("IT"); con regione e luogo come in /api/luoghi. */
+  nazione?: string;
+  regione?: string;
+  luogo?: string;
   /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
   al?: string;
 }
@@ -82,11 +93,15 @@ export interface Io {
 
 export type StatoImportazione = 'IN_CORSO' | 'FINITA' | 'ANNULLATA' | 'FALLITA';
 
-/** Lavoro in sottofondo: importazione (manuale o dalla cartella automatica) o "Indicizza archivio". */
+/**
+ * Lavoro in sottofondo: importazione (manuale o dalla cartella automatica),
+ * "Indicizza archivio" o "Calcola luoghi" (lì importate = con un luogo,
+ * duplicate = senza, cioè in mare aperto).
+ */
 export interface LavoroImportazione {
   id: string;
   cartella: string;
-  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE';
+  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE' | 'LUOGHI';
   stato: StatoImportazione;
   iniziatoIl: string;
   finitoIl?: string;
@@ -142,6 +157,35 @@ export interface PuntoMappa {
   giorno: string;
   titolo?: string;
   video: boolean;
+  luogo?: string;
+}
+
+/** I luoghi delle foto con quante ce ne sono (GET /api/luoghi), i più fotografati prima. */
+export interface ElencoLuoghi {
+  /** Il dataset di GeoNames c'è sul server. */
+  disponibile: boolean;
+  /** Foto con GPS a cui il luogo non è ancora stato cercato. */
+  daCalcolare: number;
+  nazioni: VoceNazione[];
+}
+
+export interface VoceNazione {
+  codice: string;
+  nome: string;
+  conteggio: number;
+  regioni: VoceRegione[];
+}
+
+export interface VoceRegione {
+  /** Assente se GeoNames non la sa. */
+  nome?: string;
+  conteggio: number;
+  luoghi: VoceLuogo[];
+}
+
+export interface VoceLuogo {
+  nome: string;
+  conteggio: number;
 }
 
 /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */

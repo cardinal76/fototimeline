@@ -279,6 +279,47 @@ I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
 (cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
 foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
 
+### Luoghi dal GPS (GeoNames)
+
+Il nome del posto (Sperlonga, Lazio · Italia) si ricava dalle coordinate sul
+server, senza chiamare servizi esterni: nell'immagine ci sono i centri abitati
+di [GeoNames](https://www.geonames.org/), che il Dockerfile scarica nello
+stage `geonames` da `https://download.geonames.org/export/dump/` e mette in
+`/app/geonames` (`FOTOTIMELINE_LUOGHI`):
+
+| File | Cosa | Peso nell'immagine |
+|---|---|---|
+| `cities500.txt` | ~225 mila centri sopra i 500 abitanti (anche molte frazioni italiane), senza la colonna dei nomi alternativi | ~25 MB |
+| `alternateNames-it.txt` | i nomi in italiano (Roma, Parigi, Baviera), filtrati da `alternateNamesV2.zip` (200 MB, scaricato e buttato nello stage) | ~0,9 MB |
+| `admin1CodesASCII.txt`, `countryInfo.txt` | regioni e nazioni | ~0,2 MB |
+
+In tutto circa **26 MB** in più nell'immagine. All'avvio l'app li legge in un
+paio di secondi in un indice compatto (array di primitivi, k-d tree): circa
+**10 MB di heap** sui 384 della JVM. Oltre 30 km dal centro abitato più vicino
+(`FOTOTIMELINE_LUOGHI_DISTANZA`) il luogo resta sconosciuto: mare aperto.
+Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
+"Luoghi spenti").
+
+- Le foto nuove prendono il luogo all'importazione e all'indicizzazione.
+- Per quelle già in archivio: da admin **Calcola luoghi** (`POST
+  /api/archivio/luoghi`), in sottofondo con la barra delle importazioni. Legge
+  solo MongoDB, non il cloud: va anche da smontato, 150 mila foto in meno di
+  un minuto. Rilanciarlo non rifà quelle già calcolate (anche quelle in mare
+  aperto, segnate con `luogoCalcolato`); se tutte ce l'hanno chiede se
+  ricalcolarle tutte (`?tutte=true`), utile dopo un aggiornamento del dataset.
+- **Aggiornare il dataset**: lo stage resta nella cache di Docker e non si
+  riscarica a ogni rilascio (se la cache viene pulita, si riscarica da sé: ~215
+  MB, un minuto). Per prendere quello nuovo, su server2 dal checkout del runner
+  e con `C` come in "Comandi utili su server2": `$C build --no-cache app`, poi
+  il rilascio e **Calcola luoghi** → ricalcola tutte.
+- **Attribuzione**: i dati GeoNames sono sotto licenza
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): l'app lo dice nel
+  pannello del filtro "Luogo" e nel visore, accanto alla posizione. Non
+  toglierlo.
+- Nelle grandi città straniere il più vicino può essere un quartiere che
+  GeoNames tiene come centro a sé ("Paris 16 Passy", "City of Westminster"); i
+  quartieri segnati come tali (PPLX, per esempio Trastevere) si saltano.
+
 ## Comandi utili su server2
 
 ```bash

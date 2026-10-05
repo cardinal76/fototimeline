@@ -60,6 +60,15 @@ Il server: [DEPLOY.md](DEPLOY.md).
   tag, album, data; si scarica l'originale o si elimina.
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
+- **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,
+  in italiano: "Sperlonga, Lazio · Italia", "Parigi, Île-de-France · Francia"),
+  calcolato sul server senza servizi esterni con i dati di
+  [GeoNames](https://www.geonames.org/) (CC BY 4.0). Si vede nel visore e nel
+  popup della mappa; il filtro **📍 Luogo** sceglie nazione, regione o luogo
+  da un elenco con i conteggi, o li cerca per nome. Le foto nuove lo prendono
+  all'importazione; per quelle già in archivio c'è **Calcola luoghi** (admin),
+  in sottofondo con la barra. Oltre 30 km dal centro abitato più vicino (mare
+  aperto) il luogo resta sconosciuto.
 - **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
   anni passati ("3 anni fa"); si chiude fino al giorno dopo.
 - **App sul telefono**: dal browser "Aggiungi a schermata Home" / "Installa
@@ -67,7 +76,7 @@ Il server: [DEPLOY.md](DEPLOY.md).
 - **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
-  fotocamera), tag, album, solo preferite.
+  fotocamera, luogo), tag, album, luogo, solo preferite.
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
@@ -137,6 +146,8 @@ java -jar target/fototimeline-1.0.0.jar
 | `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
+| `FOTOTIMELINE_LUOGHI`   | (vuoto; nel container `/app/geonames`)    | Cartella dei file di GeoNames; vuoto = niente luoghi |
+| `FOTOTIMELINE_LUOGHI_DISTANZA` | `30`                               | Km oltre i quali il luogo è sconosciuto  |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -150,7 +161,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
@@ -174,7 +185,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo); con `Range` per i video |
 | GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
-| GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline)                |
+| GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline), col nome del luogo |
+| GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, regioni: [{ nome, conteggio, luoghi: [{ nome, conteggio }] }] }] }`, i più fotografati prima |
+| POST   | `/api/archivio/luoghi`       | "Calcola luoghi" in sottofondo, stato come `/api/importa`; `?tutte=true` rifà anche quelle che ce l'hanno (ruolo `fototimeline-admin`; 409 senza dataset) |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
 
 ## Test
@@ -184,7 +197,24 @@ cd backend && mvn test
 ```
 
 I test girano su un MongoDB embedded (flapdoodle): la prima volta scaricano
-il binario di MongoDB.
+il binario di MongoDB. Per i luoghi usano un mini dataset di GeoNames in
+`src/test/resources/geonames` (Roma, Sperlonga, Parigi, ...).
+
+### Luoghi sul PC
+
+Il dataset non sta nel repository. Per avere i luoghi anche sul PC:
+
+```bash
+mkdir -p ~/geonames && cd ~/geonames
+curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
+curl -O https://download.geonames.org/export/dump/admin1CodesASCII.txt
+curl -O https://download.geonames.org/export/dump/countryInfo.txt
+export FOTOTIMELINE_LUOGHI=~/geonames      # poi ./mvnw spring-boot:run
+```
+
+Così i nomi stranieri restano quelli di GeoNames (Rome, Paris); i nomi in
+italiano vengono da `alternateNames-it.txt`, che fa il Dockerfile (stage
+`geonames`).
 
 ## CI su server2
 
