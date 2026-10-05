@@ -14,10 +14,12 @@ import {
   ModificaTelefono,
   Operazione,
   PaginaFoto,
+  PaginaGruppi,
   PuntoMappa,
   Ricordo,
   Salute,
   StatoCloud,
+  StatoImpronte,
   StatoTelefono,
   VoceMese,
 } from './modelli';
@@ -123,6 +125,34 @@ export class FotoApi {
 
   sincronizzaTelefono(): Observable<StatoTelefono> {
     return this.http.post<StatoTelefono>('/api/telefono/sincronizza', {});
+  }
+
+  /** Gruppi di foto quasi uguali, dal più numeroso. */
+  quasiUguali(pagina: number, dimensione = 20): Observable<PaginaGruppi> {
+    return this.http.get<PaginaGruppi>('/api/quasi-uguali', { params: { pagina, dimensione } });
+  }
+
+  /** Elimina le foto "togli" di un gruppo; quelle tenute (se più d'una) non si propongono più insieme. */
+  risolvi(tieni: string[], togli: string[]): Observable<{ eliminate: number }> {
+    return this.http.post<{ eliminate: number }>('/api/quasi-uguali/risolvi', { tieni, togli });
+  }
+
+  /** "Non sono doppioni". */
+  ignora(ids: string[]): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/ignora', { ids });
+  }
+
+  statoImpronte(): Observable<StatoImpronte> {
+    return this.http.get<StatoImpronte>('/api/quasi-uguali/calcola');
+  }
+
+  /** "Calcola impronte" per le foto che non l'hanno (solo admin). */
+  calcolaImpronte(): Observable<StatoImpronte> {
+    return this.http.post<StatoImpronte>('/api/quasi-uguali/calcola', {});
+  }
+
+  annullaImpronte(): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/calcola/annulla', {});
   }
 
   /** La pagina "Salute" (solo admin). */

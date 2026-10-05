@@ -56,6 +56,12 @@ fototimeline:
   # admin): ogni quanto controllare se è ora di un giro.
   telefono:
     controllo: PT5M
+  # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
+  # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
+  quasi-uguali:
+    soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
+    finestra-raffica: PT10S
+    soglia-raffica: 12
   # Avvisi su Telegram quando una voce della pagina "Salute" cambia stato.
   # Token del bot (BotFather) e chat id: vuoti = avvisi spenti, la pagina c'è lo stesso.
   telegram:

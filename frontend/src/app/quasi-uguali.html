@@ -1,0 +1,115 @@
+<div class="velo" (click)="chiudi.emit()">
+  <section
+    #dialogo
+    class="dialogo"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="titolo-quasi-uguali"
+    tabindex="-1"
+    (click)="$event.stopPropagation()"
+  >
+    <header>
+      <h2 id="titolo-quasi-uguali">Foto quasi uguali</h2>
+      @if (gruppo() && totale()) {
+        <span class="tenue">Gruppo {{ posizione() }} di {{ totale() }}</span>
+      }
+      <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
+    </header>
+
+    @if (impronte(); as s) {
+      @if (s.stato === 'IN_CORSO') {
+        <div class="impronte" role="status">
+          <div class="riga">
+            <span>Calcolo le impronte… {{ s.fatte }} / {{ s.totale }}</span>
+            @if (admin()) {
+              <button type="button" class="link" (click)="annullaImpronte()">Annulla</button>
+            }
+          </div>
+          <progress [value]="percentualeImpronte()" max="100"></progress>
+        </div>
+      } @else if (s.senzaImpronta) {
+        <div class="impronte">
+          <p class="tenue">
+            {{ s.senzaImpronta }} foto ancora senza impronta: non entrano nel confronto.
+            @if (!admin()) {
+              Un amministratore può calcolarle.
+            }
+          </p>
+          @if (admin()) {
+            <button type="button" (click)="calcolaImpronte()">Calcola impronte</button>
+          }
+        </div>
+      }
+      @if (s.stato === 'FALLITO' && s.errore) {
+        <p class="errore">Calcolo delle impronte non riuscito: {{ s.errore }}</p>
+      }
+    }
+
+    @if (caricando()) {
+      <span class="rotella" aria-label="Caricamento"></span>
+    } @else if (gruppo(); as g) {
+      <p class="tenue">
+        Clic su una foto per scegliere se tenerla o toglierla. Suggerita: la risoluzione più alta, poi il file più grande,
+        poi chi ha i dati della fotocamera, poi la più vecchia. Le preferite restano.
+      </p>
+      <ul class="foto" aria-label="Foto del gruppo">
+        @for (f of g.foto; track f.id) {
+          @let tenuta = !!tieni().get(f.id);
+          <li>
+            <button
+              type="button"
+              class="scheda"
+              [class.togli]="!tenuta"
+              [attr.aria-pressed]="tenuta"
+              [attr.aria-label]="(tenuta ? 'Tieni ' : 'Togli ') + f.nomeOriginale"
+              (click)="commuta(f)"
+            >
+              <img [src]="f.miniatura" [style.aspect-ratio]="rapporto(f)" alt="" loading="lazy" />
+              <span class="segno" [class.tieni]="tenuta">{{ tenuta ? 'Tieni' : 'Togli' }}</span>
+              @if (f.preferita) {
+                <span class="stella" aria-label="Preferita">★</span>
+              }
+            </button>
+            <dl>
+              <dt class="nascosto">File</dt>
+              <dd class="nome" [title]="f.nomeOriginale">{{ f.nomeOriginale }}</dd>
+              <dt class="nascosto">Risoluzione e peso</dt>
+              <dd>
+                @if (f.larghezza && f.altezza) {
+                  {{ f.larghezza }}×{{ f.altezza }} ·
+                }
+                {{ peso(f.dimensione) }}
+              </dd>
+              <dt class="nascosto">Data</dt>
+              <dd>{{ f.scattataIl ? (f.scattataIl | date: 'd MMM y, HH:mm:ss') : 'data sconosciuta' }}</dd>
+              <dt class="nascosto">Fotocamera</dt>
+              <dd class="tenue">{{ f.fotocamera ?? 'senza dati della fotocamera' }}</dd>
+              @if (f.suggerita) {
+                <dt class="nascosto">Consiglio</dt>
+                <dd class="suggerita">Suggerita</dd>
+              }
+            </dl>
+          </li>
+        }
+      </ul>
+      <div class="piede">
+        <button type="button" [disabled]="occupato()" (click)="salta()">Salta</button>
+        <button type="button" [disabled]="occupato()" (click)="nonDoppioni()">Non sono doppioni</button>
+        <button
+          type="button"
+          class="primario"
+          [disabled]="occupato() || !daTogliere().length || !daTenere().length || !disponibile()"
+          [title]="disponibile() ? '' : 'Il cloud è smontato: le foto non si possono eliminare'"
+          (click)="togliAltre()"
+        >
+          Togli le altre ({{ daTogliere().length }})
+        </button>
+      </div>
+    } @else {
+      <p class="vuoto">Nessun gruppo di foto quasi uguali{{ totale() ? ' da vedere adesso' : '' }}.</p>
+      <div class="piede">
+        <button type="button" (click)="chiudi.emit()">Chiudi</button>
+      </div>
+    }
+  </section>
+</div>

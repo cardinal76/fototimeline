@@ -109,6 +109,30 @@ class SicurezzaTest {
     }
 
     @Test
+    void leQuasiUgualiLeRisolveChiunqueMaLeImprontePartonoSoloDallAmministratore() throws Exception {
+        mvc.perform(get("/api/quasi-uguali").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totale").value(0));
+        mvc.perform(get("/api/quasi-uguali/calcola").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.senzaImpronta").value(0));
+        // Come l'eliminazione: basta essere del realm (qui le foto non ci sono, quindi 0).
+        mvc.perform(post("/api/quasi-uguali/risolvi").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"tieni\":[\"a\"],\"togli\":[\"b\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eliminate").value(0));
+        mvc.perform(post("/api/quasi-uguali/risolvi").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"tieni\":[],\"togli\":[\"b\"]}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/quasi-uguali/calcola").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/quasi-uguali/calcola/annulla").with(oidcLogin()).with(csrf()))
+                .andExpect(status().isForbidden());
+
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        mvc.perform(post("/api/quasi-uguali/calcola").with(admin)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/quasi-uguali/calcola").with(admin).with(csrf())).andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.stato").value("IN_CORSO"));
+    }
+
+    @Test
     void lAmministratoreVedeLaSincronizzazioneDelTelefono() throws Exception {
         var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
         // Qui non c'è rclone: si vede, ma non si attiva e non parte.

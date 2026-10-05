@@ -88,6 +88,9 @@
         Salute
       </button>
     }
+    <button type="button" class="link" title="Raffiche, copie ricompresse o ridimensionate" (click)="dialogoQuasiUguali.set(true)">
+      Quasi uguali
+    </button>
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
     </button>
@@ -441,6 +444,14 @@
       </div>
     </form>
   </div>
+}
+
+@if (dialogoQuasiUguali()) {
+  <app-quasi-uguali
+    [admin]="!!galleria.io()?.admin"
+    [disponibile]="galleria.archivioDisponibile()"
+    (chiudi)="dialogoQuasiUguali.set(false)"
+  />
 }
 
 @if (dialogoSalute()) {

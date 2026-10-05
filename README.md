@@ -71,6 +71,14 @@ Il server: [DEPLOY.md](DEPLOY.md).
   quando una voce cambia stato (DEPLOY.md).
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
+- **Foto quasi uguali**: raffiche, scatti ripetuti, la stessa foto ridimensionata o
+  ricompressa da WhatsApp. Un gruppo alla volta con le miniature affiancate e,
+  sotto, risoluzione, peso, data e fotocamera; suggerisce quale tenere (la
+  risoluzione più alta, poi il file più grande, poi chi ha l'EXIF, poi la più
+  vecchia; le preferite restano sempre). "Togli le altre" elimina le scartate,
+  "Non sono doppioni" non le ripropone più. Il confronto usa un'impronta
+  percettiva (pHash a 64 bit) calcolata dalla miniatura all'importazione; per le
+  foto già in archivio c'è **Calcola impronte** (admin), in sottofondo.
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
@@ -140,6 +148,7 @@ java -jar target/fototimeline-1.0.0.jar
 | `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
+| `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
 | `FOTOTIMELINE_TELEGRAM_TOKEN`, `FOTOTIMELINE_TELEGRAM_CHAT` | (vuoti) | Avvisi su Telegram della pagina "Salute"; vuoti = spenti |
 | `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
 | `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
@@ -173,6 +182,11 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | PUT    | `/api/telefono`              | `{ attiva, sorgente, intervalloOre, giorniPrimaDiCancellare }` (400 fuori misura; admin) |
 | POST   | `/api/telefono/sincronizza`  | Un giro subito, in sottofondo: 202, 409 se già in corso (admin) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
+| GET    | `/api/quasi-uguali`          | Gruppi di foto quasi uguali (`pagina`, `dimensione`), dal più numeroso, con la `suggerita` da tenere |
+| POST   | `/api/quasi-uguali/risolvi`  | `{ tieni: [id], togli: [id] }`: elimina le `togli` come `DELETE /api/foto/{id}` (503 col cloud smontato, 400 per una preferita) |
+| POST   | `/api/quasi-uguali/ignora`   | `{ ids: [id] }`: "non sono doppioni", il gruppo non ricompare |
+| GET    | `/api/quasi-uguali/calcola`  | "Calcola impronte": stato, avanzamento e foto ancora senza impronta |
+| POST   | `/api/quasi-uguali/calcola`  | Lo avvia in sottofondo: 202, 409 se già in corso (ruolo `fototimeline-admin`); `/calcola/annulla` lo ferma |
 | GET    | `/api/salute`                | `{ stato, voci: [{ chiave, titolo, stato, messaggio, dettagli }], controllatoIl, avvisiTelegram }`, stato `OK`/`ATTENZIONE`/`ERRORE` (admin) |
 | POST   | `/api/salute/prova`          | Messaggio di prova su Telegram: 204, 409 se non configurato, 502 se Telegram rifiuta (admin) |
 | GET    | `/salute`                    | Healthcheck di Docker: `ok`, senza login                   |

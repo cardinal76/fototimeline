@@ -18,6 +18,7 @@ import { Cartella, Foto, ModificaTelefono, StatoSalute, StatoTelefono } from './
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
+import { QuasiUguali } from './quasi-uguali';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -28,7 +29,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Mappa, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FormsModule, Mappa, QuasiUguali, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -57,6 +58,7 @@ export class App {
   protected sposta = false;
   protected ricerca = '';
   protected readonly dialogoTelefono = signal(false);
+  protected readonly dialogoQuasiUguali = signal(false);
   protected readonly telefono = signal<StatoTelefono | null>(null);
   protected readonly salvandoTelefono = signal(false);
   protected moduloTelefono: ModificaTelefono = {
@@ -173,7 +175,7 @@ export class App {
 
   /**
    * Esc chiude quello che è aperto sopra la timeline: il dialogo di
-   * importazione, del telefono o della salute, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   * importazione, del telefono, delle quasi uguali o della salute, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
    */
   protected esc(): void {
     if (this.aperta()) {
@@ -183,6 +185,8 @@ export class App {
       this.chiudiImporta();
     } else if (this.dialogoTelefono()) {
       this.chiudiTelefono();
+    } else if (this.dialogoQuasiUguali()) {
+      this.dialogoQuasiUguali.set(false);
     } else if (this.dialogoSalute()) {
       this.chiudiSalute();
     } else if (this.selezione()) {

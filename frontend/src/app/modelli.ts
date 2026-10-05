@@ -205,6 +205,49 @@ export interface ModificaTelefono {
   copieInParallelo: number;
 }
 
+/** Una foto di un gruppo di quasi uguali. */
+export interface FotoSimile {
+  id: string;
+  /** "/api/foto/<id>/miniatura" */
+  miniatura: string;
+  nomeOriginale: string;
+  larghezza?: number;
+  altezza?: number;
+  dimensione: number;
+  scattataIl?: string;
+  fotocamera?: string;
+  preferita: boolean;
+  /** Quella che il server consiglia di tenere: risoluzione, peso, EXIF, data. */
+  suggerita: boolean;
+  /** Da tenere all'inizio: la suggerita e le preferite. */
+  tieni: boolean;
+}
+
+export interface GruppoSimili {
+  foto: FotoSimile[];
+}
+
+export interface PaginaGruppi {
+  gruppi: GruppoSimili[];
+  totale: number;
+  pagina: number;
+  altre: boolean;
+}
+
+/** "Calcola impronte": stato vuoto se dall'avvio del server non è mai partito. */
+export interface StatoImpronte {
+  stato?: 'IN_CORSO' | 'FINITO' | 'ANNULLATO' | 'FALLITO';
+  iniziatoIl?: string;
+  finitoIl?: string;
+  totale: number;
+  fatte: number;
+  calcolate: number;
+  errori: number;
+  errore?: string;
+  /** Foto (non video) ancora senza impronta: non entrano nel confronto. */
+  senzaImpronta: number;
+}
+
 /** Pallino della pagina "Salute": verde, giallo, rosso. */
 export type StatoSalute = 'OK' | 'ATTENZIONE' | 'ERRORE';
 

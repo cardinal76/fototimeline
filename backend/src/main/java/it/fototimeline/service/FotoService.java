@@ -45,6 +45,7 @@ import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
+import it.fototimeline.quasiuguali.Impronta;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
@@ -334,12 +335,20 @@ public class FotoService {
         }
     }
 
-    /** Miniatura e, per gli HEIC, vista JPEG. */
+    /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
     private void anteprime(Letto letto, Path file) throws IOException {
         Path anteprima = letto.anteprima();
         archivio.creaMiniatura(letto.foto().getId(), anteprima != null ? anteprima : file, anteprima == null);
         if (letto.genere() == Genere.HEIC) {
             archivio.salvaVista(letto.foto().getId(), anteprima);
+        }
+        if (letto.genere() != Genere.VIDEO) {
+            try {
+                letto.foto().setImpronta(Impronta.calcola(archivio.miniatura(letto.foto().getId())));
+            } catch (IOException | RuntimeException e) {
+                // Non blocca l'importazione: la riempie "Calcola impronte".
+                log.warn("Impronta di {} non calcolata: {}", letto.foto().getNomeOriginale(), e.toString());
+            }
         }
     }
 

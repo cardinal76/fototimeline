@@ -55,6 +55,12 @@ public class Foto {
     /** Durata del video, in secondi. */
     private Double durata;
 
+    /**
+     * Impronta percettiva (dHash a 64 bit) della miniatura, per trovare le foto
+     * quasi uguali; null per i video e finché non è calcolata.
+     */
+    private Long impronta;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -123,4 +129,7 @@ public class Foto {
 
     public Double getDurata() { return durata; }
     public void setDurata(Double durata) { this.durata = durata; }
+
+    public Long getImpronta() { return impronta; }
+    public void setImpronta(Long impronta) { this.impronta = impronta; }
 }
