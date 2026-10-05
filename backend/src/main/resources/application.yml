@@ -66,10 +66,13 @@ fototimeline:
   importazione-automatica:
     cartella: ${FOTOTIMELINE_CARTELLA_AUTOMATICA:}
     intervallo: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:PT15M}
-  # Foto nuove da pCloud nella cartella automatica (impostazioni nell'app, da
-  # admin): ogni quanto controllare se è ora di un giro.
+  # Foto nuove dai telefoni (pCloud) nella cartella automatica (i telefoni si
+  # aggiungono nell'app, da admin): ogni quanto controllare se è ora di un giro.
   telefono:
     controllo: PT5M
+    # A chi dare il telefono migrato da quando era uno solo (username Keycloak);
+    # vuoto = al primo amministratore che entra.
+    proprietario: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:}
   # Il nome del luogo dal GPS, offline: i file di GeoNames (CC BY 4.0) in
   # questa cartella (cities500.txt, admin1CodesASCII.txt, ...; nel container
   # li scarica il Dockerfile in /app/geonames). Vuota = niente luoghi.

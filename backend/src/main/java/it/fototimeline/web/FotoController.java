@@ -43,6 +43,8 @@ import it.fototimeline.service.Risultati.PaginaFoto;
 import it.fototimeline.service.Risultati.PuntoMappa;
 import it.fototimeline.service.Risultati.Ricordo;
 import it.fototimeline.service.Risultati.VoceMese;
+import it.fototimeline.sicurezza.RegistroUtenti;
+import it.fototimeline.sicurezza.UtenteCorrente;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -54,13 +56,17 @@ public class FotoController {
     private final FotoService service;
     private final ImportazioneCartelle importazione;
     private final LavoriImportazione lavori;
+    private final UtenteCorrente corrente;
+    private final RegistroUtenti utenti;
     private final ConversioneVideo conversione;
 
     public FotoController(FotoService service, ImportazioneCartelle importazione, LavoriImportazione lavori,
-            ConversioneVideo conversione) {
+            UtenteCorrente corrente, RegistroUtenti utenti, ConversioneVideo conversione) {
         this.service = service;
         this.importazione = importazione;
         this.lavori = lavori;
+        this.corrente = corrente;
+        this.utenti = utenti;
         this.conversione = conversione;
     }
 
@@ -75,9 +81,10 @@ public class FotoController {
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
             @RequestParam(required = false) String luogo,
+            @RequestParam(required = false) String caricataDa,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo),
+        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -89,8 +96,9 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
-            @RequestParam(required = false) String luogo) {
-        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo));
+            @RequestParam(required = false) String luogo,
+            @RequestParam(required = false) String caricataDa) {
+        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
     }
 
     @GetMapping("/mappa")
@@ -101,8 +109,9 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
-            @RequestParam(required = false) String luogo) {
-        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo));
+            @RequestParam(required = false) String luogo,
+            @RequestParam(required = false) String caricataDa) {
+        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */
@@ -121,12 +130,13 @@ public class FotoController {
     public List<Caricamento> carica(@RequestParam("file") List<MultipartFile> file,
             @RequestParam(required = false) String album) throws IOException {
         var esiti = new java.util.ArrayList<Caricamento>();
+        String chi = corrente.chi().username();
         for (MultipartFile f : file) {
             // Su file e non in memoria: un video può pesare gigabyte.
             Path temporaneo = Files.createTempFile("fototimeline-caricamento-", "");
             try {
                 f.transferTo(temporaneo);
-                esiti.add(service.importa(f.getOriginalFilename(), temporaneo, null, album));
+                esiti.add(service.importa(f.getOriginalFilename(), temporaneo, null, album, chi));
             } finally {
                 Files.deleteIfExists(temporaneo);
             }
@@ -142,7 +152,8 @@ public class FotoController {
     public ResponseEntity<StatoLavoro> importa(@Valid @RequestBody RichiestaImportazione r) {
         Path cartella = importazione.consentita(Path.of(r.cartella().trim()));
         return ResponseEntity.accepted()
-                .body(lavori.avvia(cartella, r.albumDaCartella(), r.sposta(), LavoriImportazione.Origine.MANUALE));
+                .body(lavori.avvia(cartella, r.albumDaCartella(), r.sposta(), LavoriImportazione.Origine.MANUALE,
+                        corrente.chi().username()));
     }
 
     /**
@@ -199,6 +210,19 @@ public class FotoController {
     @GetMapping("/album")
     public List<String> album() {
         return service.album();
+    }
+
+    /** Una voce del filtro "Caricate da". */
+    public record CaricateDa(String username, String nome, long conteggio) {
+    }
+
+    /** Chi ha portato foto e quante, col nome visto al login (o lo username, se non è mai entrato). */
+    @GetMapping("/caricate-da")
+    public List<CaricateDa> caricateDa() {
+        var nomi = utenti.nomi();
+        return service.caricateDa().stream()
+                .map(c -> new CaricateDa(c.username(), nomi.getOrDefault(c.username(), c.username()), c.conteggio()))
+                .toList();
     }
 
     @GetMapping("/foto/{id}/miniatura")

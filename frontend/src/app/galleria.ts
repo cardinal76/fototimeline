@@ -4,6 +4,7 @@ import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import {
+  CaricateDa,
   Caricamento,
   CopiaBackup,
   ElencoLuoghi,
@@ -49,6 +50,8 @@ export class Galleria {
   readonly mesi = signal<VoceMese[]>([]);
   readonly tag = signal<string[]>([]);
   readonly album = signal<string[]>([]);
+  /** Chi ha portato foto, per il filtro e per "Caricata da Anna". */
+  readonly caricateDa = signal<CaricateDa[]>([]);
   /** Luoghi con i conteggi: per il filtro e per "Calcola luoghi". */
   readonly luoghi = signal<ElencoLuoghi | null>(null);
   readonly selezionate = signal<ReadonlySet<string>>(new Set());
@@ -307,6 +310,12 @@ export class Galleria {
     this.api.timeline(this.filtro()).subscribe((m) => this.mesi.set(m));
     this.api.tag().subscribe((t) => this.tag.set(t));
     this.api.album().subscribe((a) => this.album.set(a));
+    this.api.caricateDa().subscribe((c) => this.caricateDa.set(c));
+  }
+
+  /** Il nome di chi ha portato una foto, se è entrato almeno una volta; altrimenti lo username. */
+  nomeDi(username: string): string {
+    return this.caricateDa().find((c) => c.username === username)?.nome ?? username;
   }
 
   prossimaPagina(primaPagina = false): void {

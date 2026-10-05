@@ -8,6 +8,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -76,6 +77,16 @@ public class ImportazioneCartelle {
 
     public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta, Avanzamento avanzamento)
             throws IOException {
+        return importa(cartella, albumDaCartella, sposta, avanzamento, file -> null);
+    }
+
+    /**
+     * @param caricataDa chi ha portato ogni file: per "Importa cartella" chi
+     *                   l'ha lanciata, per la cartella automatica il proprietario
+     *                   del telefono che l'ha copiato ({@link ProvenienzaFile})
+     */
+    public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta, Avanzamento avanzamento,
+            Function<Path, String> caricataDa) throws IOException {
         archivio.verificaDisponibile();
         Path base = consentita(cartella);
         if (!Files.isDirectory(base)) {
@@ -105,7 +116,7 @@ public class ImportazioneCartelle {
                         ? p.getParent().getFileName().toString()
                         : null;
                 esito = fotoService.importa(p.getFileName().toString(), p,
-                        Files.getLastModifiedTime(p).toInstant(), album);
+                        Files.getLastModifiedTime(p).toInstant(), album, caricataDa.apply(p));
             } catch (IOException e) {
                 esito = new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, e.getMessage());
             }

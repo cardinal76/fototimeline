@@ -71,6 +71,8 @@ services:
       # Vuota = spenta. Per esempio /cloud/Da importare: ci carica il telefono.
       FOTOTIMELINE_CARTELLA_AUTOMATICA: ${FOTOTIMELINE_CARTELLA_AUTOMATICA:-}
       FOTOTIMELINE_INTERVALLO_AUTOMATICO: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:-PT15M}
+      # Di chi è il telefono di quando era uno solo; vuoto = del primo admin che entra.
+      FOTOTIMELINE_TELEFONO_PROPRIETARIO: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:-}
       # Versione compatibile (H.264) dei video HEVC: thread di ffmpeg e lato corto massimo.
       FOTOTIMELINE_VIDEO_ATTIVA: ${FOTOTIMELINE_VIDEO_ATTIVA:-true}
       FOTOTIMELINE_VIDEO_THREAD: ${FOTOTIMELINE_VIDEO_THREAD:-2}

@@ -35,6 +35,13 @@ public class Foto {
     private String giorno;
     private OrigineData origineData;
     private Instant caricataIl;
+    /**
+     * Chi l'ha portata nell'archivio: lo username Keycloak di chi l'ha caricata
+     * o importata, o il proprietario del telefono da cui arriva. Null per le
+     * foto di prima e per quelle senza login (il PC).
+     */
+    @Indexed
+    private String caricataDa;
 
     private String titolo;
     private String descrizione;
@@ -121,6 +128,9 @@ public class Foto {
 
     public Instant getCaricataIl() { return caricataIl; }
     public void setCaricataIl(Instant caricataIl) { this.caricataIl = caricataIl; }
+
+    public String getCaricataDa() { return caricataDa; }
+    public void setCaricataDa(String caricataDa) { this.caricataDa = caricataDa; }
 
     public String getTitolo() { return titolo; }
     public void setTitolo(String titolo) { this.titolo = titolo; }

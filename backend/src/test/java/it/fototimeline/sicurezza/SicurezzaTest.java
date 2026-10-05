@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -13,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
@@ -20,11 +23,17 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.OidcLoginRequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
+
+import it.fototimeline.telefono.SorgenteTelefono;
 
 /** Il login acceso, come su server2, senza un Keycloak vero: gli indirizzi non vengono mai chiamati. */
 @SpringBootTest(properties = {
@@ -58,6 +67,9 @@ class SicurezzaTest {
     @Autowired
     MockMvc mvc;
 
+    @Autowired
+    MongoTemplate mongo;
+
     @Test
     void senzaLoginLeApiRispondono401ELePagineMandanoAKeycloak() throws Exception {
         mvc.perform(get("/api/foto")).andExpect(status().isUnauthorized());
@@ -86,12 +98,7 @@ class SicurezzaTest {
         mvc.perform(post("/api/archivio/video/converti").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/video/annulla").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(get("/api/backup").with(oidcLogin())).andExpect(status().isOk());
-        // La sincronizzazione del telefono non si vede nemmeno.
-        mvc.perform(get("/api/telefono").with(oidcLogin())).andExpect(status().isForbidden());
-        mvc.perform(put("/api/telefono").with(oidcLogin()).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"attiva\":false}"))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/api/telefono/sincronizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/utenti").with(oidcLogin())).andExpect(status().isForbidden());
         // Nemmeno la pagina "Salute" e la prova di Telegram.
         mvc.perform(get("/api/salute").with(oidcLogin())).andExpect(status().isForbidden());
         mvc.perform(post("/api/salute/prova").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
@@ -136,31 +143,118 @@ class SicurezzaTest {
                 .andExpect(jsonPath("$.stato").value("IN_CORSO"));
     }
 
+    private static final OidcLoginRequestPostProcessor ANNA = oidcLogin()
+            .idToken(t -> t.claim("preferred_username", "anna").claim("name", "Anna Rossi"));
+    private static final OidcLoginRequestPostProcessor MARCO = oidcLogin()
+            .idToken(t -> t.claim("preferred_username", "marco").claim("name", "Marco"))
+            .authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+
+    private void dueTelefoni() {
+        mongo.remove(new Query(), SorgenteTelefono.class);
+        mongo.insert(new SorgenteTelefono("t-marco", "Telefono di Marco", "marco", false, "pcloud:Automatic Upload",
+                6, 7, 6, Instant.parse("2026-01-01T00:00:00Z"), null));
+        mongo.insert(new SorgenteTelefono("t-anna", "Telefono di Anna", "anna", false, "pcloud-anna:Automatic Upload",
+                6, 7, 6, Instant.parse("2026-01-02T00:00:00Z"), null));
+    }
+
     @Test
-    void lAmministratoreVedeLaSincronizzazioneDelTelefono() throws Exception {
-        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
-        // Qui non c'è rclone: si vede, ma non si attiva e non parte.
-        mvc.perform(get("/api/telefono").with(admin)).andExpect(status().isOk())
+    void ogniFamiliareVedeSoloIlSuoTelefonoEPuoSoloSincronizzarlo() throws Exception {
+        dueTelefoni();
+        mvc.perform(get("/api/telefoni").with(ANNA)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.disponibile").value(false))
+                .andExpect(jsonPath("$.telefoni.length()").value(1))
+                .andExpect(jsonPath("$.telefoni[0].id").value("t-anna"));
+        mvc.perform(get("/api/telefoni").with(oidcLogin())).andExpect(jsonPath("$.telefoni.length()").value(0));
+        mvc.perform(put("/api/telefoni/t-anna").with(ANNA).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"attiva\":false}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/telefoni").with(ANNA).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Mio\",\"proprietario\":\"anna\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/api/telefoni/t-anna").with(ANNA).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/telefoni/t-marco/sincronizza").with(ANNA).with(csrf())).andExpect(status().isNotFound());
+        // Il suo sì; qui non c'è rclone, quindi 409.
+        mvc.perform(post("/api/telefoni/t-anna/sincronizza").with(ANNA).with(csrf())).andExpect(status().isConflict());
+    }
+
+    @Test
+    void lAmministratoreGestisceTuttiITelefoni() throws Exception {
+        dueTelefoni();
+        // Qui non c'è rclone: si vedono, ma non si attivano e non partono.
+        mvc.perform(get("/api/telefoni").with(MARCO)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.disponibile").value(false))
                 .andExpect(jsonPath("$.motivo").isNotEmpty())
-                .andExpect(jsonPath("$.inCorso").value(false))
-                .andExpect(jsonPath("$.intervalloOre").value(6));
-        mvc.perform(put("/api/telefono").with(admin)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":12}"))
+                .andExpect(jsonPath("$.telefoni[*].id").value(org.hamcrest.Matchers.contains("t-marco", "t-anna")))
+                .andExpect(jsonPath("$.telefoni[0].inCorso").value(false))
+                .andExpect(jsonPath("$.telefoni[0].intervalloOre").value(6));
+        String papa = "{\"nome\":\"Telefono di papà\",\"proprietario\":\"papa\",\"sorgente\":\"pcloud-papa:Automatic Upload\"}";
+        mvc.perform(post("/api/telefoni").with(MARCO)
+                .contentType(MediaType.APPLICATION_JSON).content(papa))
                 .andExpect(status().isForbidden());
-        mvc.perform(put("/api/telefono").with(admin).with(csrf())
+        mvc.perform(post("/api/telefoni").with(MARCO).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(papa))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").isNotEmpty())
+                .andExpect(jsonPath("$.proprietario").value("papa"))
+                .andExpect(jsonPath("$.intervalloOre").value(6));
+        mvc.perform(post("/api/telefoni").with(MARCO).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(papa))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("già")));
+        mvc.perform(put("/api/telefoni/t-marco").with(MARCO).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":0}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("ore")));
-        mvc.perform(put("/api/telefono").with(admin).with(csrf())
+        mvc.perform(put("/api/telefoni/t-marco").with(MARCO).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"attiva\":true}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(put("/api/telefono").with(admin).with(csrf())
+        mvc.perform(put("/api/telefoni/t-marco").with(MARCO).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":12,\"giorniPrimaDiCancellare\":0}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.intervalloOre").value(12))
                 .andExpect(jsonPath("$.giorniPrimaDiCancellare").value(0));
-        mvc.perform(post("/api/telefono/sincronizza").with(admin).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(put("/api/telefoni/nessuno").with(MARCO).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":12}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/telefoni/t-marco/sincronizza").with(MARCO).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(delete("/api/telefoni/t-anna").with(MARCO).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/telefoni/t-anna").with(MARCO).with(csrf())).andExpect(status().isNotFound());
+        // Il vecchio indirizzo non c'è più.
+        mvc.perform(get("/api/telefono").with(MARCO)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void gliUtentiSiRegistranoELeFotoSannoChiLeHaCaricate() throws Exception {
+        mongo.remove(new Query(), Utente.class);
+        mvc.perform(get("/api/io").with(ANNA))
+                .andExpect(jsonPath("$.username").value("anna"))
+                .andExpect(jsonPath("$.nome").value("Anna Rossi"));
+        mvc.perform(get("/api/io").with(MARCO)).andExpect(jsonPath("$.admin").value(true));
+
+        var immagine = new java.io.ByteArrayOutputStream();
+        var img = new java.awt.image.BufferedImage(20, 10, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        img.setRGB(3, 4, 0x123456);
+        javax.imageio.ImageIO.write(img, "png", immagine);
+        mvc.perform(multipart("/api/foto").file(new MockMultipartFile("file", "mare.png", "image/png", immagine.toByteArray()))
+                .with(ANNA).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].esito").value("CARICATA"))
+                .andExpect(jsonPath("$[0].foto.caricataDa").value("anna"));
+
+        mvc.perform(get("/api/caricate-da").with(oidcLogin()))
+                .andExpect(jsonPath("$[0].username").value("anna"))
+                .andExpect(jsonPath("$[0].nome").value("Anna Rossi"))
+                .andExpect(jsonPath("$[0].conteggio").value(1));
+        mvc.perform(get("/api/foto").param("caricataDa", "anna").with(oidcLogin())).andExpect(jsonPath("$.totale").value(1));
+        mvc.perform(get("/api/foto").param("caricataDa", "marco").with(oidcLogin())).andExpect(jsonPath("$.totale").value(0));
+        mvc.perform(get("/api/timeline").param("caricataDa", "anna").with(oidcLogin()))
+                .andExpect(jsonPath("$[0].conteggio").value(1));
+
+        mvc.perform(get("/api/utenti").with(MARCO)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].username").value(org.hamcrest.Matchers.contains("anna", "marco")))
+                .andExpect(jsonPath("$[0].nome").value("Anna Rossi"))
+                .andExpect(jsonPath("$[0].admin").value(false))
+                .andExpect(jsonPath("$[1].admin").value(true));
     }
 
     @Test

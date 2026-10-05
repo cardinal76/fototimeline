@@ -49,12 +49,12 @@ import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
 import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
-import it.fototimeline.telefono.ImpostazioniTelefono;
-import it.fototimeline.telefono.ImpostazioniTelefono.Giro;
 import it.fototimeline.telefono.SincronizzazioneTelefono;
+import it.fototimeline.telefono.SorgenteTelefono;
+import it.fototimeline.telefono.SorgenteTelefono.Giro;
 
 /**
- * La pagina "Salute": rclone, cloud, backup, telefono, importazioni, spazio
+ * La pagina "Salute": rclone, cloud, backup, telefoni, importazioni, spazio
  * e numeri dell'archivio, ognuno con un pallino verde, giallo o rosso.
  *
  * <p>Ogni controllo gira per conto suo, con un tempo massimo: se uno lancia o
@@ -133,7 +133,7 @@ public class Salute {
         }
         controlli.add(new Controllo("cloud", "Cloud", () -> List.of(montaggio())));
         controlli.add(new Controllo("backup", "Backup dei metadati", () -> List.of(backup())));
-        controlli.add(new Controllo("telefono", "Telefono (pCloud)", this::telefono));
+        controlli.add(new Controllo("telefono", TITOLO_TELEFONI, this::telefono));
         controlli.add(new Controllo("importazione", "Importazioni", () -> List.of(importazione())));
         controlli.add(new Controllo("disco", "Disco delle miniature", () -> List.of(disco())));
         if (cloud.gestito()) {
@@ -239,20 +239,58 @@ public class Salute {
 
     // ------------------------------------------------------------ telefono
 
+    static final String TITOLO_TELEFONI = "Telefoni (pCloud)";
+
+    /**
+     * Una voce sola per tutti i telefoni: il pallino è quello del telefono
+     * messo peggio, e nel messaggio c'è il suo nome. Contano quelli attivi e
+     * quelli che hanno girato almeno una volta (anche a mano).
+     */
     private List<VoceSalute> telefono() {
         String chiave = "telefono";
-        String titolo = "Telefono (pCloud)";
-        SincronizzazioneTelefono.Stato s = telefono.stato();
-        Giro ultimo = s.ultimoGiro();
-        if (!s.attiva() && ultimo == null && !s.inCorso()) {
-            // Sul PC non c'è; sul server non è mai stata usata: niente da dire.
-            return s.disponibile() ? List.of(VoceSalute.ok(chiave, titolo, "Spenta", null)) : List.of();
+        SincronizzazioneTelefono.Elenco elenco = telefono.elenco(t -> true);
+        List<SincronizzazioneTelefono.Stato> usati = elenco.telefoni().stream()
+                .filter(t -> t.attiva() || t.ultimoGiro() != null || t.inCorso())
+                .toList();
+        if (usati.isEmpty()) {
+            // Sul PC non c'è; sul server nessun telefono è mai stato usato: niente da dire.
+            return elenco.disponibile()
+                    ? List.of(VoceSalute.ok(chiave, TITOLO_TELEFONI,
+                            elenco.telefoni().isEmpty() ? "Nessun telefono" : "Tutti spenti", null))
+                    : List.of();
         }
+        List<VoceSalute> singole = usati.stream().map(this::telefono).toList();
+        StatoSalute peggiore = StatoSalute.OK;
+        for (VoceSalute v : singole) {
+            peggiore = peggiore.peggiore(v.stato());
+        }
+        List<String> dettagli = new ArrayList<>();
+        List<String> messaggi = new ArrayList<>();
+        for (VoceSalute v : singole) {
+            if (singole.size() > 1) {
+                dettagli.add(v.titolo() + ": " + v.messaggio());
+            }
+            v.dettagli().forEach(d -> dettagli.add(singole.size() > 1 ? v.titolo() + " · " + d : d));
+            if (v.stato() == peggiore) {
+                messaggi.add(v.titolo() + ": " + v.messaggio());
+            }
+        }
+        String messaggio = peggiore == StatoSalute.OK && singole.size() > 1
+                ? singole.size() + " telefoni a posto"
+                : String.join("; ", messaggi);
+        return List.of(new VoceSalute(chiave, TITOLO_TELEFONI, peggiore, messaggio, dettagli));
+    }
+
+    /** Un telefono: titolo il suo nome, il resto come la voce di quando il telefono era uno. */
+    private VoceSalute telefono(SincronizzazioneTelefono.Stato s) {
+        String chiave = "telefono-" + s.id();
+        String titolo = s.nome() != null && !s.nome().isBlank() ? s.nome() : SorgenteTelefono.NOME;
+        Giro ultimo = s.ultimoGiro();
         List<String> dettagli = new ArrayList<>();
         dettagli.add((s.attiva() ? "Attiva, ogni " + s.intervalloOre() + " ore" : "Spenta (solo a mano)")
                 + ", da " + s.sorgente());
         if (s.inCorso()) {
-            dettagli.add("Un giro è in corso adesso");
+            dettagli.add(s.inCoda() ? "Un giro è in coda" : "Un giro è in corso adesso");
         }
         if (ultimo != null) {
             dettagli.add(ultimo.trovati() + " su pCloud · " + ultimo.copiati() + " copiati · "
@@ -263,24 +301,24 @@ public class Salute {
             dettagli.add("Prossimo giro: " + data(s.prossimoGiroIl()));
         }
         if (ultimo == null) {
-            return List.of(s.inCorso()
+            return s.inCorso()
                     ? VoceSalute.ok(chiave, titolo, "Primo giro in corso", dettagli)
-                    : VoceSalute.attenzione(chiave, titolo, "Attiva, ma nessun giro finora", dettagli));
+                    : VoceSalute.attenzione(chiave, titolo, "Attiva, ma nessun giro finora", dettagli);
         }
         String quando = "Ultimo giro " + data(ultimo.iniziatoIl()) + " (" + fa(ultimo.iniziatoIl()) + ")";
-        if (ultimo.esito() == ImpostazioniTelefono.Esito.ERRORE) {
+        if (ultimo.esito() == SorgenteTelefono.Esito.ERRORE) {
             String motivo = ultimo.messaggio() != null ? ultimo.messaggio() : "errore";
             String testo = erroreDiToken(ultimo)
                     ? "pCloud rifiuta il token: va rifatta la configurazione di rclone (GUIDA.md, 3.1). " + motivo
                     : quando + " con errori: " + motivo;
-            return List.of(VoceSalute.errore(chiave, titolo, testo, dettagli));
+            return VoceSalute.errore(chiave, titolo, testo, dettagli);
         }
         Duration limite = Duration.ofHours(2L * s.intervalloOre());
         if (s.attiva() && !s.inCorso() && ultimo.iniziatoIl().plus(limite).isBefore(clock.instant())) {
-            return List.of(VoceSalute.errore(chiave, titolo,
-                    "Non gira da più di " + durata(limite) + ": " + quando.toLowerCase(Locale.ITALIAN), dettagli));
+            return VoceSalute.errore(chiave, titolo,
+                    "Non gira da più di " + durata(limite) + ": " + quando.toLowerCase(Locale.ITALIAN), dettagli);
         }
-        return List.of(VoceSalute.ok(chiave, titolo, quando + ": " + ultimo.copiati() + " copiati", dettagli));
+        return VoceSalute.ok(chiave, titolo, quando + ": " + ultimo.copiati() + " copiati", dettagli);
     }
 
     /** "Invalid 'access_token' (2094)", "empty token found": pCloud non accetta più le credenziali. */
@@ -388,7 +426,7 @@ public class Salute {
 
     /**
      * Lo spazio dei remote che usiamo: quello del cloud e, se c'è nel
-     * rclone.conf, quello del telefono. Alcuni remote non lo dicono.
+     * rclone.conf, quelli dei telefoni. Alcuni remote non lo dicono.
      */
     private List<VoceSalute> spazioRemote() {
         Set<String> configurati = new HashSet<>();
@@ -397,9 +435,11 @@ public class Salute {
         }
         List<String> da = new ArrayList<>();
         da.add(nomeRemote(cloud.remoto()));
-        String sorgente = telefono.impostazioni().sorgente();
-        if (sorgente != null && sorgente.contains(":")) {
-            da.add(nomeRemote(sorgente));
+        for (SorgenteTelefono t : telefono.sorgenti()) {
+            String sorgente = t.sorgente();
+            if (sorgente != null && sorgente.contains(":")) {
+                da.add(nomeRemote(sorgente));
+            }
         }
         List<VoceSalute> voci = new ArrayList<>();
         for (String remote : da.stream().distinct().toList()) {

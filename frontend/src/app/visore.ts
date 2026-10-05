@@ -63,6 +63,11 @@ export class Visore {
   protected readonly scarica = computed(() => FotoApi.originale(this.foto(), true));
   protected readonly anteprima = computed(() => FotoApi.miniatura(this.foto()));
   protected readonly origine = computed(() => ORIGINI[this.foto().origineData]);
+  /** "Anna": il nome di chi l'ha portata; null per le foto di prima. */
+  protected readonly caricataDa = computed(() => {
+    const chi = this.foto().caricataDa;
+    return chi ? this.galleria.nomeDi(chi) : null;
+  });
   protected readonly indice = computed(() => this.galleria.foto().findIndex((f) => f.id === this.foto().id));
   protected readonly album = this.galleria.album;
   protected readonly tagNoti = this.galleria.tag;

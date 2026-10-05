@@ -5,7 +5,7 @@ si fanno. I dettagli tecnici del server sono in [DEPLOY.md](DEPLOY.md).
 
 ```
 telefono ──(app pCloud)──▶ pCloud: Automatic Upload/
-                                     │ server2, ogni 6 ore (pannello "Telefono")
+                                     │ server2, ogni 6 ore (pannello "Telefoni", uno per familiare)
                                      ▼
 pCloud (tutto il resto) ──(script sul PC)──▶ LifetimeCloud: FotoTimeline/AAAA/MM/GG
                                      ▲               ▲
@@ -167,8 +167,14 @@ docker exec fototimeline-rclone-1 rclone lsd "pcloud:Automatic Upload" --config 
 ```
 
 **3.2 Nell'app** (https://foto.marcocardinali.it, da admin): **Monta** (il riavvio di rclone lo
-smonta) → **Telefono** → cartella `pcloud:Automatic Upload`, ogni `6` ore, togli dopo `7` giorni →
-**Attiva** → **Salva** → **Sincronizza ora**.
+smonta) → **Telefoni** → **Aggiungi** → nome `Telefono di Marco`, proprietario `marco`, cartella
+`pcloud:Automatic Upload`, ogni `6` ore, togli dopo `7` giorni → **Attivo** → **Aggiungi** →
+**Sincronizza ora**. Le foto che arrivano da lì risultano "caricate da" Marco.
+
+Se la sincronizzazione c'era già da prima (un telefono solo), non serve aggiungerlo: dopo il
+rilascio compare da solo come "Telefono", con le sue impostazioni, e non ricopia niente. È di
+`FOTOTIMELINE_TELEFONO_PROPRIETARIO` (nel `.env`) o, se vuoto, del primo amministratore che entra;
+da **Modifica** gli si cambia nome e proprietario.
 
 Controllo da server2:
 
@@ -190,7 +196,8 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   (iPhone) che Firefox e Chrome non sempre riproducono. La coda gira in sottofondo, uno alla volta
   (in basso a sinistra quanti fatti e quanti da fare); i video nuovi ci entrano da soli. Col cloud
   smontato aspetta. Su un VPS conta qualche minuto di CPU per ogni minuto di video 4K.
-- **Telefono**: la sincronizzazione da pCloud.
+- **Telefoni**: la sincronizzazione da pCloud, un telefono per familiare (sezione 5).
+- **Caricate da**: il filtro per vedere le foto portate da una persona; nel visore, "Caricata da".
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
 - **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
   ce l'hanno; quelle nuove lo prendono da sole. Non serve il cloud montato, 150 mila foto in meno
@@ -217,6 +224,65 @@ Run workflow) la mette su server2.
 
 ---
 
+## 5. Aggiungere un familiare
+
+L'archivio è di famiglia: tutti vedono tutte le foto, ma ognuno ha il suo telefono, e ogni foto
+sa chi l'ha portata. Per aggiungere Anna:
+
+**5.1 L'utente in Keycloak**, dal server di produzione (i comandi completi sono in
+[DEPLOY.md](DEPLOY.md), "Keycloak: realm, client e amministratore"; per la console web c'è
+`tunnel-kc-up`):
+
+```bash
+cd ~/presenze && set -a && . ./.env.prod && set +a
+KC="docker exec presenze-keycloak /opt/keycloak/bin/kcadm.sh"
+$KC config credentials --server http://localhost:8080/auth --realm master \
+  --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"
+$KC create users -r fototimeline -s username=anna -s enabled=true \
+  -s firstName=Anna -s lastName=Rossi -s email=anna@example.com
+$KC set-password -r fototimeline --username anna --new-password 'temporanea' --temporary
+# Solo se deve montare il cloud, fare backup e gestire i telefoni di tutti:
+# $KC add-roles -r fototimeline --uusername anna --rolename fototimeline-admin
+```
+
+Anna entra una volta su https://foto.marcocardinali.it (cambia la password): da quel momento
+l'app la conosce e la propone come proprietario. Senza ruolo admin vede e modifica le foto, ma dei
+telefoni vede solo il suo.
+
+**5.2 La sua cartella su pCloud.** Due casi:
+
+- **Stesso account pCloud** (quello di famiglia, il remote `pcloud`): sul suo telefono l'app pCloud
+  carica in `Automatic Upload/<nome del dispositivo>`. Se vuoi un telefono a parte per lei, la
+  cartella è `pcloud:Automatic Upload/<nome del dispositivo>`, e quella del telefono di Marco va
+  ristretta allo stesso modo (`pcloud:Automatic Upload/Pixel 8`): l'app non accetta due telefoni
+  sulla stessa cartella né una cartella dentro l'altra, perché copierebbero gli stessi file.
+- **Il suo account pCloud**: serve un **altro remote di rclone**, `pcloud-anna`, fatto come
+  `pcloud` nella sezione 3.1 ma col login di Anna. Sul **PC**: `rclone config` → `n` → nome
+  `pcloud-anna` → tipo `pcloud` → client_id e secret vuoti → advanced `n` → browser **`y`** (il
+  login lo fa Anna, col suo account) → `y` → `q`. Poi:
+
+  ```bash
+  rclone lsd "pcloud-anna:Automatic Upload"    # le cartelle dei suoi dispositivi
+  rclone config show pcloud-anna               # deve avere hostname = eapi.pcloud.com
+  ```
+
+  Copia la sezione `[pcloud-anna]` in fondo a `~/fototimeline/rclone/rclone.conf` su **server2**,
+  poi `docker restart fototimeline-rclone-1` e prova:
+
+  ```bash
+  docker exec fototimeline-rclone-1 rclone lsd "pcloud-anna:Automatic Upload" --config /config/rclone/rclone.conf
+  ```
+
+  La cartella del suo telefono è `pcloud-anna:Automatic Upload`.
+
+**5.3 Nell'app**, da admin: **Monta** (se il riavvio di rclone l'ha smontato) → **Telefoni** →
+**Aggiungi** → nome `Telefono di Anna`, proprietario `anna`, la cartella del punto 5.2, **Attivo**
+→ **Aggiungi** → **Sincronizza ora**. Le sue foto arrivano nella stessa cartella automatica di
+tutte le altre (senza album nuovi) e risultano "caricate da Anna". Se un giorno lo togli
+(**Elimina**), le copie restano registrate: rimesso con la stessa cartella non ricopia niente.
+
+---
+
 ## Se qualcosa non va
 
 | Messaggio | Causa | Rimedio |
@@ -227,7 +293,9 @@ Run workflow) la mette su server2.
 | `bash\r: No such file or directory` | script con "a capo" di Windows | `git config --global core.autocrlf input`, poi `git rm -rq --cached . && git reset -q --hard` |
 | `./deploy/foto-da-pcloud.sh: No such file or directory` | non sei nella cartella del repository | `cd ~/projects/fototimeline` |
 | `Permission denied (publickey)` con git | chiave del PC non su GitHub | sezione 1, chiave su GitHub |
-| pCloud `empty token found` | il token non è stato incollato | rifare 3.1 |
+| pCloud `empty token found` | il token non è stato incollato | rifare 3.1 (o 5.2 per `pcloud-anna`) |
+| "remote sconosciuto" o `didn't find section in config file` per `pcloud-anna:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 5.2 |
+| "La cartella ... è già di ..." | due telefoni sulla stessa cartella o una dentro l'altra | restringere le cartelle per dispositivo (5.2) |
 | pCloud `Invalid 'access_token' (2094)` | account europeo senza `hostname = eapi.pcloud.com` | rifare 3.1 dal PC |
 | "ARCHIVIO non può essere la radice" | `ARCHIVIO=/mnt/p` | una cartella nuova, es. `/mnt/p/Archivio foto` |
 | raccogli fermo | PC in sospensione o `P:` staccato | `p-up` e rilanciare: riprende |

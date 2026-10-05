@@ -51,7 +51,7 @@ public class ConfigurazioneSicurezza {
     @Bean
     SecurityFilterChain filtri(HttpSecurity http, LoginProperties login,
             @Value("${server.address:}") String indirizzo,
-            ObjectProvider<ClientRegistrationRepository> registrazioni) throws Exception {
+            ObjectProvider<ClientRegistrationRepository> registrazioni, RegistroUtenti utenti) throws Exception {
         csrf(http);
         if (!login.attivo()) {
             controllaSoloLocale(indirizzo);
@@ -74,17 +74,18 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**",
                     "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**")
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
-            // La sincronizzazione del telefono, anche in lettura: dice dove carica il telefono.
-            a.requestMatchers("/api/telefono", "/api/telefono/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            // Chi è entrato nell'app: email e ruoli, solo per gli admin.
+            a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // La pagina "Salute" e la prova di Telegram (/salute, l'healthcheck, resta pubblico qui sopra).
             a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {
                 a.anyRequest().authenticated();
             }
         });
-        http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak())));
+        http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login.ruoloAdmin()))));
         // Le chiamate XHR prendono 401 (Angular manda al login), le pagine il redirect a Keycloak.
         http.exceptionHandling(e -> e
                 .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),

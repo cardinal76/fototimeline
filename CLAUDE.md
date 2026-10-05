@@ -130,6 +130,9 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   restano. Verso rclone un `Rclone` suo con timeout di pochi secondi, non
   quello del montaggio. Una voce nuova: un `Controllo` in `controlla()`, con
   una `chiave` fissa (gli avvisi la ricordano).
+- La voce `telefono` riassume tutti i telefoni (`SincronizzazioneTelefono.elenco`):
+  il pallino del telefono messo peggio, il suo nome nel messaggio, gli altri
+  nei dettagli. Una chiave sola: un telefono in più non cambia gli avvisi.
 - `AvvisiSalute` ogni `fototimeline.telegram.controllo` confronta gli stati
   con quelli in `impostazioni/avvisi-salute` e scrive su Telegram solo i
   cambi; se l'invio fallisce non salva, così riprova. Il token del bot sta
@@ -167,8 +170,9 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
   token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup`,
-  `/api/archivio/**`, tutto `/api/telefono` e `/api/salute` vogliono `fototimeline-admin`
-  (`fototimeline.login.ruolo-admin`).
+  `/api/archivio/**`, `/api/utenti` e `/api/salute` vogliono `fototimeline-admin`
+  (`fototimeline.login.ruolo-admin`); `/api/telefoni` lo controlla il
+  controller (ognuno vede il suo telefono).
 - CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
@@ -227,22 +231,49 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
   entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
 
-## Telefono (pCloud)
+## Telefoni (pCloud) e archivio di famiglia
 
-- `SincronizzazioneTelefono` (pacchetto `telefono`) copia i file nuovi da
-  pCloud (`sorgente`, per esempio `pcloud:Automatic Upload`) nella cartella
-  automatica, tutto con l'API rc (`Rclone.chiama`), non col montaggio:
-  `operations/list` (ricorsivo, solo file), `operations/copyfile`,
-  `operations/stat` (`{"item": null}` se manca), `operations/deletefile`.
-  La destinazione è la cartella automatica relativa al punto di montaggio
-  (`/cloud/telefono` → `lifetime:telefono`), senza sottocartelle (`/` → ` - `).
-- Registro `copie_telefono` (sorgente, percorso, dimensione): un file nel
-  registro non si ricopia mai. Dopo `giorniPrimaDiCancellare` si toglie da
-  pCloud solo se non è più nella cartella automatica (l'ha importato).
-- Impostazioni e ultimo giro nel documento `impostazioni/sincronizzazione-telefono`,
-  scritti con update separati. Un giro alla volta (thread `telefono`);
-  `@Scheduled` ogni `fototimeline.telefono.controllo` (PT5M) controlla se sono
-  passate `intervalloOre`. `/api/telefono/**` è da admin anche in GET.
+- `SincronizzazioneTelefono` (pacchetto `telefono`) copia i file nuovi di ogni
+  telefono (`SorgenteTelefono`, collezione `sorgenti_telefono`: nome,
+  proprietario, `sorgente` come `pcloud:Automatic Upload` o
+  `pcloud-anna:...`, orari, ultimo giro) nella cartella automatica, tutto con
+  l'API rc (`Rclone.chiama`), non col montaggio: `operations/list`
+  (ricorsivo, solo file), `operations/copyfile`, `operations/stat`
+  (`{"item": null}` se manca), `operations/deletefile`. La destinazione è la
+  cartella automatica relativa al punto di montaggio (`/cloud/telefono` →
+  `lifetime:telefono`), **piatta per tutti i telefoni** (`/` → ` - `): le
+  sottocartelle diventerebbero album.
+- Registro `copie_telefono` (chiave unica sorgente+percorso+dimensione, più
+  `idSorgente` e `proprietario`): un file nel registro non si ricopia mai, anche
+  se il telefono viene tolto e rimesso con la stessa cartella. Due telefoni non
+  possono avere la stessa cartella né una dentro l'altra (`Sorgente.sovrapposta`). Dopo
+  `giorniPrimaDiCancellare` si toglie dalla sorgente (solo le copie di quella
+  sorgente) se non è più nella cartella automatica.
+- **Di chi è un file importato**: `LavoriImportazione` passa all'importazione
+  automatica i `ProvenienzaFile` (oggi solo `SincronizzazioneTelefono.caricataDa`):
+  si cerca nel registro la copia con quella `destinazione` (la più recente) e
+  vale il proprietario attuale del telefono, o quello salvato nella copia se il
+  telefono non c'è più. Non creare sottocartelle per telefono né prefissi nel nome.
+- Un giro alla volta su un thread `telefono`: "Sincronizza ora" e lo scheduler
+  (`fototimeline.telefono.controllo`, PT5M) mettono in coda (`inCoda`); stato
+  e contatori sono per telefono. Impostazioni e giro si scrivono con update
+  separati; l'ultimo giro con `updateFirst`, così un telefono tolto non torna.
+- Migrazione (`migra`, all'avvio): il vecchio documento
+  `impostazioni/sincronizzazione-telefono` diventa il telefono `telefono`
+  ("Telefono") e si cancella; le voci del registro senza `idSorgente` lo
+  prendono. Proprietario: `fototimeline.telefono.proprietario`, o il primo admin
+  in `utenti`, o il primo admin che entra (`UtenteRegistrato`).
+- Permessi: `/api/telefoni` è aperto a chi ha fatto login; `TelefoniController`
+  fa vedere a chi non è admin solo i propri telefoni e gli lascia solo
+  "Sincronizza ora" (403 sulle modifiche, 404 sui telefoni degli altri).
+- `Foto.caricataDa` è lo username Keycloak (`UtenteCorrente.chi()`): lo
+  mettono il caricamento, "Importa cartella" (chi l'ha lanciata) e la cartella
+  automatica (il proprietario del telefono). Null per le foto di prima e sul PC.
+  Filtro `caricataDa` su foto, timeline e mappa; `GET /api/caricate-da` dà i
+  conteggi coi nomi.
+- `utenti` (`RegistroUtenti`): ogni login (`RuoliKeycloak`) e ogni `GET /api/io`
+  aggiornano username, nome, email, admin, ultimo accesso. `GET /api/utenti` è
+  da admin. Niente API admin di Keycloak.
 
 ## Foto quasi uguali
 

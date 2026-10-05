@@ -33,6 +33,8 @@ export interface Foto {
   video: boolean;
   /** Durata del video, in secondi. */
   durata?: number;
+  /** Username di chi l'ha portata (caricata, importata o dal suo telefono); vuoto per le foto di prima. */
+  caricataDa?: string;
   /** Codec del video e dell'audio ("hevc", "aac"), per i video. */
   codecVideo?: string;
   codecAudio?: string;
@@ -84,6 +86,8 @@ export interface Filtro {
   tag?: string;
   album?: string;
   preferite?: boolean;
+  /** Username: solo le foto portate da questa persona. */
+  caricataDa?: string;
   /** Codice ISO della nazione ("IT"); con regione e luogo come in /api/luoghi. */
   nazione?: string;
   regione?: string;
@@ -114,6 +118,8 @@ export interface Importazione {
 /** Chi è collegato. Con il login spento (il PC) si è admin. */
 export interface Io {
   login: boolean;
+  /** Quello che finisce in "caricata da"; vuoto con il login spento. */
+  username?: string;
   nome?: string;
   admin: boolean;
   /** Sotto quale cartella si può importare; null = ovunque (il PC). */
@@ -250,8 +256,13 @@ export interface GiroTelefono {
   messaggiErrori: string[];
 }
 
-/** Sincronizzazione del telefono (pCloud → cartella automatica), solo admin. */
+/** Un telefono della famiglia (pCloud → cartella automatica). */
 export interface StatoTelefono {
+  id: string;
+  /** "Telefono di Anna". */
+  nome: string;
+  /** Username di chi ha il telefono; vuoto solo per quello migrato, finché un admin non entra. */
+  proprietario?: string;
   attiva: boolean;
   /** Remote di rclone e cartella: "pcloud:Automatic Upload". */
   sorgente: string;
@@ -260,24 +271,51 @@ export interface StatoTelefono {
   giorniPrimaDiCancellare: number;
   /** Quanti file si copiano insieme (1–32). */
   copieInParallelo: number;
-  disponibile: boolean;
-  /** Perché non si può attivare, se non disponibile. */
-  motivo?: string;
-  /** Dove finiscono le copie: "lifetime:telefono". */
-  destinazione?: string;
+  /** Un giro in coda o in corso. */
   inCorso: boolean;
+  /** In coda: aspetta che finisca il giro di un altro telefono. */
+  inCoda: boolean;
   ultimoGiro?: GiroTelefono;
   prossimoGiroIl?: string;
   /** I contatori del giro che sta girando (esito ancora vuoto). */
   giroInCorso?: GiroTelefono;
 }
 
+/** I telefoni visibili (l'admin tutti, gli altri il proprio) e quello che vale per tutti. */
+export interface ElencoTelefoni {
+  disponibile: boolean;
+  /** Perché qui la sincronizzazione non può girare, se non disponibile. */
+  motivo?: string;
+  /** Dove finiscono le copie: "lifetime:telefono". */
+  destinazione?: string;
+  telefoni: StatoTelefono[];
+}
+
 export interface ModificaTelefono {
+  nome: string;
+  proprietario: string;
   attiva: boolean;
   sorgente: string;
   intervalloOre: number;
   giorniPrimaDiCancellare: number;
   copieInParallelo: number;
+}
+
+/** Un utente entrato almeno una volta (solo per gli admin). */
+export interface Utente {
+  username: string;
+  nome: string;
+  email?: string;
+  primoAccesso: string;
+  ultimoAccesso: string;
+  admin: boolean;
+}
+
+/** Una voce del filtro "Caricate da". */
+export interface CaricateDa {
+  username: string;
+  nome: string;
+  conteggio: number;
 }
 
 /** Una foto come la vede chi ha un link di condivisione: niente nome del file, percorso, tag. */

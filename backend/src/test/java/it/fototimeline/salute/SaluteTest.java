@@ -52,10 +52,10 @@ import it.fototimeline.cloud.Rclone;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
 import it.fototimeline.service.LavoriImportazione;
-import it.fototimeline.telefono.ImpostazioniTelefono;
-import it.fototimeline.telefono.ImpostazioniTelefono.Esito;
-import it.fototimeline.telefono.ImpostazioniTelefono.Giro;
 import it.fototimeline.telefono.SincronizzazioneTelefono;
+import it.fototimeline.telefono.SorgenteTelefono;
+import it.fototimeline.telefono.SorgenteTelefono.Esito;
+import it.fototimeline.telefono.SorgenteTelefono.Giro;
 
 /** Su MongoDB embedded, con rclone e Telegram finti. */
 @SpringBootTest(properties = "de.flapdoodle.mongodb.embedded.version=7.0.14")
@@ -98,6 +98,7 @@ class SaluteTest {
     void prepara() throws IOException {
         mongo.remove(Query.query(Criteria.where("_id").in("sincronizzazione-telefono", "backup-metadati",
                 StatiAvvisati.ID)), "impostazioni");
+        mongo.remove(new Query(), SorgenteTelefono.class);
         if (Files.isDirectory(backup.cartella())) {
             try (Stream<Path> s = Files.list(backup.cartella())) {
                 for (Path p : s.toList()) {
@@ -118,9 +119,20 @@ class SaluteTest {
         esecutore.shutdownNow();
     }
 
+    /** Un telefono nel database, come lo salva la pagina "Telefoni". */
+    private void telefono(String id, String nome, boolean attiva, String sorgente, int intervalloOre, Giro giro) {
+        mongo.save(new SorgenteTelefono(id, nome, id, attiva, sorgente, intervalloOre, 7, 6,
+                adesso.minus(Duration.ofDays(30)), giro));
+    }
+
+    private Giro giroOk(Duration fa) {
+        return new Giro(adesso.minus(fa), adesso.minus(fa), Esito.OK, "Fatto", 3, 3, 0, 0, 0, List.of());
+    }
+
     @Test
     void tuttoAPosto() throws IOException {
         backup.esegui();
+        telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
         rclone.inAttesa = List.of("IMG_1.jpg", "VID_2.mp4", "note.txt");
 
         Salute.Rapporto r = salute.controlla();
@@ -137,6 +149,8 @@ class SaluteTest {
         assertThat(voce(r, "spazio-pcloud").stato()).isEqualTo(StatoSalute.OK);
         assertThat(voce(r, "importazione").dettagli()).anySatisfy(d -> assertThat(d).startsWith("2 file in attesa"));
         assertThat(voce(r, "archivio").stato()).isEqualTo(StatoSalute.OK);
+        assertThat(voce(r, "telefono").stato()).isEqualTo(StatoSalute.OK);
+        assertThat(voce(r, "telefono").messaggio()).contains("Telefono di Marco").contains("3 copiati");
         assertThat(rclone.chiamate).contains("config/listremotes");
         assertThat(rclone.parametri.get("operations/list")).containsEntry("remote", "telefono")
                 .containsEntry("fs", "lifetime:");
@@ -167,28 +181,42 @@ class SaluteTest {
     }
 
     @Test
+    void senzaTelefoniNienteVoceTelefonoSulPc() {
+        // Qui (nel test) la sincronizzazione non può girare: senza telefoni usati la voce non c'è.
+        telefono("anna", "Telefono di Anna", false, "pcloud-anna:Automatic Upload", 6, null);
+        assertThat(salute.controlla().voci()).extracting(VoceSalute::chiave).doesNotContain("telefono");
+    }
+
+    @Test
     void telefonoConIlTokenScadutoERossoELoDice() {
         Giro giro = new Giro(adesso.minus(Duration.ofHours(1)), adesso, Esito.ERRORE,
                 "operations/list: couldn't list files: Invalid 'access_token' (2094)", 0, 0, 0, 0, 0, List.of());
-        mongo.save(new ImpostazioniTelefono("sincronizzazione-telefono", true, "pcloud:Automatic Upload", 6, 7, 6,
-                giro));
+        telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
+        telefono("anna", "Telefono di Anna", true, "pcloud-anna:Automatic Upload", 6, giro);
         VoceSalute v = voce(salute.controlla(), "telefono");
         assertThat(v.stato()).isEqualTo(StatoSalute.ERRORE);
-        assertThat(v.messaggio()).contains("token").contains("2094");
+        assertThat(v.messaggio()).contains("Telefono di Anna").contains("token").contains("2094")
+                .doesNotContain("Telefono di Marco");
+        assertThat(v.dettagli()).anySatisfy(d -> assertThat(d).startsWith("Telefono di Marco: Ultimo giro"));
     }
 
     @Test
     void telefonoAttivoCheNonGiraERosso() {
-        Giro giro = new Giro(adesso.minus(Duration.ofHours(13)), adesso.minus(Duration.ofHours(13)), Esito.OK,
-                "Fatto", 3, 3, 0, 0, 0, List.of());
-        mongo.save(new ImpostazioniTelefono("sincronizzazione-telefono", true, "pcloud:Automatic Upload", 6, 7, 6,
-                giro));
+        telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
+        telefono("anna", "Telefono di Anna", true, "pcloud-anna:Automatic Upload", 6, giroOk(Duration.ofHours(13)));
         VoceSalute v = voce(salute.controlla(), "telefono");
         assertThat(v.stato()).isEqualTo(StatoSalute.ERRORE);
-        assertThat(v.messaggio()).contains("Non gira da più di 12 ore");
+        assertThat(v.messaggio()).contains("Telefono di Anna").contains("Non gira da più di 12 ore")
+                .doesNotContain("Telefono di Marco");
 
-        mongo.save(new ImpostazioniTelefono("sincronizzazione-telefono", true, "pcloud:Automatic Upload", 12, 7, 6,
-                giro));
+        // Ogni 12 ore, 13 ore fa va bene: tutti e due a posto.
+        telefono("anna", "Telefono di Anna", true, "pcloud-anna:Automatic Upload", 12, giroOk(Duration.ofHours(13)));
+        v = voce(salute.controlla(), "telefono");
+        assertThat(v.stato()).isEqualTo(StatoSalute.OK);
+        assertThat(v.messaggio()).isEqualTo("2 telefoni a posto");
+
+        // Spento (solo a mano) non è "fermo", anche se è vecchio.
+        telefono("anna", "Telefono di Anna", false, "pcloud-anna:Automatic Upload", 6, giroOk(Duration.ofDays(10)));
         assertThat(voce(salute.controlla(), "telefono").stato()).isEqualTo(StatoSalute.OK);
     }
 

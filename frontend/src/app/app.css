@@ -409,6 +409,19 @@ progress {
   justify-content: flex-end;
   gap: 0.5rem;
 }
+.dialogo.telefoni {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.elenco-telefoni {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.elenco-telefoni .riga {
+  display: flex;
+  justify-content: space-between;
+}
 .rilascio {
   position: fixed;
   inset: 0.75rem;
