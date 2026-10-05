@@ -194,20 +194,29 @@ un'importazione); alla fine la timeline si ricarica.
   un'altra cartella non diventa una seconda scheda (il file resta lì).
 - I file illeggibili finiscono tra gli errori della barra, senza fermare il resto.
 
-#### Da zip su un altro cloud (pCloud)
+#### Da pCloud, in quattro passi
 
-`deploy/zip-in-archivio.sh` apre uno zip alla volta, mette foto e video in
-`AAAA/MM/GG` (EXIF, poi data del video, poi data del file nello zip) e li copia
-in `lifetime:FotoTimeline`; poi si indicizza. Riparte da dove era arrivato
-(`zip-fatti.txt`). Un file diverso con lo stesso nome non sovrascrive: il
-vecchio va in `FotoTimeline-sovrascritte/`, da importare dall'app alla fine.
+`deploy/foto-da-pcloud.sh` gira sul PC (WSL), legge pCloud Drive da P: e lavora
+in fasi separate, ognuna da rilanciare finché non finisce bene:
+
+| Fase | Cosa fa |
+|---|---|
+| `raccogli` | cerca foto e video sotto `RADICE`, in tutte le sottocartelle e dentro gli zip, e li mette in `~/foto-da-pcloud/ordinate/AAAA/MM/GG` (EXIF, poi data del video, poi data del file). Le copie identiche entrano una volta. |
+| `carica` | copia `ordinate/` in `lifetime:FotoTimeline` e controlla che ci sia tutto. Poi nell'app: **Indicizza archivio**. |
+| `archivia` | su pCloud, in `ARCHIVIO/AAAA/AAAA-MM.zip`: uno zip per mese, controllato dopo la copia. |
+| `pulisci` | solo dopo `GIORNI` (7) giorni da carica e archivia, e dopo aver scritto `CANCELLA`: toglie da pCloud gli originali copiati e le cartelle rimaste vuote. |
+
+Gli zip con dentro anche altro (documenti, ...) e i file non letti restano su
+pCloud, elencati in `~/foto-da-pcloud/da-controllare.txt`. `stato` dice a che
+punto è. Sul PC serve spazio quanto tutte le foto, finché non si pulisce.
 
 ```bash
-sudo apt install -y unzip libimage-exiftool-perl
-# su server2, con un remote "pcloud:" in ~/trasferimento/rclone.conf (rclone nel container):
-nohup deploy/zip-in-archivio.sh 'pcloud:Cartella degli zip' > ~/trasferimento/log.txt 2>&1 &
-# oppure sul PC (WSL), da pCloud Drive su P: con il proprio rclone:
-RCLONE=rclone deploy/zip-in-archivio.sh '/mnt/p/Cartella degli zip'
+sudo apt install -y unzip zip libimage-exiftool-perl rclone   # rclone con il remote lifetime:
+sudo mount -t drvfs P: /mnt/p
+RADICE='/mnt/p/Foto' ARCHIVIO='/mnt/p/Archivio foto' deploy/foto-da-pcloud.sh raccogli
+deploy/foto-da-pcloud.sh carica
+deploy/foto-da-pcloud.sh archivia
+deploy/foto-da-pcloud.sh pulisci      # dopo 7 giorni
 ```
 
 I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
