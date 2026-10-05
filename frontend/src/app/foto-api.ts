@@ -5,6 +5,7 @@ import { Observable } from 'rxjs';
 import {
   Caricamento,
   Cartella,
+  Condivisione,
   CopiaBackup,
   Filtro,
   Foto,
@@ -12,12 +13,16 @@ import {
   LavoroImportazione,
   Modifica,
   ModificaTelefono,
+  NuovaCondivisione,
   Operazione,
   PaginaFoto,
+  PaginaGruppi,
   PuntoMappa,
   Ricordo,
+  Salute,
   StatoCloud,
   StatoConversioni,
+  StatoImpronte,
   StatoTelefono,
   VoceMese,
 } from './modelli';
@@ -139,6 +144,44 @@ export class FotoApi {
     return this.http.post<StatoTelefono>('/api/telefono/sincronizza', {});
   }
 
+  /** Gruppi di foto quasi uguali, dal più numeroso. */
+  quasiUguali(pagina: number, dimensione = 20): Observable<PaginaGruppi> {
+    return this.http.get<PaginaGruppi>('/api/quasi-uguali', { params: { pagina, dimensione } });
+  }
+
+  /** Elimina le foto "togli" di un gruppo; quelle tenute (se più d'una) non si propongono più insieme. */
+  risolvi(tieni: string[], togli: string[]): Observable<{ eliminate: number }> {
+    return this.http.post<{ eliminate: number }>('/api/quasi-uguali/risolvi', { tieni, togli });
+  }
+
+  /** "Non sono doppioni". */
+  ignora(ids: string[]): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/ignora', { ids });
+  }
+
+  statoImpronte(): Observable<StatoImpronte> {
+    return this.http.get<StatoImpronte>('/api/quasi-uguali/calcola');
+  }
+
+  /** "Calcola impronte" per le foto che non l'hanno (solo admin). */
+  calcolaImpronte(): Observable<StatoImpronte> {
+    return this.http.post<StatoImpronte>('/api/quasi-uguali/calcola', {});
+  }
+
+  annullaImpronte(): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/calcola/annulla', {});
+  }
+
+  /** La pagina "Salute" (solo admin). */
+  salute(): Observable<Salute> {
+    return this.http.get<Salute>('/api/salute');
+  }
+
+  /** Un messaggio di prova su Telegram: 409 se non è configurato. */
+  provaTelegram(): Observable<void> {
+    return this.http.post<void>('/api/salute/prova', {});
+  }
+
   modifica(id: string, modifica: Modifica): Observable<Foto> {
     return this.http.put<Foto>(`/api/foto/${id}`, modifica);
   }
@@ -149,6 +192,24 @@ export class FotoApi {
 
   multipla(ids: string[], operazione: Operazione, valore?: string): Observable<{ modificate: number }> {
     return this.http.post<{ modificate: number }>('/api/foto/multiple', { ids, operazione, valore });
+  }
+
+  /** Link pubblici: si creano, si elencano (i propri; l'admin tutti) e si revocano. */
+  creaCondivisione(nuova: NuovaCondivisione): Observable<Condivisione> {
+    return this.http.post<Condivisione>('/api/condivisioni', nuova);
+  }
+
+  condivisioni(): Observable<Condivisione[]> {
+    return this.http.get<Condivisione[]>('/api/condivisioni');
+  }
+
+  revocaCondivisione(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/condivisioni/${id}`);
+  }
+
+  /** L'indirizzo da mandare: la pagina pubblica, che non chiede il login. */
+  static linkCondivisione(c: Condivisione): string {
+    return `${location.origin}/c/${c.token}`;
   }
 
   static miniatura(f: Foto): string {

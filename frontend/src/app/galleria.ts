@@ -13,6 +13,7 @@ import {
   LavoroImportazione,
   Modifica,
   Operazione,
+  Salute,
   StatoCloud,
   StatoConversioni,
   VoceMese,
@@ -56,6 +57,8 @@ export class Galleria {
   /** Ultimo backup dei metadati (solo per gli admin). */
   readonly ultimoBackup = signal<CopiaBackup | null>(null);
   readonly backupInCorso = signal(false);
+  /** L'ultimo controllo della pagina "Salute" (solo per gli admin), per il pallino nella barra. */
+  readonly salute = signal<Salute | null>(null);
   /** Importazione da seguire con la barra; null quando non ce n'è una da mostrare. */
   readonly importazione = signal<LavoroImportazione | null>(null);
   /** Coda delle versioni compatibili dei video (solo admin); null quando non c'è niente da mostrare. */
@@ -111,6 +114,7 @@ export class Galleria {
       if (io.admin) {
         this.aggiornaBackup();
         this.seguiConversioni();
+        this.seguiSalute();
       }
     });
     this.aggiornaCloud();
@@ -211,6 +215,22 @@ export class Galleria {
       },
       error: () => (this.conversioniTimer = setTimeout(() => this.seguiConversioni(), 60000)),
     });
+  }
+
+  /** Il pallino della salute: subito e poi ogni 5 minuti. */
+  private seguiSalute(): void {
+    this.aggiornaSalute();
+    setInterval(() => this.aggiornaSalute(), 5 * 60_000);
+  }
+
+  aggiornaSalute(): Promise<Salute | null> {
+    return firstValueFrom(this.api.salute()).then(
+      (s) => {
+        this.salute.set(s);
+        return s;
+      },
+      () => null,
+    );
   }
 
   aggiornaBackup(): void {

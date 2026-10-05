@@ -80,6 +80,11 @@ services:
       RCLONE_REMOTO: ${RCLONE_REMOTO:-lifetime:}
       RCLONE_PUNTO_MONTAGGIO: /cloud
       RCLONE_MONTA_ALL_AVVIO: ${RCLONE_MONTA_ALL_AVVIO:-false}
+      # Avvisi su Telegram ai cambi della pagina "Salute"; vuoti = spenti. Il dominio fa il link nei messaggi.
+      FOTOTIMELINE_TELEGRAM_TOKEN: ${FOTOTIMELINE_TELEGRAM_TOKEN:-}
+      FOTOTIMELINE_TELEGRAM_CHAT: ${FOTOTIMELINE_TELEGRAM_CHAT:-}
+      FOTOTIMELINE_TELEGRAM_ATTENZIONE: ${FOTOTIMELINE_TELEGRAM_ATTENZIONE:-false}
+      FOTOTIMELINE_DOMINIO: ${FOTOTIMELINE_DOMINIO:?}
     volumes:
       # Miniature sul disco di server2: dal cloud la timeline sarebbe lenta.
       - miniature:/miniature

@@ -68,6 +68,11 @@ public class Foto {
     @Indexed(sparse = true)
     private StatoConversione conversione;
     private String erroreConversione;
+    /**
+     * Impronta percettiva (pHash a 64 bit) della miniatura, per trovare le foto
+     * quasi uguali; null per i video e finché non è calcolata.
+     */
+    private Long impronta;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -152,4 +157,7 @@ public class Foto {
 
     public String getErroreConversione() { return erroreConversione; }
     public void setErroreConversione(String erroreConversione) { this.erroreConversione = erroreConversione; }
+
+    public Long getImpronta() { return impronta; }
+    public void setImpronta(Long impronta) { this.impronta = impronta; }
 }
