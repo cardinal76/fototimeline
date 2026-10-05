@@ -54,6 +54,9 @@ GIORNI="${DATI_GIORNI:-${GIORNI:-7}}"
 ESCLUDI="${ESCLUDI:-}"
 PCLOUD="${DATI_PCLOUD:-${PCLOUD:-}}"
 RCLONE="${RCLONE:-rclone}"
+# File scaricati in parallelo da pCloud: con tante foto piccole il limite è l'attesa per
+# file, non la banda (8 -> 24 ha portato una fibra da 8 a 29 MB/s).
+TRASFERIMENTI="${TRASFERIMENTI:-24}"
 export TZ="${TZ:-Europe/Rome}"
 
 ORDINATE="$LAVORO/ordinate"
@@ -223,7 +226,7 @@ scarica() {
     mkdir -p "$SPECCHIO"
     echo "Scarico da $PCLOUD in $SPECCHIO (si può interrompere e rilanciare)…"
     rc copy "$PCLOUD" "$SPECCHIO" --filter-from "$filtri" --ignore-case \
-        --transfers 8 --checkers 16 --stats-one-line --stats 30s --stats-log-level NOTICE
+        --transfers "$TRASFERIMENTI" --checkers $((TRASFERIMENTI + 8)) --stats-one-line --stats 30s --stats-log-level NOTICE
     date +%s > "$LAVORO/fase-scarica.ok"
     echo "Scaricato: $(du -sh "$SPECCHIO" | cut -f1). Prossimo passo: $0 raccogli"
 }
