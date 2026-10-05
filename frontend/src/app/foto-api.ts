@@ -67,6 +67,11 @@ export class FotoApi {
     return this.http.post<LavoroImportazione>('/api/importa', { cartella, albumDaCartella, sposta });
   }
 
+  /** "Indicizza archivio": dà una scheda alle foto già nell'archivio che l'app non conosce (solo admin). */
+  indicizza(): Observable<LavoroImportazione> {
+    return this.http.post<LavoroImportazione>('/api/archivio/indicizza', {});
+  }
+
   /** L'importazione in corso o l'ultima finita; null se non ce ne sono state. */
   importazioneCorrente(): Observable<LavoroImportazione | null> {
     return this.http.get<LavoroImportazione | null>('/api/importazioni/corrente');

@@ -175,6 +175,25 @@ l'app guarda in quella cartella di LifetimeCloud e, se ci sono foto o video
 Basta far caricare all'app di LifetimeCloud sul telefono le foto in quella
 cartella.
 
+### Foto già ordinate nel cloud
+
+Le foto caricate su LifetimeCloud da fuori (per esempio con uno script),
+direttamente in `FotoTimeline/AAAA/MM/GG/`, l'app non le conosce finché non
+le si indicizza: in alto a destra, da admin e col cloud montato, **Indicizza
+archivio** (`POST /api/archivio/indicizza`). Percorre tutto l'archivio,
+saltando le cartelle col punto (`.backup`, `.miniature`), e a ogni file senza
+scheda dà la scheda e la miniatura **senza copiarlo**: resta dov'è. Gira in
+sottofondo come un'importazione (stessa barra, si può annullare, mai insieme a
+un'importazione); alla fine la timeline si ricarica.
+
+- La data viene dall'EXIF; se manca, dalla cartella `AAAA/MM/GG` in cui sta il
+  file (origine "cartella"), altrimenti dalla data di modifica del file.
+- Se la data dice un altro giorno, il file si sposta nella cartella giusta.
+- I file che hanno già una scheda si saltano senza scaricarli: rifarla dopo
+  ogni caricamento costa poco. Una copia identica di una foto che sta già in
+  un'altra cartella non diventa una seconda scheda (il file resta lì).
+- I file illeggibili finiscono tra gli errori della barra, senza fermare il resto.
+
 ## Comandi utili su server2
 
 ```bash

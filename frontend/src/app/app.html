@@ -66,6 +66,17 @@
       >
         {{ galleria.backupInCorso() ? 'Backup…' : 'Backup' }}
       </button>
+      @if (galleria.archivioDisponibile()) {
+        <button
+          type="button"
+          class="link"
+          [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+          title="Aggiunge le foto messe nell'archivio da fuori (per esempio caricate nel cloud)"
+          (click)="indicizza()"
+        >
+          Indicizza archivio
+        </button>
+      }
     }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
@@ -226,12 +237,19 @@
 @if (galleria.importazione(); as l) {
   <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
     <div class="riga">
+      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : 'Importazione';
       <b>
         @switch (l.stato) {
-          @case ('IN_CORSO') { {{ l.origine === 'AUTOMATICA' ? 'Importazione automatica' : 'Importo' }} da {{ l.cartella }}… }
-          @case ('FINITA') { Importazione finita }
-          @case ('ANNULLATA') { Importazione annullata }
-          @case ('FALLITA') { Importazione non riuscita }
+          @case ('IN_CORSO') {
+            @switch (l.origine) {
+              @case ('INDICIZZAZIONE') { Indicizzazione dell'archivio… }
+              @case ('AUTOMATICA') { Importazione automatica da {{ l.cartella }}… }
+              @default { Importo da {{ l.cartella }}… }
+            }
+          }
+          @case ('FINITA') { {{ lavoro }} finita }
+          @case ('ANNULLATA') { {{ lavoro }} annullata }
+          @case ('FALLITA') { {{ lavoro }} non riuscita }
         }
       </b>
       @if (l.stato === 'IN_CORSO') {

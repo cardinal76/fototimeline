@@ -131,6 +131,15 @@ public class FotoController {
                 .body(lavori.avvia(cartella, r.albumDaCartella(), r.sposta(), LavoriImportazione.Origine.MANUALE));
     }
 
+    /**
+     * "Indicizza archivio" (solo admin, ConfigurazioneSicurezza): in sottofondo
+     * come un'importazione, con lo stesso stato e la stessa barra.
+     */
+    @PostMapping("/archivio/indicizza")
+    public ResponseEntity<StatoLavoro> indicizza() {
+        return ResponseEntity.accepted().body(lavori.avviaIndicizzazione());
+    }
+
     @GetMapping("/importazioni/corrente")
     public ResponseEntity<StatoLavoro> importazioneCorrente() {
         return lavori.corrente().map(ResponseEntity::ok).orElse(ResponseEntity.noContent().build());

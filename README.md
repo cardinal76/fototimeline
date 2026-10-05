@@ -43,6 +43,10 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
   importare (sottocartelle comprese); volendo, il nome della sottocartella
   diventa l'album, e con "sposta" gli originali vengono tolti dall'origine.
   Gira in sottofondo con la barra di avanzamento e si può annullare.
+- **Indicizza archivio** (admin): le foto messe a mano o da uno script nelle
+  cartelle `AAAA/MM/GG` dell'archivio entrano nella timeline senza essere
+  copiate; data dall'EXIF o, se manca, dalla cartella. In sottofondo, con la
+  stessa barra delle importazioni.
 - **Importazione automatica**: una cartella (per esempio quella dove il
   telefono carica nel cloud) che ogni 15 minuti si svuota nell'archivio.
 - **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
@@ -152,6 +156,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/backup`                | Backup dei metadati presenti                               |
 | POST   | `/api/backup`                | Fa subito un backup (ruolo `fototimeline-admin`)           |
 | POST   | `/api/cloud/monta`, `/smonta`| Monta o smonta il cloud (ruolo `fototimeline-admin`)       |
+| POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |

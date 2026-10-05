@@ -1,4 +1,4 @@
-export type OrigineData = 'EXIF' | 'FILE' | 'CARICAMENTO' | 'MANUALE';
+export type OrigineData = 'EXIF' | 'FILE' | 'CARTELLA' | 'CARICAMENTO' | 'MANUALE';
 
 export interface Foto {
   id: string;
@@ -82,11 +82,11 @@ export interface Io {
 
 export type StatoImportazione = 'IN_CORSO' | 'FINITA' | 'ANNULLATA' | 'FALLITA';
 
-/** Importazione in sottofondo, manuale o dalla cartella automatica. */
+/** Lavoro in sottofondo: importazione (manuale o dalla cartella automatica) o "Indicizza archivio". */
 export interface LavoroImportazione {
   id: string;
   cartella: string;
-  origine: 'MANUALE' | 'AUTOMATICA';
+  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE';
   stato: StatoImportazione;
   iniziatoIl: string;
   finitoIl?: string;

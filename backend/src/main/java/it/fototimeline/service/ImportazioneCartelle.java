@@ -1,8 +1,11 @@
 package it.fototimeline.service;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -90,11 +93,7 @@ public class ImportazioneCartelle {
                     .toList();
         }
 
-        int importate = 0;
-        int duplicate = 0;
-        int errori = 0;
-        int rimossi = 0;
-        List<String> messaggi = new ArrayList<>();
+        Riepilogo riepilogo = new Riepilogo();
         avanzamento.inizio(file.size());
         for (Path p : file) {
             if (avanzamento.annullata()) {
@@ -110,21 +109,12 @@ public class ImportazioneCartelle {
             } catch (IOException e) {
                 esito = new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, e.getMessage());
             }
-            switch (esito.esito()) {
-                case CARICATA -> importate++;
-                case DUPLICATA -> duplicate++;
-                case ERRORE -> {
-                    errori++;
-                    if (messaggi.size() < MAX_MESSAGGI) {
-                        messaggi.add(relativo(p) + ": " + esito.messaggio());
-                    }
-                }
-            }
+            riepilogo.conta(relativo(p), esito);
             boolean rimossa = false;
             if (sposta && esito.esito() != Risultati.Esito.ERRORE && inArchivio(esito.foto())) {
                 try {
                     Files.delete(p);
-                    rimossi++;
+                    riepilogo.rimossi++;
                     rimossa = true;
                 } catch (IOException e) {
                     log.warn("Importata ma non riesco a togliere {}: {}", p, e.getMessage());
@@ -135,7 +125,85 @@ public class ImportazioneCartelle {
         if (sposta) {
             pulisciSottocartelleVuote(base);
         }
-        return new Importazione(file.size(), importate, duplicate, errori, rimossi, messaggi);
+        return riepilogo.importazione(file.size());
+    }
+
+    /**
+     * "Indicizza archivio": dà una scheda ai file che stanno già nell'archivio
+     * ma che l'app non conosce (caricati nel cloud da fuori), senza copiarli
+     * ({@link FotoService#indicizza}). Le cartelle e i file che iniziano col
+     * punto ({@code .backup}, {@code .miniature}) si saltano.
+     */
+    public Importazione indicizza(Avanzamento avanzamento) throws IOException {
+        archivio.verificaDisponibile();
+        Path base = archivio.radice();
+        List<Path> file = new ArrayList<>();
+        if (Files.isDirectory(base)) {
+            Files.walkFileTree(base, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path cartella, BasicFileAttributes attributi) {
+                    boolean nascosta = !cartella.equals(base) && cartella.getFileName().toString().startsWith(".");
+                    return nascosta || cartella.equals(archivio.cartellaMiniature())
+                            ? FileVisitResult.SKIP_SUBTREE
+                            : FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path p, BasicFileAttributes attributi) {
+                    String nome = p.getFileName().toString();
+                    if (attributi.isRegularFile() && !nome.startsWith(".")
+                            && FotoService.TIPI.containsKey(FotoService.estensione(nome))) {
+                        file.add(p);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path p, IOException e) {
+                    log.warn("Indicizzazione: non riesco a leggere {}: {}", p, e.getMessage());
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+        file.sort(null);
+
+        Riepilogo riepilogo = new Riepilogo();
+        avanzamento.inizio(file.size());
+        for (Path p : file) {
+            if (avanzamento.annullata()) {
+                break;
+            }
+            Caricamento esito = fotoService.indicizza(p);
+            riepilogo.conta(relativo(p), esito);
+            avanzamento.fatta(p, esito, false);
+        }
+        return riepilogo.importazione(file.size());
+    }
+
+    /** I conti di un'importazione o di un'indicizzazione, file per file. */
+    private static final class Riepilogo {
+        private int importate;
+        private int duplicate;
+        private int errori;
+        private int rimossi;
+        private final List<String> messaggi = new ArrayList<>();
+
+        void conta(String file, Caricamento esito) {
+            switch (esito.esito()) {
+                case CARICATA -> importate++;
+                case DUPLICATA -> duplicate++;
+                case ERRORE -> {
+                    errori++;
+                    if (messaggi.size() < MAX_MESSAGGI) {
+                        messaggi.add(file + ": " + esito.messaggio());
+                    }
+                }
+            }
+        }
+
+        Importazione importazione(int trovate) {
+            return new Importazione(trovate, importate, duplicate, errori, rimossi, messaggi);
+        }
     }
 
     /** Le sottocartelle di una cartella consentita, per il navigatore. */

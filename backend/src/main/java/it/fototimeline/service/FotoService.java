@@ -125,16 +125,132 @@ public class FotoService {
      */
     public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album) {
         archivio.verificaDisponibile();
+        Letto letto;
+        try {
+            letto = leggi(nome, file);
+        } catch (Scartato s) {
+            return s.esito;
+        }
+        Foto foto = letto.foto();
+        foto.setAlbum(pulisciAlbum(album));
+        if (ultimaModifica != null) {
+            data(foto, letto.data(), LocalDateTime.ofInstant(ultimaModifica, clock.getZone()), OrigineData.FILE);
+        } else {
+            data(foto, letto.data(), LocalDateTime.now(clock), OrigineData.CARICAMENTO);
+        }
+
+        try {
+            foto.setPercorso(archivio.salvaOriginale(
+                    nome, foto.getId(), letto.estensione(), foto.getScattataIl().toLocalDate(), file));
+            anteprime(letto, file);
+            return new Caricamento(nome, Esito.CARICATA, repository.insert(foto), null);
+        } catch (DuplicateKeyException e) {
+            // Stesso file caricato in parallelo: ha vinto l'altro.
+            archivio.elimina(foto.getId(), foto.getPercorso());
+            return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
+                    "Già in archivio");
+        } catch (Exception e) {
+            log.warn("Importazione di {} fallita", nome, e);
+            archivio.elimina(foto.getId(), foto.getPercorso());
+            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+        } finally {
+            eliminaSilenzioso(letto.anteprima());
+        }
+    }
+
+    /**
+     * "Indicizza archivio": dà la scheda a un file che sta già nell'archivio
+     * ma che l'app non conosce (messo nel cloud da fuori). Stessa lettura di
+     * {@link #importa(String, Path, Instant, String)}, ma il file non si copia:
+     * resta dov'è, salvo spostarlo nella cartella del suo giorno se la data
+     * letta dice un altro giorno. Senza data nei metadati vale la cartella
+     * AAAA/MM/GG in cui si trova, altrimenti la data di modifica del file.
+     */
+    public Caricamento indicizza(Path file) {
+        archivio.verificaDisponibile();
+        String nome = file.getFileName().toString();
+        String percorso;
+        try {
+            percorso = archivio.percorso(file);
+        } catch (IllegalArgumentException e) {
+            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+        }
+        // Prima del resto: dal cloud calcolare l'hash vuol dire scaricare il file.
+        if (repository.existsByPercorso(percorso)) {
+            return new Caricamento(nome, Esito.DUPLICATA, null, "Già in archivio");
+        }
+        Letto letto;
+        try {
+            letto = leggi(nome, file);
+        } catch (Scartato s) {
+            // Anche una copia identica di una foto che sta altrove: il file resta dov'è, senza scheda.
+            return s.esito;
+        }
+        Foto foto = letto.foto();
+        foto.setPercorso(percorso);
+        try {
+            LocalDateTime modifica = LocalDateTime.ofInstant(Files.getLastModifiedTime(file).toInstant(), clock.getZone());
+            LocalDate giorno = ArchivioFile.giornoDellaCartella(percorso);
+            if (giorno != null) {
+                data(foto, letto.data(), giorno.atTime(modifica.toLocalTime()), OrigineData.CARTELLA);
+            } else {
+                data(foto, letto.data(), modifica, OrigineData.FILE);
+            }
+            anteprime(letto, file);
+            foto = repository.insert(foto);
+        } catch (DuplicateKeyException e) {
+            archivio.elimina(foto.getId(), null);
+            return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
+                    "Già in archivio");
+        } catch (Exception e) {
+            log.warn("Indicizzazione di {} fallita", percorso, e);
+            archivio.elimina(foto.getId(), null);
+            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+        } finally {
+            eliminaSilenzioso(letto.anteprima());
+        }
+        // Dopo l'inserimento: se lo spostamento non riesce la scheda è giusta lo stesso, e il riordino ci riprova.
+        try {
+            if (mettiAlSuoPosto(foto)) {
+                foto = repository.save(foto);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Indicizzata ma non riesco a spostare {}: {}", percorso, e.getMessage());
+        }
+        return new Caricamento(nome, Esito.CARICATA, foto, null);
+    }
+
+    /** Quello che si sa di un file dopo averlo letto, prima di metterlo in archivio. */
+    private record Letto(Foto foto, Genere genere, String estensione, Path anteprima, LocalDateTime data) {
+    }
+
+    /** Il file non entra: l'esito da restituire (formato, duplicato, illeggibile). */
+    private static final class Scartato extends Exception {
+        private final transient Caricamento esito;
+
+        Scartato(Caricamento esito) {
+            super(esito.messaggio(), null, false, false);
+            this.esito = esito;
+        }
+    }
+
+    /**
+     * Legge hash, dimensioni e metadati di un file e prepara la scheda (senza
+     * data e percorso, che dipendono da chi la chiama). {@code anteprima} è il
+     * JPEG da cui fare la miniatura (e per gli HEIC la vista), null per le foto
+     * normali; {@code data} quella dei metadati, se c'è.
+     */
+    private Letto leggi(String nome, Path file) throws Scartato {
         String estensione = estensione(nome);
         Genere genere = genere(estensione);
         if (genere == null) {
-            return new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato");
+            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato"));
         }
         if (genere == Genere.HEIC && !media.heicDisponibile()) {
-            return new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server");
+            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server"));
         }
         if (genere == Genere.VIDEO && !media.videoDisponibile()) {
-            return new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server");
+            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server"));
         }
 
         String hash;
@@ -144,11 +260,11 @@ public class FotoService {
             dimensione = Files.size(file);
         } catch (IOException e) {
             log.warn("{} illeggibile: {}", nome, e.toString());
-            return new Caricamento(nome, Esito.ERRORE, null, "File illeggibile (" + e.getMessage() + ")");
+            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "File illeggibile (" + e.getMessage() + ")"));
         }
         Optional<Foto> esistente = repository.findByHash(hash);
         if (esistente.isPresent()) {
-            return new Caricamento(nome, Esito.DUPLICATA, esistente.get(), "Già in archivio");
+            throw new Scartato(new Caricamento(nome, Esito.DUPLICATA, esistente.get(), "Già in archivio"));
         }
 
         Foto foto = new Foto();
@@ -158,10 +274,8 @@ public class FotoService {
         foto.setDimensione(dimensione);
         foto.setHash(hash);
         foto.setCaricataIl(clock.instant());
-        foto.setAlbum(pulisciAlbum(album));
         foto.setVideo(genere == Genere.VIDEO);
 
-        // Il JPEG da cui fare la miniatura (e per gli HEIC la vista): per le foto normali è il file stesso.
         Path anteprima = null;
         try {
             LocalDateTime data;
@@ -199,42 +313,33 @@ public class FotoService {
                 }
                 default -> throw new IllegalStateException(genere.name());
             }
-            if (data != null) {
-                foto.setScattataIl(data);
-                foto.setOrigineData(OrigineData.EXIF);
-            } else if (ultimaModifica != null) {
-                foto.setScattataIl(LocalDateTime.ofInstant(ultimaModifica, clock.getZone()));
-                foto.setOrigineData(OrigineData.FILE);
-            } else {
-                foto.setScattataIl(LocalDateTime.now(clock));
-                foto.setOrigineData(OrigineData.CARICAMENTO);
-            }
+            return new Letto(foto, genere, estensione, anteprima, data);
         } catch (Exception e) {
             eliminaSilenzioso(anteprima);
             log.warn("{} illeggibile: {}", nome, e.toString());
-            return new Caricamento(nome, Esito.ERRORE, null,
+            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null,
                     (genere == Genere.VIDEO ? "Video illeggibile" : "Immagine illeggibile")
-                            + (e.getMessage() != null ? " (" + e.getMessage() + ")" : ""));
+                            + (e.getMessage() != null ? " (" + e.getMessage() + ")" : "")));
         }
+    }
 
-        try {
-            foto.setPercorso(archivio.salvaOriginale(
-                    nome, foto.getId(), estensione, foto.getScattataIl().toLocalDate(), file));
-            archivio.creaMiniatura(foto.getId(), anteprima != null ? anteprima : file, anteprima == null);
-            if (genere == Genere.HEIC) {
-                archivio.salvaVista(foto.getId(), anteprima);
-            }
-            return new Caricamento(nome, Esito.CARICATA, repository.insert(foto), null);
-        } catch (DuplicateKeyException e) {
-            // Stesso file caricato in parallelo: ha vinto l'altro.
-            archivio.elimina(foto.getId(), foto.getPercorso());
-            return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(hash).orElse(null), "Già in archivio");
-        } catch (Exception e) {
-            log.warn("Importazione di {} fallita", nome, e);
-            archivio.elimina(foto.getId(), foto.getPercorso());
-            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
-        } finally {
-            eliminaSilenzioso(anteprima);
+    /** La data dei metadati se c'è (EXIF), altrimenti la riserva con la sua origine. */
+    private static void data(Foto foto, LocalDateTime metadati, LocalDateTime riserva, OrigineData origineRiserva) {
+        if (metadati != null) {
+            foto.setScattataIl(metadati);
+            foto.setOrigineData(OrigineData.EXIF);
+        } else {
+            foto.setScattataIl(riserva);
+            foto.setOrigineData(origineRiserva);
+        }
+    }
+
+    /** Miniatura e, per gli HEIC, vista JPEG. */
+    private void anteprime(Letto letto, Path file) throws IOException {
+        Path anteprima = letto.anteprima();
+        archivio.creaMiniatura(letto.foto().getId(), anteprima != null ? anteprima : file, anteprima == null);
+        if (letto.genere() == Genere.HEIC) {
+            archivio.salvaVista(letto.foto().getId(), anteprima);
         }
     }
 
