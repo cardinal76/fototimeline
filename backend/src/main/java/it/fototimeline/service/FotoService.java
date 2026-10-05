@@ -44,8 +44,10 @@ import org.springframework.stereotype.Service;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.luoghi.GeocodificaInversa;
+import it.fototimeline.dominio.StatoConversione;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
+import it.fototimeline.quasiuguali.Impronta;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
@@ -91,16 +93,19 @@ public class FotoService {
     private final EstrattoreMetadati estrattore;
     private final StrumentiMedia media;
     private final GeocodificaInversa luoghi;
+    private final ConversioneVideo conversione;
     private final Clock clock;
 
     public FotoService(FotoRepository repository, MongoTemplate mongo, ArchivioFile archivio,
-            EstrattoreMetadati estrattore, StrumentiMedia media, GeocodificaInversa luoghi, Optional<Clock> clock) {
+            EstrattoreMetadati estrattore, StrumentiMedia media, GeocodificaInversa luoghi, ConversioneVideo conversione,
+            Optional<Clock> clock) {
         this.repository = repository;
         this.mongo = mongo;
         this.archivio = archivio;
         this.estrattore = estrattore;
         this.media = media;
         this.luoghi = luoghi;
+        this.conversione = conversione;
         this.clock = clock.orElse(Clock.systemDefaultZone());
     }
 
@@ -146,7 +151,9 @@ public class FotoService {
             foto.setPercorso(archivio.salvaOriginale(
                     nome, foto.getId(), letto.estensione(), foto.getScattataIl().toLocalDate(), file));
             anteprime(letto, file);
-            return new Caricamento(nome, Esito.CARICATA, repository.insert(foto), null);
+            Caricamento esito = new Caricamento(nome, Esito.CARICATA, repository.insert(foto), null);
+            segnalaConversione(foto);
+            return esito;
         } catch (DuplicateKeyException e) {
             // Stesso file caricato in parallelo: ha vinto l'altro.
             archivio.elimina(foto.getId(), foto.getPercorso());
@@ -201,6 +208,7 @@ public class FotoService {
             }
             anteprime(letto, file);
             foto = repository.insert(foto);
+            segnalaConversione(foto);
         } catch (DuplicateKeyException e) {
             archivio.elimina(foto.getId(), null);
             return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
@@ -310,6 +318,7 @@ public class FotoService {
                     foto.setFotocamera(info.fotocamera());
                     foto.setLatitudine(info.latitudine());
                     foto.setLongitudine(info.longitudine());
+                    conversione.prepara(foto, info);
                     anteprima = Files.createTempFile("fototimeline-", ".jpg");
                     media.fotogramma(file, info.durata(), anteprima);
                     data = info.ripresoIl();
@@ -339,12 +348,27 @@ public class FotoService {
         }
     }
 
-    /** Miniatura e, per gli HEIC, vista JPEG. */
+    /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
     private void anteprime(Letto letto, Path file) throws IOException {
         Path anteprima = letto.anteprima();
         archivio.creaMiniatura(letto.foto().getId(), anteprima != null ? anteprima : file, anteprima == null);
         if (letto.genere() == Genere.HEIC) {
             archivio.salvaVista(letto.foto().getId(), anteprima);
+        }
+        if (letto.genere() != Genere.VIDEO) {
+            try {
+                letto.foto().setImpronta(Impronta.calcola(archivio.miniatura(letto.foto().getId())));
+            } catch (IOException | RuntimeException e) {
+                // Non blocca l'importazione: la riempie "Calcola impronte".
+                log.warn("Impronta di {} non calcolata: {}", letto.foto().getNomeOriginale(), e.toString());
+            }
+        }
+    }
+
+    /** Un video non compatibile appena entrato: la coda parte (in sottofondo). */
+    private void segnalaConversione(Foto foto) {
+        if (foto.getConversione() == StatoConversione.IN_CODA) {
+            conversione.segnala();
         }
     }
 
@@ -478,6 +502,34 @@ public class FotoService {
             rifaiAnteprime(foto);
         }
         return vista;
+    }
+
+    /**
+     * Il file per {@code /file}.
+     *
+     * @param definitivo true se a quell'indirizzo non cambierà (si può tenere in
+     *                   cache per sempre); false per un video che aspetta la
+     *                   versione compatibile
+     */
+    public record FileServito(Path file, String contentType, String nome, boolean definitivo) {
+    }
+
+    /**
+     * Quello che va al browser per {@code /file}: per i video la versione
+     * compatibile, se c'è; l'originale per il resto, o se lo si chiede
+     * ({@code originale}, per esempio per scaricarlo).
+     */
+    public FileServito fileDaServire(Foto foto, boolean originale) {
+        if (foto.isVideo() && !originale && foto.getConversione() == StatoConversione.FATTA) {
+            Path compatibile = archivio.compatibile(foto.getId());
+            if (Files.exists(compatibile)) {
+                String nome = foto.getNomeOriginale();
+                int punto = nome.lastIndexOf('.');
+                return new FileServito(compatibile, "video/mp4", (punto < 0 ? nome : nome.substring(0, punto)) + ".mp4", true);
+            }
+        }
+        boolean definitivo = originale || !foto.isVideo() || Boolean.TRUE.equals(foto.getCompatibile());
+        return new FileServito(fileOriginale(foto), foto.getContentType(), foto.getNomeOriginale(), definitivo);
     }
 
     public String contentTypeVista(Foto foto) {

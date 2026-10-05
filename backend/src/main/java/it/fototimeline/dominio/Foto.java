@@ -70,6 +70,25 @@ public class Foto {
     /** Durata del video, in secondi. */
     private Double durata;
 
+    /** Codec del video e dell'audio come li dice ffprobe ("hevc", "aac"); null per le foto. */
+    private String codecVideo;
+    private String codecAudio;
+    /**
+     * True se ogni browser sa riprodurre l'originale (H.264 + AAC/MP3 in
+     * MP4/MOV); false se serve la versione compatibile; null se il video non
+     * è ancora stato analizzato (archivi di prima, "Converti video" lo fa).
+     */
+    private Boolean compatibile;
+    /** La versione compatibile: in coda, fatta, non riuscita; null se non serve o non è chiesta. */
+    @Indexed(sparse = true)
+    private StatoConversione conversione;
+    private String erroreConversione;
+    /**
+     * Impronta percettiva (pHash a 64 bit) della miniatura, per trovare le foto
+     * quasi uguali; null per i video e finché non è calcolata.
+     */
+    private Long impronta;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -153,4 +172,22 @@ public class Foto {
 
     public Double getDurata() { return durata; }
     public void setDurata(Double durata) { this.durata = durata; }
+
+    public String getCodecVideo() { return codecVideo; }
+    public void setCodecVideo(String codecVideo) { this.codecVideo = codecVideo; }
+
+    public String getCodecAudio() { return codecAudio; }
+    public void setCodecAudio(String codecAudio) { this.codecAudio = codecAudio; }
+
+    public Boolean getCompatibile() { return compatibile; }
+    public void setCompatibile(Boolean compatibile) { this.compatibile = compatibile; }
+
+    public StatoConversione getConversione() { return conversione; }
+    public void setConversione(StatoConversione conversione) { this.conversione = conversione; }
+
+    public String getErroreConversione() { return erroreConversione; }
+    public void setErroreConversione(String erroreConversione) { this.erroreConversione = erroreConversione; }
+
+    public Long getImpronta() { return impronta; }
+    public void setImpronta(Long impronta) { this.impronta = impronta; }
 }

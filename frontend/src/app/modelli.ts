@@ -33,6 +33,37 @@ export interface Foto {
   video: boolean;
   /** Durata del video, in secondi. */
   durata?: number;
+  /** Codec del video e dell'audio ("hevc", "aac"), per i video. */
+  codecVideo?: string;
+  codecAudio?: string;
+  /** True se ogni browser riproduce l'originale; false se serve la versione compatibile; assente se non si sa ancora. */
+  compatibile?: boolean;
+  /** La versione compatibile (H.264 in MP4) dei video che ne hanno bisogno. */
+  conversione?: StatoConversione;
+  erroreConversione?: string;
+}
+
+export type StatoConversione = 'IN_CODA' | 'IN_CORSO' | 'FATTA' | 'ERRORE';
+
+/** La coda delle versioni compatibili dei video ("Converti video", solo admin). */
+export interface StatoConversioni {
+  /** False se le conversioni sono spente o sul server manca ffmpeg. */
+  attiva: boolean;
+  inCorso: boolean;
+  /** C'è da fare ma il cloud è smontato. */
+  inAttesa: boolean;
+  /** In coda, compreso quello in corso. */
+  daFare: number;
+  /** Finiti dall'ultimo "Converti video". */
+  fatti: number;
+  errori: number;
+  /** Video che hanno la versione compatibile, in tutto. */
+  convertiti: number;
+  correnteId?: string;
+  corrente?: string;
+  /** Del video in corso, 0..100. */
+  percentuale?: number;
+  messaggi: string[];
 }
 
 export interface PaginaFoto {
@@ -247,4 +278,123 @@ export interface ModificaTelefono {
   intervalloOre: number;
   giorniPrimaDiCancellare: number;
   copieInParallelo: number;
+}
+
+/** Una foto come la vede chi ha un link di condivisione: niente nome del file, percorso, tag. */
+export interface FotoCondivisa {
+  id: string;
+  video: boolean;
+  larghezza?: number;
+  altezza?: number;
+  scattataIl: string;
+  durata?: number;
+  titolo?: string;
+  /** Solo se chi ha creato il link ha scelto "includi posizione". */
+  latitudine?: number;
+  longitudine?: number;
+}
+
+/** La galleria pubblica di un link (/c/<token>). */
+export interface GalleriaCondivisa {
+  titolo: string;
+  scadeIl?: string;
+  download: boolean;
+  /** False col cloud smontato: si vedono solo le miniature. */
+  archivioDisponibile: boolean;
+  foto: FotoCondivisa[];
+}
+
+/** Per creare un link: le foto da una selezione, da un album o da un intervallo di giorni. */
+export interface NuovaCondivisione {
+  titolo?: string;
+  ids?: string[];
+  album?: string;
+  dal?: string;
+  al?: string;
+  /** 1, 7, 30; null = non scade. */
+  giorni: number | null;
+  download: boolean;
+  posizione: boolean;
+}
+
+/** Un link nell'elenco "Le mie condivisioni". */
+export interface Condivisione {
+  id: string;
+  token: string;
+  titolo: string;
+  foto: number;
+  origine: 'SELEZIONE' | 'ALBUM' | 'DATE';
+  descrizioneOrigine?: string;
+  creataDa: string;
+  creataIl: string;
+  scadeIl?: string;
+  download: boolean;
+  posizione: boolean;
+  visite: number;
+  ultimoAccesso?: string;
+  revocata: boolean;
+  scaduta: boolean;
+}
+
+/** Una foto di un gruppo di quasi uguali. */
+export interface FotoSimile {
+  id: string;
+  /** "/api/foto/<id>/miniatura" */
+  miniatura: string;
+  nomeOriginale: string;
+  larghezza?: number;
+  altezza?: number;
+  dimensione: number;
+  scattataIl?: string;
+  fotocamera?: string;
+  preferita: boolean;
+  /** Quella che il server consiglia di tenere: risoluzione, peso, EXIF, data. */
+  suggerita: boolean;
+  /** Da tenere all'inizio: la suggerita e le preferite. */
+  tieni: boolean;
+}
+
+export interface GruppoSimili {
+  foto: FotoSimile[];
+}
+
+export interface PaginaGruppi {
+  gruppi: GruppoSimili[];
+  totale: number;
+  pagina: number;
+  altre: boolean;
+}
+
+/** "Calcola impronte": stato vuoto se dall'avvio del server non è mai partito. */
+export interface StatoImpronte {
+  stato?: 'IN_CORSO' | 'FINITO' | 'ANNULLATO' | 'FALLITO';
+  iniziatoIl?: string;
+  finitoIl?: string;
+  totale: number;
+  fatte: number;
+  calcolate: number;
+  errori: number;
+  errore?: string;
+  /** Foto (non video) ancora senza impronta: non entrano nel confronto. */
+  senzaImpronta: number;
+}
+
+/** Pallino della pagina "Salute": verde, giallo, rosso. */
+export type StatoSalute = 'OK' | 'ATTENZIONE' | 'ERRORE';
+
+export interface VoceSalute {
+  chiave: string;
+  titolo: string;
+  stato: StatoSalute;
+  messaggio: string;
+  dettagli: string[];
+}
+
+/** GET /api/salute (solo admin). */
+export interface Salute {
+  stato: StatoSalute;
+  voci: VoceSalute[];
+  controllatoIl: string;
+  /** Token e chat di Telegram impostati sul server. */
+  avvisiTelegram: boolean;
 }

@@ -42,6 +42,20 @@ fototimeline:
     heif-convert: ${FOTOTIMELINE_HEIF_CONVERT:heif-convert}
     ffmpeg: ${FOTOTIMELINE_FFMPEG:ffmpeg}
     ffprobe: ${FOTOTIMELINE_FFPROBE:ffprobe}
+  # Versione compatibile (H.264/AAC in MP4) dei video che non tutti i browser
+  # riproducono (HEVC dell'iPhone, VP9, ProRes): una alla volta, in sottofondo,
+  # con ffmpeg a priorità bassa (nice -n 19).
+  video:
+    attiva: ${FOTOTIMELINE_VIDEO_ATTIVA:true}
+    # Lato corto massimo: 1080 = i 4K scendono a 1080p, i più piccoli restano come sono.
+    risoluzione-massima: ${FOTOTIMELINE_VIDEO_RISOLUZIONE:1080}
+    # Thread di ffmpeg: quanta CPU può prendere una conversione.
+    thread: ${FOTOTIMELINE_VIDEO_THREAD:2}
+    # Dove vanno i convertiti; vuoto = <archivio>/.compatibili, accanto agli
+    # originali (nel cloud sul server: pesano come video, non come miniature).
+    destinazione: ${FOTOTIMELINE_VIDEO_DESTINAZIONE:}
+    # Ogni quanto la coda guarda se può ripartire (per esempio cloud rimontato).
+    controllo: PT1M
   # Copia dei metadati (MongoDB) accanto alle foto: <archivio>/.backup.
   backup:
     cartella: ${FOTOTIMELINE_BACKUP_CARTELLA:}
@@ -63,6 +77,30 @@ fototimeline:
     cartella: ${FOTOTIMELINE_LUOGHI:}
     # Più lontano di così dal centro abitato più vicino: luogo sconosciuto (mare aperto).
     distanza-massima-km: ${FOTOTIMELINE_LUOGHI_DISTANZA:30}
+  # Link pubblici alle foto (/c/<token>): freno per indirizzo IP sui path
+  # pubblici, contro chi prova token a caso.
+  condivisioni:
+    richieste-al-minuto: 1200
+    token-sbagliati: 20
+    finestra-token-sbagliati: PT15M
+    massimo-foto: 2000
+    lato-vista: 2048
+  # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
+  # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
+  quasi-uguali:
+    soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
+    finestra-raffica: PT10S
+    soglia-raffica: 12
+  # Avvisi su Telegram quando una voce della pagina "Salute" cambia stato.
+  # Token del bot (BotFather) e chat id: vuoti = avvisi spenti, la pagina c'è lo stesso.
+  telegram:
+    token: ${FOTOTIMELINE_TELEGRAM_TOKEN:}
+    chat: ${FOTOTIMELINE_TELEGRAM_CHAT:}
+    # Anche quando una voce diventa gialla (per esempio il cloud smontato).
+    avvisa-attenzione: ${FOTOTIMELINE_TELEGRAM_ATTENZIONE:false}
+    controllo: ${FOTOTIMELINE_TELEGRAM_CONTROLLO:PT15M}
+    # Il link all'app nei messaggi; vuoto = senza link.
+    indirizzo-app: ${FOTOTIMELINE_DOMINIO:}
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

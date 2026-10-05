@@ -15,10 +15,11 @@ import { firstValueFrom } from 'rxjs';
 import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, ModificaTelefono, StatoTelefono } from './modelli';
+import { Cartella, Condivisione, Foto, ModificaTelefono, StatoSalute, StatoTelefono } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
+import { QuasiUguali } from './quasi-uguali';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -29,7 +30,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FiltroLuogo, FormsModule, Mappa, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FiltroLuogo, FormsModule, Mappa, QuasiUguali, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -58,6 +59,7 @@ export class App {
   protected sposta = false;
   protected ricerca = '';
   protected readonly dialogoTelefono = signal(false);
+  protected readonly dialogoQuasiUguali = signal(false);
   protected readonly telefono = signal<StatoTelefono | null>(null);
   protected readonly salvandoTelefono = signal(false);
   protected moduloTelefono: ModificaTelefono = {
@@ -68,6 +70,16 @@ export class App {
     copieInParallelo: 6,
   };
   private telefonoTimer?: ReturnType<typeof setTimeout>;
+  /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
+  protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
+  protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
+  protected readonly creandoLink = signal(false);
+  protected readonly linkCreato = signal<string | null>(null);
+  protected readonly dialogoCondivisioni = signal(false);
+  protected readonly condivisioni = signal<Condivisione[] | null>(null);
+  protected readonly dialogoSalute = signal(false);
+  protected readonly controlloSalute = signal(false);
+  protected readonly provaInCorso = signal(false);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -171,16 +183,24 @@ export class App {
 
   /**
    * Esc chiude quello che è aperto sopra la timeline: il dialogo di
-   * importazione o del telefono, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   * importazione, del telefono, delle quasi uguali o della salute, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
    */
   protected esc(): void {
     if (this.aperta()) {
       return;
     }
-    if (this.dialogoImporta()) {
+    if (this.dialogoCondividi()) {
+      this.dialogoCondividi.set(null);
+    } else if (this.dialogoCondivisioni()) {
+      this.dialogoCondivisioni.set(false);
+    } else if (this.dialogoImporta()) {
       this.chiudiImporta();
     } else if (this.dialogoTelefono()) {
       this.chiudiTelefono();
+    } else if (this.dialogoQuasiUguali()) {
+      this.dialogoQuasiUguali.set(false);
+    } else if (this.dialogoSalute()) {
+      this.chiudiSalute();
     } else if (this.selezione()) {
       this.esciSelezione();
     }
@@ -320,6 +340,27 @@ export class App {
     }
   }
 
+  protected async convertiVideo(): Promise<void> {
+    if (
+      !confirm(
+        'Prepara una versione compatibile (H.264) dei video che non tutti i browser sanno riprodurre, ' +
+          "come gli HEVC dell'iPhone. Gira in sottofondo, un video alla volta: può richiedere ore.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await this.galleria.convertiVideo();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Conversione dei video non partita');
+    }
+  }
+
+  protected percentualeConversioni(): number {
+    const s = this.galleria.conversioni();
+    return s && s.fatti + s.errori + s.daFare ? Math.round(((s.fatti + s.errori) / (s.fatti + s.errori + s.daFare)) * 100) : 0;
+  }
+
   protected percentualeImportazione(): number {
     const l = this.galleria.importazione();
     return l && l.trovate ? Math.round((l.fatte / l.trovate) * 100) : 0;
@@ -400,6 +441,123 @@ export class App {
   protected chiudiTelefono(): void {
     clearTimeout(this.telefonoTimer);
     this.dialogoTelefono.set(false);
+  }
+
+  // ------------------------------------------------------------ condivisione
+
+  protected apriCondividiSelezione(): void {
+    const ids = [...this.galleria.selezionate()];
+    this.apriCondividi({ ids, descrizione: `${ids.length} foto selezionate` }, '');
+  }
+
+  protected apriCondividiAlbum(): void {
+    const album = this.galleria.filtro().album;
+    if (album) {
+      this.apriCondividi({ album, descrizione: `tutte le foto dell'album "${album}"` }, album);
+    }
+  }
+
+  private apriCondividi(scelta: { ids?: string[]; album?: string; descrizione: string }, titolo: string): void {
+    this.moduloCondividi = { titolo, giorni: 7, download: false, posizione: false };
+    this.linkCreato.set(null);
+    this.dialogoCondividi.set(scelta);
+  }
+
+  protected async creaLink(): Promise<void> {
+    const scelta = this.dialogoCondividi();
+    if (!scelta) return;
+    this.creandoLink.set(true);
+    try {
+      const c = await firstValueFrom(
+        this.api.creaCondivisione({ ...this.moduloCondividi, ids: scelta.ids, album: scelta.album }),
+      );
+      this.linkCreato.set(FotoApi.linkCondivisione(c));
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Link non creato');
+    } finally {
+      this.creandoLink.set(false);
+    }
+  }
+
+  protected async copia(link: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(link);
+      this.galleria.avvisa('Link copiato');
+    } catch {
+      // Senza HTTPS o senza permesso: lo si copia a mano dal campo.
+      this.galleria.avvisa('Copia non riuscita: seleziona il link e copialo a mano');
+    }
+  }
+
+  protected chiudiCondividi(): void {
+    if (this.linkCreato() && this.selezione()) {
+      this.esciSelezione();
+    }
+    this.dialogoCondividi.set(null);
+  }
+
+  protected apriCondivisioni(): void {
+    this.dialogoCondivisioni.set(true);
+    this.condivisioni.set(null);
+    this.api.condivisioni().subscribe({
+      next: (c) => this.condivisioni.set(c),
+      error: () => {
+        this.galleria.avvisa('Condivisioni non leggibili');
+        this.dialogoCondivisioni.set(false);
+      },
+    });
+  }
+
+  protected link(c: Condivisione): string {
+    return FotoApi.linkCondivisione(c);
+  }
+
+  protected async revoca(c: Condivisione): Promise<void> {
+    if (!confirm(`Revocare "${c.titolo}"? Chi ha il link non vedrà più le foto.`)) return;
+    try {
+      await firstValueFrom(this.api.revocaCondivisione(c.id));
+      this.condivisioni.update((l) => l?.map((x) => (x.id === c.id ? { ...x, revocata: true } : x)) ?? null);
+    } catch {
+      this.galleria.avvisa('Revoca non riuscita');
+    }
+  }
+
+  // ------------------------------------------------------------ salute
+
+  protected apriSalute(): void {
+    this.dialogoSalute.set(true);
+    void this.aggiornaSalute();
+  }
+
+  protected async aggiornaSalute(): Promise<void> {
+    this.controlloSalute.set(true);
+    try {
+      if (!(await this.galleria.aggiornaSalute())) {
+        this.galleria.avvisa('Salute non leggibile');
+      }
+    } finally {
+      this.controlloSalute.set(false);
+    }
+  }
+
+  protected async provaTelegram(): Promise<void> {
+    this.provaInCorso.set(true);
+    try {
+      await firstValueFrom(this.api.provaTelegram());
+      this.galleria.avvisa('Messaggio di prova mandato su Telegram');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Messaggio di prova non mandato');
+    } finally {
+      this.provaInCorso.set(false);
+    }
+  }
+
+  protected chiudiSalute(): void {
+    this.dialogoSalute.set(false);
+  }
+
+  protected nomeStato(s: StatoSalute): string {
+    return s === 'OK' ? 'tutto a posto' : s === 'ATTENZIONE' ? 'da guardare' : 'qualcosa non va';
   }
 
   protected logout(): void {
