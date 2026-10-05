@@ -1,0 +1,118 @@
+@if (galleria(); as g) {
+  <header class="testata">
+    <div>
+      <h1>{{ g.titolo }}</h1>
+      <p class="tenue">
+        {{ g.foto.length }} {{ g.foto.length === 1 ? 'elemento' : 'elementi' }}
+        @if (g.scadeIl) {
+          · il link scade il {{ g.scadeIl | date: 'd MMMM y, HH:mm' }}
+        }
+      </p>
+    </div>
+    @if (g.download && g.archivioDisponibile) {
+      <a class="bottone primario" [href]="zip" download>Scarica tutto</a>
+    }
+  </header>
+
+  @if (!g.archivioDisponibile) {
+    <p class="avviso" role="status">
+      Le foto a piena risoluzione in questo momento non sono raggiungibili: si vedono le miniature. Riprova più tardi.
+    </p>
+  }
+
+  <main class="griglia">
+    @for (f of g.foto; track f.id; let i = $index) {
+      <button
+        type="button"
+        class="tassello"
+        [style.flex-grow]="rapporto(f)"
+        [style.flex-basis.px]="rapporto(f) * 200"
+        [attr.aria-label]="f.titolo || (f.video ? 'Video' : 'Foto') + ' ' + (i + 1)"
+        (click)="aperta.set(i)"
+      >
+        <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" loading="lazy" decoding="async" alt="" />
+        @if (f.video) {
+          <span class="video" aria-hidden="true">▶ {{ durata(f.durata) }}</span>
+        }
+      </button>
+    } @empty {
+      <p class="vuoto">Le foto di questo link non ci sono più.</p>
+    }
+  </main>
+  <footer class="tenue">Condiviso con FotoTimeline</footer>
+
+  @if (foto(); as f) {
+    <div
+      class="visore"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-label]="f.titolo || 'Foto'"
+      (click)="aperta.set(null)"
+      (touchstart)="tocco($event)"
+      (touchend)="rilascio($event)"
+    >
+      @if (f.video) {
+        <video
+          class="immagine"
+          [src]="vista(f)"
+          [poster]="miniatura(f)"
+          controls
+          autoplay
+          playsinline
+          preload="metadata"
+          (click)="$event.stopPropagation()"
+        ></video>
+      } @else {
+        @if (!caricata()) {
+          <img class="immagine segnaposto" [src]="miniatura(f)" alt="" aria-hidden="true" (click)="$event.stopPropagation()" />
+        }
+        @if (!vistaMancante()) {
+          <img
+            class="immagine"
+            [class.nascosta]="!caricata()"
+            [src]="vista(f)"
+            [alt]="f.titolo || 'Foto'"
+            (load)="caricata.set(true)"
+            (error)="vistaMancante.set(true)"
+            (click)="$event.stopPropagation()"
+          />
+        }
+      }
+
+      @if (aperta()! > 0) {
+        <button type="button" class="freccia sx" aria-label="Precedente" (click)="$event.stopPropagation(); vai(-1)">‹</button>
+      }
+      @if (aperta()! < g.foto.length - 1) {
+        <button type="button" class="freccia dx" aria-label="Successiva" (click)="$event.stopPropagation(); vai(1)">›</button>
+      }
+
+      <div class="comandi" (click)="$event.stopPropagation()">
+        <span>{{ aperta()! + 1 }} / {{ g.foto.length }}</span>
+        @if (g.download && g.archivioDisponibile) {
+          <a [href]="originale(f)" download title="Scarica l'originale">⤓</a>
+        }
+        <button type="button" (click)="aperta.set(null)" title="Chiudi (Esc)">✕</button>
+      </div>
+
+      <div class="didascalia" (click)="$event.stopPropagation()">
+        @if (f.titolo) {
+          <b>{{ f.titolo }}</b>
+        }
+        <span>{{ f.scattataIl | date: 'EEEE d MMMM y, HH:mm' }}</span>
+        @if (mappa(f); as m) {
+          <a [href]="m" target="_blank" rel="noopener noreferrer">Posizione</a>
+        }
+        @if (vistaMancante()) {
+          <span class="errore">Foto a piena risoluzione non raggiungibile ora: questa è la miniatura.</span>
+        }
+      </div>
+    </div>
+  }
+} @else if (errore(); as e) {
+  <div class="messaggio">
+    <p class="grande">{{ e }}</p>
+    <p class="tenue">Se ti serve, chiedi un link nuovo a chi te l'ha mandato.</p>
+  </div>
+} @else {
+  <div class="messaggio"><span class="rotella" aria-label="Caricamento"></span></div>
+}

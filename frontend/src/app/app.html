@@ -37,6 +37,9 @@
     >
       ★ Preferite
     </button>
+    @if (galleria.filtro().album) {
+      <button type="button" class="link" title="Un link per chi non ha un account" (click)="apriCondividiAlbum()">Condividi album</button>
+    }
     @if (filtriAttivi()) {
       <button type="button" class="link" (click)="azzera()">Azzera filtri</button>
     }
@@ -88,6 +91,7 @@
         Salute
       </button>
     }
+    <button type="button" class="link" title="Le mie condivisioni: i link mandati" (click)="apriCondivisioni()">Condivisioni</button>
     <button type="button" class="link" title="Raffiche, copie ricompresse o ridimensionate" (click)="dialogoQuasiUguali.set(true)">
       Quasi uguali
     </button>
@@ -217,6 +221,7 @@
     <button type="button" (click)="operazione('TOGLI_TAG')">− Tag</button>
     <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
+    <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
     <button type="button" class="link" (click)="galleria.deseleziona()">Deseleziona</button>
   </div>
@@ -443,6 +448,103 @@
         <button type="submit" class="primario" [disabled]="!telefono() || salvandoTelefono()">Salva</button>
       </div>
     </form>
+  </div>
+}
+
+@if (dialogoCondividi(); as scelta) {
+  <div class="velo" (click)="chiudiCondividi()">
+    <form class="dialogo" role="dialog" aria-labelledby="titolo-condividi" (click)="$event.stopPropagation()" (ngSubmit)="creaLink()">
+      <h2 id="titolo-condividi">Condividi con un link</h2>
+      @if (linkCreato(); as link) {
+        <p class="tenue">Chi apre questo link vede {{ scelta.descrizione }}, senza account.</p>
+        <div class="link-creato">
+          <input readonly [value]="link" aria-label="Link" (focus)="$any($event.target).select()" />
+          <button type="button" class="primario" (click)="copia(link)">Copia</button>
+        </div>
+        <div class="piede">
+          <button type="button" (click)="chiudiCondividi()">Fatto</button>
+        </div>
+      } @else {
+        <p class="tenue">
+          Un link di sola lettura con {{ scelta.descrizione }}, per chi non ha un account. Vede le foto (ridotte, senza i
+          dati della fotocamera), la data di scatto e il titolo: non nomi dei file, tag, album o descrizioni.
+        </p>
+        <label>
+          Titolo
+          <input name="titolo" [(ngModel)]="moduloCondividi.titolo" maxlength="120" placeholder="Per esempio: Festa di Luca" />
+        </label>
+        <label>
+          Scade
+          <select name="giorni" [(ngModel)]="moduloCondividi.giorni">
+            <option [ngValue]="1">fra 1 giorno</option>
+            <option [ngValue]="7">fra 7 giorni</option>
+            <option [ngValue]="30">fra 30 giorni</option>
+            <option [ngValue]="null">mai</option>
+          </select>
+        </label>
+        <label class="spunta-riga">
+          <input type="checkbox" name="download" [(ngModel)]="moduloCondividi.download" />
+          Permetti di scaricare gli originali (uno per uno o tutti in uno zip, con i dati della fotocamera)
+        </label>
+        <label class="spunta-riga">
+          <input type="checkbox" name="posizione" [(ngModel)]="moduloCondividi.posizione" />
+          Includi la posizione GPS
+        </label>
+        <div class="piede">
+          <button type="button" (click)="chiudiCondividi()">Annulla</button>
+          <button type="submit" class="primario" [disabled]="creandoLink()">{{ creandoLink() ? 'Creo…' : 'Crea link' }}</button>
+        </div>
+      }
+    </form>
+  </div>
+}
+
+@if (dialogoCondivisioni()) {
+  <div class="velo" (click)="dialogoCondivisioni.set(false)">
+    <div class="dialogo" role="dialog" aria-labelledby="titolo-condivisioni" (click)="$event.stopPropagation()">
+      <h2 id="titolo-condivisioni">Le mie condivisioni</h2>
+      @if (condivisioni(); as elenco) {
+        <ul class="condivisioni">
+          @for (c of elenco; track c.id) {
+            <li [class.spenta]="c.revocata || c.scaduta">
+              <div>
+                <b>{{ c.titolo }}</b>
+                <small class="tenue">
+                  {{ c.foto }} foto ·
+                  @if (c.revocata) {
+                    revocato
+                  } @else if (c.scaduta) {
+                    scaduto
+                  } @else if (c.scadeIl) {
+                    scade il {{ c.scadeIl | date: 'd MMM y, HH:mm' }}
+                  } @else {
+                    non scade
+                  }
+                  · {{ c.visite }} {{ c.visite === 1 ? 'visita' : 'visite' }}
+                  @if (c.download) {
+                    · download
+                  }
+                  @if (galleria.io()?.admin && galleria.io()?.login) {
+                    · di {{ c.creataDa }}
+                  }
+                </small>
+              </div>
+              @if (!c.revocata && !c.scaduta) {
+                <button type="button" (click)="copia(link(c))">Copia link</button>
+                <button type="button" class="pericolo" (click)="revoca(c)">Revoca</button>
+              }
+            </li>
+          } @empty {
+            <li class="tenue">Nessun link creato. Seleziona delle foto o apri un album e scegli "Condividi".</li>
+          }
+        </ul>
+      } @else {
+        <span class="rotella" aria-label="Caricamento"></span>
+      }
+      <div class="piede">
+        <button type="button" (click)="dialogoCondivisioni.set(false)">Chiudi</button>
+      </div>
+    </div>
   </div>
 }
 

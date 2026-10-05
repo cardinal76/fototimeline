@@ -56,6 +56,14 @@ fototimeline:
   # admin): ogni quanto controllare se è ora di un giro.
   telefono:
     controllo: PT5M
+  # Link pubblici alle foto (/c/<token>): freno per indirizzo IP sui path
+  # pubblici, contro chi prova token a caso.
+  condivisioni:
+    richieste-al-minuto: 1200
+    token-sbagliati: 20
+    finestra-token-sbagliati: PT15M
+    massimo-foto: 2000
+    lato-vista: 2048
   # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
   # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
   quasi-uguali:

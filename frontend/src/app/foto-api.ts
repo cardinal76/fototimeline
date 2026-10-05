@@ -5,6 +5,7 @@ import { Observable } from 'rxjs';
 import {
   Caricamento,
   Cartella,
+  Condivisione,
   CopiaBackup,
   Filtro,
   Foto,
@@ -12,6 +13,7 @@ import {
   LavoroImportazione,
   Modifica,
   ModificaTelefono,
+  NuovaCondivisione,
   Operazione,
   PaginaFoto,
   PaginaGruppi,
@@ -175,6 +177,24 @@ export class FotoApi {
 
   multipla(ids: string[], operazione: Operazione, valore?: string): Observable<{ modificate: number }> {
     return this.http.post<{ modificate: number }>('/api/foto/multiple', { ids, operazione, valore });
+  }
+
+  /** Link pubblici: si creano, si elencano (i propri; l'admin tutti) e si revocano. */
+  creaCondivisione(nuova: NuovaCondivisione): Observable<Condivisione> {
+    return this.http.post<Condivisione>('/api/condivisioni', nuova);
+  }
+
+  condivisioni(): Observable<Condivisione[]> {
+    return this.http.get<Condivisione[]>('/api/condivisioni');
+  }
+
+  revocaCondivisione(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/condivisioni/${id}`);
+  }
+
+  /** L'indirizzo da mandare: la pagina pubblica, che non chiede il login. */
+  static linkCondivisione(c: Condivisione): string {
+    return `${location.origin}/c/${c.token}`;
   }
 
   static miniatura(f: Foto): string {

@@ -147,6 +147,20 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
   (`sessione.ts`), perché la risposta porta a Keycloak, su un'altra origine.
+- **Path pubblici** (senza login, solo GET): `/salute`, `/error`, i file della
+  PWA, e per i link di condivisione `/c/*`, `/api/condivise/**` e i bundle di
+  Angular (`/main-*.js`, `/chunk-*.js`, `/polyfills-*.js`, `/styles-*.css`:
+  codice, niente dati; `index.html` lo serve `CondiviseController` solo da
+  `/c/{token}`). Ogni endpoint sotto `/api/condivise/{token}` passa da
+  `CondivisioniService.valida` (token, scadenza, revoca) e, per una foto, da
+  `foto(c, id)` (404 se non è nel link). Una risposta pubblica nuova usa
+  record suoi (`FotoCondivisa`), mai `Foto`: niente percorso, nome del file,
+  tag, descrizione, fotocamera, GPS (salvo `posizione`). Le immagini passano
+  dalla vista ridotta senza EXIF (`vistaCondivisa`). `LimiteRichieste` frena
+  per IP. Non allargare i `permitAll` senza un test in `CondivisioniTest`.
+- La pagina `/c/<token>` è la stessa app: `main.ts` vede `/c/` e avvia solo
+  `Condivisa` (con `fetch`, senza l'interceptor del 401), così non parte
+  nessuna chiamata privata e nessun redirect a Keycloak.
 - `fototimeline.importazione` limita "Importa cartella" e il navigatore a una
   radice (sul server `/cloud`). L'archivio e le miniature si saltano sempre.
 

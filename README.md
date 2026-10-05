@@ -82,6 +82,13 @@ Il server: [DEPLOY.md](DEPLOY.md).
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
+- **Condividere con un link** (chi non ha un account, per esempio gli amici
+  dopo una festa): dalla selezione (*Condividi…*) o da un album aperto
+  (*Condividi album*) si crea un link `https://<dominio>/c/<token>` con
+  titolo, scadenza (1, 7, 30 giorni o mai), download degli originali sì/no e
+  posizione GPS sì/no. Chi lo apre vede una galleria di sola lettura, senza
+  menu né login. *Condivisioni* elenca i link (visite, scadenza) con *Copia
+  link* e *Revoca*. Dettagli sotto, "Link di condivisione".
 
 Formati: JPEG, PNG, GIF, BMP, WebP, **HEIC** (iPhone) e **video** MP4/MOV.
 HEIC e video richiedono programmi esterni, che nel container ci sono: sul PC
@@ -200,6 +207,59 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
 | GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline)                |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
+
+Link di condivisione (dietro login come il resto):
+
+| Metodo | Percorso                     | Cosa fa                                                    |
+|--------|------------------------------|------------------------------------------------------------|
+| POST   | `/api/condivisioni`          | Crea: `{ titolo, ids \| album \| dal+al, giorni: 1/7/30/null, download, posizione }` → 201 col token |
+| GET    | `/api/condivisioni`          | I link dell'utente (l'admin li vede tutti), con visite e ultimo accesso |
+| DELETE | `/api/condivisioni/{id}`     | Revoca (solo chi l'ha creato o l'admin; per gli altri 404)  |
+
+**Pubbliche, senza login** (solo GET; ogni richiesta controlla il token):
+
+| Metodo | Percorso                                        | Cosa fa                                        |
+|--------|-------------------------------------------------|------------------------------------------------|
+| GET    | `/c/{token}`                                    | La pagina (index.html dell'app, che mostra solo la galleria) |
+| GET    | `/api/condivise/{token}`                        | Titolo, scadenza, download, foto; 404 link sconosciuto, 410 scaduto o revocato |
+| GET    | `/api/condivise/{token}/foto/{id}/miniatura`    | Miniatura                                      |
+| GET    | `/api/condivise/{token}/foto/{id}/vista`        | JPEG al massimo di 2048 px, senza EXIF         |
+| GET    | `/api/condivise/{token}/foto/{id}/video`        | Il video (originale, con `Range`)              |
+| GET    | `/api/condivise/{token}/foto/{id}/originale`    | Originale da scaricare (403 senza download)    |
+| GET    | `/api/condivise/{token}/zip`                    | Tutti gli originali in uno zip (403 senza download) |
+
+### Link di condivisione
+
+- **Chi li crea**: ogni utente collegato (vede già tutte le foto, e il link
+  porta il suo nome); ognuno vede e revoca i suoi, l'admin tutti.
+- **Token**: 256 bit da `SecureRandom` in base64url (43 caratteri). È
+  salvato in chiaro in `condivisioni`, perché chi ha creato il link possa
+  ricopiarlo: chi legge il database può aprire i link.
+- **Le foto sono fissate alla creazione**: un album che cresce dopo non
+  allarga il link; le foto eliminate spariscono. Al massimo 2000 per link.
+- **Una foto che non è nel link risponde 404**, come un token sconosciuto.
+- **Chi ha il link vede** titolo del link, data di scatto, titolo della foto,
+  dimensioni e durata dei video. **Non vede** nome del file, percorso nel
+  cloud, descrizione, tag, album, fotocamera, hash, chi ha creato il link; la
+  posizione GPS solo se spuntata ("Includi la posizione", spenta di solito).
+- **Le foto si vedono da un JPEG ridotto e senza metadati**, fatto la prima
+  volta dall'originale e tenuto in `<miniature>/condivise/`. I **video** si
+  guardano dall'originale anche senza download (altrimenti non si
+  guarderebbero): il file può contenere la posizione registrata dal telefono.
+  Con il download permesso, originali e zip sono i file come sono, EXIF e GPS
+  compresi (il dialogo lo dice).
+- **Zip** scritto direttamente sulla risposta, un file alla volta a pezzi di
+  64 KB (la JVM ha 384 MB). JPEG e video non si ricomprimono (deflate livello
+  0); non STORED perché vorrebbe CRC e dimensione prima di ogni file, cioè
+  leggerlo due volte dal cloud. Nei download i nomi sono la data di scatto
+  (`2024-05-17 14.03.22.jpg`), non quelli dell'archivio.
+- **Cloud smontato**: la galleria e le miniature si vedono; vista non ancora
+  preparata, originali e zip rispondono 503 con un messaggio per chi ha il link.
+- **Freno per IP** (`LimiteRichieste`, in memoria): 1200 richieste al minuto
+  sui path pubblici e, dopo 20 link sconosciuti (o foto fuori dal link) in 15
+  minuti, 429 per 15 minuti. Gli IPv6 contano per la loro /64.
+  `fototimeline.condivisioni.*` in `application.yml`.
+- La pagina risponde con `Referrer-Policy: no-referrer` e `X-Robots-Tag: noindex`.
 
 ## Test
 
