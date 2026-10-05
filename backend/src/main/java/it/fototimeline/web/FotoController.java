@@ -28,6 +28,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.service.ConversioneVideo;
+import it.fototimeline.service.ConversioneVideo.StatoConversioni;
 import it.fototimeline.service.FiltroFoto;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.FotoService.Modifica;
@@ -56,14 +58,16 @@ public class FotoController {
     private final LavoriImportazione lavori;
     private final UtenteCorrente corrente;
     private final RegistroUtenti utenti;
+    private final ConversioneVideo conversione;
 
     public FotoController(FotoService service, ImportazioneCartelle importazione, LavoriImportazione lavori,
-            UtenteCorrente corrente, RegistroUtenti utenti) {
+            UtenteCorrente corrente, RegistroUtenti utenti, ConversioneVideo conversione) {
         this.service = service;
         this.importazione = importazione;
         this.lavori = lavori;
         this.corrente = corrente;
         this.utenti = utenti;
+        this.conversione = conversione;
     }
 
     @GetMapping("/foto")
@@ -74,10 +78,13 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dal,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate al,
+            @RequestParam(required = false) String nazione,
+            @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, caricataDa),
+        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -87,8 +94,11 @@ public class FotoController {
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String album,
             @RequestParam(required = false) Boolean preferite,
+            @RequestParam(required = false) String nazione,
+            @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa) {
-        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, caricataDa));
+        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
     }
 
     @GetMapping("/mappa")
@@ -97,8 +107,11 @@ public class FotoController {
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String album,
             @RequestParam(required = false) Boolean preferite,
+            @RequestParam(required = false) String nazione,
+            @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa) {
-        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, caricataDa));
+        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */
@@ -233,21 +246,49 @@ public class FotoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /** L'originale; con Range (i video nel browser) risponde a pezzi. */
+    /**
+     * Il file; con Range (i video nel browser) risponde a pezzi. Per i video
+     * la versione compatibile (H.264 in MP4) se c'è; {@code originale=true} o
+     * {@code scarica=true} danno sempre l'originale.
+     */
     @GetMapping("/foto/{id}/file")
     public ResponseEntity<Resource> file(@PathVariable String id,
-            @RequestParam(defaultValue = "false") boolean scarica) {
+            @RequestParam(defaultValue = "false") boolean scarica,
+            @RequestParam(defaultValue = "false") boolean originale) {
         return service.trova(id)
                 .map(foto -> {
+                    var servito = service.fileDaServire(foto, originale || scarica);
                     var disposizione = (scarica ? ContentDisposition.attachment() : ContentDisposition.inline())
-                            .filename(foto.getNomeOriginale(), StandardCharsets.UTF_8)
+                            .filename(servito.nome(), StandardCharsets.UTF_8)
                             .build();
+                    // Un video in attesa della versione compatibile: allo stesso indirizzo arriverà quella.
+                    var cache = servito.definitivo()
+                            ? CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable()
+                            : CacheControl.noCache().cachePrivate();
                     return ResponseEntity.ok()
-                            .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
-                            .contentType(MediaType.parseMediaType(foto.getContentType()))
+                            .cacheControl(cache)
+                            .contentType(MediaType.parseMediaType(servito.contentType()))
                             .header(HttpHeaders.CONTENT_DISPOSITION, disposizione.toString())
-                            .<Resource>body(new FileSystemResource(service.fileOriginale(foto)));
+                            .<Resource>body(new FileSystemResource(servito.file()));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** La coda delle versioni compatibili dei video: quanti fatti, quanti da fare, quello in corso. */
+    @GetMapping("/archivio/video")
+    public StatoConversioni conversioni() {
+        return conversione.stato();
+    }
+
+    /** "Converti video" (solo admin): mette in coda i video già in archivio che ne hanno bisogno. */
+    @PostMapping("/archivio/video/converti")
+    public ResponseEntity<StatoConversioni> convertiVideo() {
+        return ResponseEntity.accepted().body(conversione.avvia());
+    }
+
+    @PostMapping("/archivio/video/annulla")
+    public ResponseEntity<StatoConversioni> annullaConversioni() {
+        conversione.annulla();
+        return ResponseEntity.accepted().body(conversione.stato());
     }
 }

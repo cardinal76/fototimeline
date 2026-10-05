@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -48,6 +49,9 @@ import it.fototimeline.telefono.SorgenteTelefono;
         "spring.security.oauth2.client.provider.keycloak.token-uri=https://kc.invalid/token",
         "spring.security.oauth2.client.provider.keycloak.jwk-set-uri=https://kc.invalid/certs",
         "spring.security.oauth2.client.provider.keycloak.user-name-attribute=sub",
+        // Token finto: non deve uscire da /api/salute. Nessun test qui manda davvero.
+        "fototimeline.telegram.token=123456:token-segreto-di-prova",
+        "fototimeline.telegram.chat=42",
 })
 @AutoConfigureMockMvc
 class SicurezzaTest {
@@ -71,7 +75,8 @@ class SicurezzaTest {
         mvc.perform(get("/api/foto")).andExpect(status().isUnauthorized());
         mvc.perform(get("/")).andExpect(status().isFound())
                 .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
-        mvc.perform(get("/salute")).andExpect(status().isOk());
+        mvc.perform(get("/salute")).andExpect(status().isOk()).andExpect(content().string("ok"));
+        mvc.perform(get("/api/salute")).andExpect(status().isUnauthorized());
         // I file della PWA non chiedono il login: 200 se il frontend è compilato in static/, 404 se no
         // (in CI), mai 401 o il redirect a Keycloak.
         for (String pubblico : new String[] {"/manifest.webmanifest", "/sw.js", "/icone/icona-192.png"}) {
@@ -88,8 +93,54 @@ class SicurezzaTest {
         mvc.perform(post("/api/cloud/smonta").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/backup").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/indicizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/archivio/luoghi").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/luoghi").with(oidcLogin())).andExpect(status().isOk());
+        mvc.perform(post("/api/archivio/video/converti").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/archivio/video/annulla").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(get("/api/backup").with(oidcLogin())).andExpect(status().isOk());
         mvc.perform(get("/api/utenti").with(oidcLogin())).andExpect(status().isForbidden());
+        // Nemmeno la pagina "Salute" e la prova di Telegram.
+        mvc.perform(get("/api/salute").with(oidcLogin())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/salute/prova").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void lAmministratoreVedeLaSaluteMaNonIlToken() throws Exception {
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        String corpo = mvc.perform(get("/api/salute").with(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.stato").isNotEmpty())
+                .andExpect(jsonPath("$.controllatoIl").isNotEmpty())
+                .andExpect(jsonPath("$.avvisiTelegram").value(true))
+                .andExpect(jsonPath("$.voci[?(@.chiave == 'archivio')].stato").value("OK"))
+                .andExpect(jsonPath("$.voci[?(@.chiave == 'backup')]").exists())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(corpo).doesNotContain("token-segreto").doesNotContain("123456");
+        // Senza token CSRF la prova non parte (e qui non deve partire davvero).
+        mvc.perform(post("/api/salute/prova").with(admin)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void leQuasiUgualiLeRisolveChiunqueMaLeImprontePartonoSoloDallAmministratore() throws Exception {
+        mvc.perform(get("/api/quasi-uguali").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totale").value(0));
+        mvc.perform(get("/api/quasi-uguali/calcola").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.senzaImpronta").value(0));
+        // Come l'eliminazione: basta essere del realm (qui le foto non ci sono, quindi 0).
+        mvc.perform(post("/api/quasi-uguali/risolvi").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"tieni\":[\"a\"],\"togli\":[\"b\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eliminate").value(0));
+        mvc.perform(post("/api/quasi-uguali/risolvi").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"tieni\":[],\"togli\":[\"b\"]}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/quasi-uguali/calcola").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/quasi-uguali/calcola/annulla").with(oidcLogin()).with(csrf()))
+                .andExpect(status().isForbidden());
+
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        mvc.perform(post("/api/quasi-uguali/calcola").with(admin)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/quasi-uguali/calcola").with(admin).with(csrf())).andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.stato").value("IN_CORSO"));
     }
 
     private static final OidcLoginRequestPostProcessor ANNA = oidcLogin()
@@ -213,6 +264,9 @@ class SicurezzaTest {
         mvc.perform(post("/api/cloud/smonta").with(admin)).andExpect(status().isForbidden());
         // Passa la sicurezza; qui non c'è rclone, quindi 409.
         mvc.perform(post("/api/cloud/smonta").with(admin).with(csrf())).andExpect(status().isConflict());
+        // Qui non c'è il dataset di GeoNames: "Calcola luoghi" passa la sicurezza ma non parte.
+        mvc.perform(post("/api/archivio/luoghi").with(admin).with(csrf())).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("GeoNames")));
         // L'archivio qui è un disco, sempre disponibile: l'indicizzazione parte.
         mvc.perform(post("/api/archivio/indicizza").with(admin)).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/indicizza").with(admin).with(csrf())).andExpect(status().isAccepted())

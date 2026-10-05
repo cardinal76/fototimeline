@@ -50,3 +50,35 @@ select,
 .bottone {
   font: inherit;
 }
+
+/* Condivisione (dialoghi di app.html): qui perché app.css è già al limite del budget. */
+.link-creato {
+  display: flex;
+  gap: 0.5rem;
+}
+.link-creato input {
+  flex: 1;
+  min-width: 0;
+}
+.condivisioni {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow: auto;
+}
+.condivisioni li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--bordo);
+}
+.condivisioni li > div {
+  flex: 1;
+  display: grid;
+  gap: 0.15rem;
+}
+.condivisioni li.spenta {
+  opacity: 0.55;
+}

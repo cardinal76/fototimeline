@@ -1,0 +1,4 @@
+#ISO	ISO3	ISO-Numeric	fips	Country	Capital	Area(in sq km)	Population	Continent	tld	CurrencyCode	CurrencyName	Phone	Postal Code Format	Postal Code Regex	Languages	geonameid	neighbours	EquivalentFipsCode
+DE	DEU	276	GM	Germany	Berlin	357021	82927922	EU	.de	EUR	Euro	49	#####	^(\d{5})$	de	2921044	CH,PL,NL,DK,BE,CZ,LU,FR,AT	
+FR	FRA	250	FR	France	Paris	547030	66987244	EU	.fr	EUR	Euro	33	#####	^(\d{5})$	fr-FR,frp,br,co,ca,eu,oc	3017382	CH,DE,BE,LU,IT,AD,MC,ES	
+IT	ITA	380	IT	Italy	Rome	301230	60431283	EU	.it	EUR	Euro	39	#####	^(\d{5})$	it-IT,de-IT,fr-IT,sc,ca,co,sl	3175395	CH,VA,SI,SM,FR,AT	

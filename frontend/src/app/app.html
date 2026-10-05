@@ -37,6 +37,7 @@
         }
       </select>
     }
+    <app-filtro-luogo />
     <button
       type="button"
       class="interruttore"
@@ -45,6 +46,9 @@
     >
       ★ Preferite
     </button>
+    @if (galleria.filtro().album) {
+      <button type="button" class="link" title="Un link per chi non ha un account" (click)="apriCondividiAlbum()">Condividi album</button>
+    }
     @if (filtriAttivi()) {
       <button type="button" class="link" (click)="azzera()">Azzera filtri</button>
     }
@@ -84,11 +88,44 @@
         >
           Indicizza archivio
         </button>
+        <button
+          type="button"
+          class="link"
+          [disabled]="galleria.conversioni()?.inCorso"
+          title="Versione compatibile dei video che non tutti i browser riproducono (HEVC dell'iPhone e simili)"
+          (click)="convertiVideo()"
+        >
+          Converti video
+        </button>
       }
+      @if (galleria.luoghi()?.disponibile) {
+        <button
+          type="button"
+          class="link"
+          [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+          [title]="(galleria.luoghi()?.daCalcolare ?? 0) + ' foto col GPS senza luogo: il nome del luogo dalle coordinate (GeoNames)'"
+          (click)="calcolaLuoghi()"
+        >
+          Calcola luoghi
+        </button>
+      }
+      <button
+        type="button"
+        class="link"
+        [title]="galleria.salute() ? 'Salute: ' + nomeStato(galleria.salute()!.stato) : 'Salute del server'"
+        (click)="apriSalute()"
+      >
+        <span class="pallino" [attr.data-stato]="galleria.salute()?.stato ?? null" aria-hidden="true"></span>
+        Salute
+      </button>
     }
     @if (galleria.io()?.admin || galleria.io()?.login) {
       <button type="button" class="link" title="Foto nuove dai telefoni della famiglia, da pCloud" (click)="apriTelefoni()">Telefoni</button>
     }
+    <button type="button" class="link" title="Le mie condivisioni: i link mandati" (click)="apriCondivisioni()">Condivisioni</button>
+    <button type="button" class="link" title="Raffiche, copie ricompresse o ridimensionate" (click)="dialogoQuasiUguali.set(true)">
+      Quasi uguali
+    </button>
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
     </button>
@@ -215,6 +252,7 @@
     <button type="button" (click)="operazione('TOGLI_TAG')">− Tag</button>
     <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
+    <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
     <button type="button" class="link" (click)="galleria.deseleziona()">Deseleziona</button>
   </div>
@@ -248,12 +286,13 @@
 @if (galleria.importazione(); as l) {
   <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
     <div class="riga">
-      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : 'Importazione';
+      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : 'Importazione';
       <b>
         @switch (l.stato) {
           @case ('IN_CORSO') {
             @switch (l.origine) {
               @case ('INDICIZZAZIONE') { Indicizzazione dell'archivio… }
+              @case ('LUOGHI') { Calcolo dei luoghi… }
               @case ('AUTOMATICA') { Importazione automatica da {{ l.cartella }}… }
               @default { Importo da {{ l.cartella }}… }
             }
@@ -270,21 +309,68 @@
       }
     </div>
     <progress [value]="percentualeImportazione()" max="100"></progress>
-    <p>
-      {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
-      @if (l.rimossi) {
-        · {{ l.rimossi }} tolte dall'origine
-      }
-      @if (l.errori) {
-        · <span class="errore">{{ l.errori }} errori</span>
-      }
-    </p>
+    @if (l.origine === 'LUOGHI') {
+      <p>{{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} con un luogo · {{ l.duplicate }} senza (mare aperto)</p>
+    } @else {
+      <p>
+        {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
+        @if (l.rimossi) {
+          · {{ l.rimossi }} tolte dall'origine
+        }
+        @if (l.errori) {
+          · <span class="errore">{{ l.errori }} errori</span>
+        }
+      </p>
+    }
     @if (l.errore) {
       <p class="errore">{{ l.errore }}</p>
     }
     @if (l.messaggi.length && l.stato !== 'IN_CORSO') {
       <ul class="errori">
         @for (m of l.messaggi.slice(0, 8); track $index) {
+          <li>{{ m }}</li>
+        }
+      </ul>
+    }
+  </div>
+}
+
+@if (galleria.conversioni(); as s) {
+  <div class="avanzamento conversione" role="status">
+    <div class="riga">
+      <b>
+        @if (s.inAttesa) {
+          Conversione video in attesa del cloud
+        } @else if (s.inCorso || s.daFare) {
+          Conversione video…
+        } @else {
+          Conversione video finita
+        }
+      </b>
+      @if (s.inCorso || s.daFare) {
+        <button type="button" class="link" (click)="galleria.annullaConversioni()">Annulla</button>
+      } @else {
+        <button type="button" class="link" (click)="galleria.chiudiConversioni()">Chiudi</button>
+      }
+    </div>
+    <progress [value]="percentualeConversioni()" max="100"></progress>
+    <p>
+      {{ s.fatti }} fatti · {{ s.daFare }} da fare
+      @if (s.errori) {
+        · <span class="errore">{{ s.errori }} errori</span>
+      }
+    </p>
+    @if (s.inCorso && s.corrente) {
+      <p class="corrente">
+        In corso: {{ s.corrente }}
+        @if (s.percentuale != null) {
+          ({{ s.percentuale }}%)
+        }
+      </p>
+    }
+    @if (s.messaggi.length && !s.inCorso) {
+      <ul class="errori">
+        @for (m of s.messaggi.slice(0, 8); track $index) {
           <li>{{ m }}</li>
         }
       </ul>
@@ -496,6 +582,165 @@
         <button type="submit" class="primario" [disabled]="salvandoTelefono()">{{ id === 'nuovo' ? 'Aggiungi' : 'Salva' }}</button>
       </div>
     </form>
+  </div>
+}
+
+@if (dialogoCondividi(); as scelta) {
+  <div class="velo" (click)="chiudiCondividi()">
+    <form class="dialogo" role="dialog" aria-labelledby="titolo-condividi" (click)="$event.stopPropagation()" (ngSubmit)="creaLink()">
+      <h2 id="titolo-condividi">Condividi con un link</h2>
+      @if (linkCreato(); as link) {
+        <p class="tenue">Chi apre questo link vede {{ scelta.descrizione }}, senza account.</p>
+        <div class="link-creato">
+          <input readonly [value]="link" aria-label="Link" (focus)="$any($event.target).select()" />
+          <button type="button" class="primario" (click)="copia(link)">Copia</button>
+        </div>
+        <div class="piede">
+          <button type="button" (click)="chiudiCondividi()">Fatto</button>
+        </div>
+      } @else {
+        <p class="tenue">
+          Un link di sola lettura con {{ scelta.descrizione }}, per chi non ha un account. Vede le foto (ridotte, senza i
+          dati della fotocamera), la data di scatto e il titolo: non nomi dei file, tag, album o descrizioni.
+        </p>
+        <label>
+          Titolo
+          <input name="titolo" [(ngModel)]="moduloCondividi.titolo" maxlength="120" placeholder="Per esempio: Festa di Luca" />
+        </label>
+        <label>
+          Scade
+          <select name="giorni" [(ngModel)]="moduloCondividi.giorni">
+            <option [ngValue]="1">fra 1 giorno</option>
+            <option [ngValue]="7">fra 7 giorni</option>
+            <option [ngValue]="30">fra 30 giorni</option>
+            <option [ngValue]="null">mai</option>
+          </select>
+        </label>
+        <label class="spunta-riga">
+          <input type="checkbox" name="download" [(ngModel)]="moduloCondividi.download" />
+          Permetti di scaricare gli originali (uno per uno o tutti in uno zip, con i dati della fotocamera)
+        </label>
+        <label class="spunta-riga">
+          <input type="checkbox" name="posizione" [(ngModel)]="moduloCondividi.posizione" />
+          Includi la posizione GPS
+        </label>
+        <div class="piede">
+          <button type="button" (click)="chiudiCondividi()">Annulla</button>
+          <button type="submit" class="primario" [disabled]="creandoLink()">{{ creandoLink() ? 'Creo…' : 'Crea link' }}</button>
+        </div>
+      }
+    </form>
+  </div>
+}
+
+@if (dialogoCondivisioni()) {
+  <div class="velo" (click)="dialogoCondivisioni.set(false)">
+    <div class="dialogo" role="dialog" aria-labelledby="titolo-condivisioni" (click)="$event.stopPropagation()">
+      <h2 id="titolo-condivisioni">Le mie condivisioni</h2>
+      @if (condivisioni(); as elenco) {
+        <ul class="condivisioni">
+          @for (c of elenco; track c.id) {
+            <li [class.spenta]="c.revocata || c.scaduta">
+              <div>
+                <b>{{ c.titolo }}</b>
+                <small class="tenue">
+                  {{ c.foto }} foto ·
+                  @if (c.revocata) {
+                    revocato
+                  } @else if (c.scaduta) {
+                    scaduto
+                  } @else if (c.scadeIl) {
+                    scade il {{ c.scadeIl | date: 'd MMM y, HH:mm' }}
+                  } @else {
+                    non scade
+                  }
+                  · {{ c.visite }} {{ c.visite === 1 ? 'visita' : 'visite' }}
+                  @if (c.download) {
+                    · download
+                  }
+                  @if (galleria.io()?.admin && galleria.io()?.login) {
+                    · di {{ c.creataDa }}
+                  }
+                </small>
+              </div>
+              @if (!c.revocata && !c.scaduta) {
+                <button type="button" (click)="copia(link(c))">Copia link</button>
+                <button type="button" class="pericolo" (click)="revoca(c)">Revoca</button>
+              }
+            </li>
+          } @empty {
+            <li class="tenue">Nessun link creato. Seleziona delle foto o apri un album e scegli "Condividi".</li>
+          }
+        </ul>
+      } @else {
+        <span class="rotella" aria-label="Caricamento"></span>
+      }
+      <div class="piede">
+        <button type="button" (click)="dialogoCondivisioni.set(false)">Chiudi</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (dialogoQuasiUguali()) {
+  <app-quasi-uguali
+    [admin]="!!galleria.io()?.admin"
+    [disponibile]="galleria.archivioDisponibile()"
+    (chiudi)="dialogoQuasiUguali.set(false)"
+  />
+}
+
+@if (dialogoSalute()) {
+  <div class="velo" (click)="chiudiSalute()">
+    <div class="dialogo" role="dialog" aria-labelledby="titolo-salute" (click)="$event.stopPropagation()">
+      <h2 id="titolo-salute">Salute</h2>
+      @if (galleria.salute(); as s) {
+        <p class="tenue">
+          Controllato alle {{ s.controllatoIl | date: 'HH:mm:ss' }}:
+          <b>{{ nomeStato(s.stato) }}</b>
+        </p>
+        <ul class="voci-salute">
+          @for (v of s.voci; track v.chiave) {
+            <li>
+              <span class="pallino" [attr.data-stato]="v.stato" [attr.aria-label]="nomeStato(v.stato)"></span>
+              <div>
+                <b>{{ v.titolo }}</b>
+                <p>{{ v.messaggio }}</p>
+                @if (v.dettagli.length) {
+                  <ul class="errori">
+                    @for (d of v.dettagli; track $index) {
+                      <li>{{ d }}</li>
+                    }
+                  </ul>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+        @if (!s.avvisiTelegram) {
+          <p class="tenue">
+            Avvisi su Telegram spenti: si accendono con <code>FOTOTIMELINE_TELEGRAM_TOKEN</code> e
+            <code>FOTOTIMELINE_TELEGRAM_CHAT</code> nel <code>.env</code> del server (DEPLOY.md).
+          </p>
+        } @else {
+          <p class="tenue">Su Telegram arriva un messaggio quando una voce diventa rossa e quando torna a posto.</p>
+        }
+      } @else {
+        <span class="rotella" aria-label="Caricamento"></span>
+      }
+
+      <div class="piede">
+        <button type="button" (click)="chiudiSalute()">Chiudi</button>
+        @if (galleria.salute()?.avvisiTelegram) {
+          <button type="button" [disabled]="provaInCorso()" (click)="provaTelegram()">
+            {{ provaInCorso() ? 'Invio…' : 'Messaggio di prova' }}
+          </button>
+        }
+        <button type="button" class="primario" [disabled]="controlloSalute()" (click)="aggiornaSalute()">
+          {{ controlloSalute() ? 'Controllo…' : 'Aggiorna' }}
+        </button>
+      </div>
+    </div>
   </div>
 }
 

@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 import it.fototimeline.cloud.ArchivioNonDisponibile;
+import it.fototimeline.luoghi.LuoghiService;
 import it.fototimeline.service.ImportazioneCartelle.Avanzamento;
 import it.fototimeline.service.Risultati.Caricamento;
 
@@ -39,8 +40,13 @@ public class LavoriImportazione {
     private static final Logger log = LoggerFactory.getLogger(LavoriImportazione.class);
     private static final int MAX_MESSAGGI = 50;
 
-    /** MANUALE e AUTOMATICA importano una cartella; INDICIZZAZIONE cerca nell'archivio i file senza scheda. */
-    public enum Origine { MANUALE, AUTOMATICA, INDICIZZAZIONE }
+    /**
+     * MANUALE e AUTOMATICA importano una cartella; INDICIZZAZIONE cerca
+     * nell'archivio i file senza scheda; LUOGHI dà il luogo alle foto con GPS
+     * (nello stato: {@code importate} quelle con un luogo, {@code duplicate}
+     * quelle senza, cioè in mare aperto).
+     */
+    public enum Origine { MANUALE, AUTOMATICA, INDICIZZAZIONE, LUOGHI }
 
     public enum Stato { IN_CORSO, FINITA, ANNULLATA, FALLITA }
 
@@ -54,6 +60,7 @@ public class LavoriImportazione {
     private final ImportazioneAutomaticaProperties automatica;
     private final ArchivioFile archivio;
     private final List<ProvenienzaFile> provenienze;
+    private final LuoghiService luoghi;
     private final Clock clock;
     private final ExecutorService esecutore = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "importazione");
@@ -63,11 +70,12 @@ public class LavoriImportazione {
     private final AtomicReference<Lavoro> ultimo = new AtomicReference<>();
 
     public LavoriImportazione(ImportazioneCartelle importazione, ImportazioneAutomaticaProperties automatica,
-            ArchivioFile archivio, List<ProvenienzaFile> provenienze, Optional<Clock> clock) {
+            ArchivioFile archivio, List<ProvenienzaFile> provenienze, LuoghiService luoghi, Optional<Clock> clock) {
         this.importazione = importazione;
         this.automatica = automatica;
         this.archivio = archivio;
         this.provenienze = List.copyOf(provenienze);
+        this.luoghi = luoghi;
         this.clock = clock.orElse(Clock.systemUTC());
     }
 
@@ -105,19 +113,35 @@ public class LavoriImportazione {
         return avvia(archivio.radice(), Origine.INDICIZZAZIONE, importazione::indicizza);
     }
 
-    /** Quello che fa un lavoro, riferendo a {@code Avanzamento}. */
+    /**
+     * "Calcola luoghi" in sottofondo, con la stessa barra. Non tocca il cloud:
+     * gira anche da smontato. {@code tutte}: anche le foto che il luogo ce
+     * l'hanno già.
+     */
+    public StatoLavoro avviaLuoghi(boolean tutte) {
+        if (!luoghi.disponibile()) {
+            throw new IllegalStateException(LuoghiService.SENZA_DATASET);
+        }
+        return avvia(archivio.radice(), Origine.LUOGHI, lavoro -> luoghi.calcola(tutte, lavoro));
+    }
+
+    /** Quello che fa un lavoro, riferendo al lavoro stesso. */
     private interface Compito {
-        void esegui(Avanzamento avanzamento) throws Exception;
+        void esegui(Lavoro lavoro) throws Exception;
     }
 
     private synchronized StatoLavoro avvia(Path cartella, Origine origine, Compito compito) {
         Lavoro attuale = ultimo.get();
         if (attuale != null && attuale.inCorso()) {
-            throw new IllegalStateException(attuale.origine == Origine.INDICIZZAZIONE
-                    ? "C'è un'indicizzazione dell'archivio in corso: aspetta che finisca o annullala"
-                    : "C'è già un'importazione in corso: aspetta che finisca o annullala");
+            throw new IllegalStateException(switch (attuale.origine) {
+                case INDICIZZAZIONE -> "C'è un'indicizzazione dell'archivio in corso: aspetta che finisca o annullala";
+                case LUOGHI -> "Il calcolo dei luoghi è in corso: aspetta che finisca o annullalo";
+                default -> "C'è già un'importazione in corso: aspetta che finisca o annullala";
+            });
         }
-        archivio.verificaDisponibile();
+        if (origine != Origine.LUOGHI) {
+            archivio.verificaDisponibile();
+        }
         Lavoro lavoro = new Lavoro(cartella.toString(), origine, clock.instant());
         ultimo.set(lavoro);
         esecutore.submit(() -> esegui(lavoro, compito));
@@ -175,7 +199,11 @@ public class LavoriImportazione {
     }
 
     private void esegui(Lavoro lavoro, Compito compito) {
-        String nome = lavoro.origine == Origine.INDICIZZAZIONE ? "Indicizzazione" : "Importazione";
+        String nome = switch (lavoro.origine) {
+            case INDICIZZAZIONE -> "Indicizzazione";
+            case LUOGHI -> "Calcolo dei luoghi";
+            default -> "Importazione";
+        };
         try {
             compito.esegui(lavoro);
             lavoro.finisci(lavoro.annullata ? Stato.ANNULLATA : Stato.FINITA, null, clock.instant());
@@ -184,6 +212,11 @@ public class LavoriImportazione {
             lavoro.finisci(Stato.FALLITA, e.getMessage(), clock.instant());
         }
         StatoLavoro fine = lavoro.stato();
+        if (lavoro.origine == Origine.LUOGHI) {
+            log.info("{} {}: {} foto con GPS, {} con un luogo, {} senza ({} in {})", nome, fine.stato(), fine.trovate(),
+                    fine.importate(), fine.duplicate(), fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
+            return;
+        }
         log.info("{} {} di {}: {} nuove, {} già presenti, {} errori, {} tolte dall'origine ({} in {})",
                 nome, fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.errori(), fine.rimossi(),
                 fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
@@ -196,7 +229,7 @@ public class LavoriImportazione {
     }
 
     /** Stato mutabile di un lavoro; lo legge l'API mentre il thread di importazione lo aggiorna. */
-    private final class Lavoro implements Avanzamento {
+    private final class Lavoro implements Avanzamento, LuoghiService.Avanzamento {
         private final String id = UUID.randomUUID().toString();
         private final String cartella;
         private final Origine origine;
@@ -244,6 +277,13 @@ public class LavoriImportazione {
             if (rimossa) {
                 rimossi++;
             }
+        }
+
+        @Override
+        public synchronized void calcolate(int quante, int conLuogo) {
+            fatte += quante;
+            importate += conLuogo;
+            duplicate += quante - conLuogo;
         }
 
         @Override

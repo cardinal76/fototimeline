@@ -45,6 +45,12 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   container `TZ=Europe/Rome`). Le date prima del 1990 sono "sconosciuta".
 - Il browser riceve `/vista` (JPEG per gli HEIC, l'originale per il resto) e
   per i video `/file`, che risponde a pezzi con `Range`.
+- Video non H.264/AAC (HEVC, VP9, ProRes, 10 bit): `ConversioneVideo` ne fa
+  una versione compatibile in `<archivio>/.compatibili/<id>.mp4`
+  (`fototimeline.video.*`), un video alla volta, con lo stato sulla scheda
+  (`compatibile`, `conversione`): così riprende dopo un riavvio. `/file` serve
+  quella se `conversione` è `FATTA`, l'originale con `?originale=true` o
+  `?scarica=true`. Col cloud smontato la coda aspetta, non va in errore.
 - Nei test i casi HEIC e video si saltano dove i programmi mancano
   (`assumeTrue`): i file di prova sono in `src/test/resources`.
 
@@ -84,6 +90,26 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - Nei test con Playwright non usare `page.clock.setFixedTime`: ferma i timer
   e Leaflet non si disegna.
 
+## Luoghi dal GPS
+
+- `GeocodificaInversa` (pacchetto `luoghi`) legge all'avvio i file di GeoNames
+  da `fototimeline.luoghi.cartella` (`FOTOTIMELINE_LUOGHI`; nel container
+  `/app/geonames`, scaricati dallo stage `geonames` del Dockerfile, mai nel
+  repository). Senza cartella l'app parte, senza luoghi.
+- `IndiceLuoghi` è un k-d tree implicito su vettori unitari 3D: solo array di
+  primitivi e i nomi in un `byte[]`, niente oggetti per punto (225 mila punti,
+  ~10 MB). Non aggiungere campi per punto senza pensare alla RAM (384 MB).
+- `FotoService.leggi` chiama `applica`: luogo, regione, nazione, codice nazione
+  e `luogoCalcolato` (true anche in mare aperto, così "Calcola luoghi" non li
+  rifà). "Calcola luoghi" è un lavoro di `LavoriImportazione` (origine
+  `LUOGHI`): `importate` = con un luogo, `duplicate` = senza; non chiede il
+  cloud montato.
+- Il filtro manda `nazione` (codice ISO), `regione`, `luogo`, nell'ordine
+  dell'indice composto `luoghi`. L'attribuzione CC BY 4.0 di GeoNames è nel
+  filtro e nel visore: va lasciata.
+- Nei test: `fototimeline.luoghi.cartella=classpath:geonames` (mini dataset in
+  `src/test/resources/geonames`).
+
 ## Backup dei metadati
 
 - `BackupMetadati` scrive `<archivio>/.backup/fototimeline-*.json.gz`: un
@@ -94,6 +120,25 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   smontato salta e recupera appena montato. `POST /api/backup` è da admin.
 - Un campo nuovo in `Foto` finisce nel backup da solo (si copia il documento
   grezzo): non serve toccare il backup.
+
+## Salute e avvisi
+
+- `Salute` (pacchetto `salute`) fa i controlli della pagina "Salute"
+  (`GET /api/salute`, admin; `/salute` senza `/api` è l'healthcheck di Docker:
+  non toccarlo). Ogni controllo gira su un thread suo con un tempo massimo
+  (`TEMPO_MASSIMO`): se lancia o tarda, la sua voce è rossa e le altre
+  restano. Verso rclone un `Rclone` suo con timeout di pochi secondi, non
+  quello del montaggio. Una voce nuova: un `Controllo` in `controlla()`, con
+  una `chiave` fissa (gli avvisi la ricordano).
+- La voce `telefono` riassume tutti i telefoni (`SincronizzazioneTelefono.elenco`):
+  il pallino del telefono messo peggio, il suo nome nel messaggio, gli altri
+  nei dettagli. Una chiave sola: un telefono in più non cambia gli avvisi.
+- `AvvisiSalute` ogni `fototimeline.telegram.controllo` confronta gli stati
+  con quelli in `impostazioni/avvisi-salute` e scrive su Telegram solo i
+  cambi; se l'invio fallisce non salva, così riprova. Il token del bot sta
+  nell'indirizzo: ogni messaggio d'errore passa da `Telegram.senzaToken`.
+- L'esito dell'ultimo backup sta anche in `impostazioni/backup-metadati`
+  (`BackupMetadati.esito()`): col cloud smontato i file non si vedono.
 
 ## Comandi
 
@@ -125,13 +170,27 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
   token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup`,
-  `/api/archivio/**` e `/api/utenti` vogliono `fototimeline-admin`
+  `/api/archivio/**`, `/api/utenti` e `/api/salute` vogliono `fototimeline-admin`
   (`fototimeline.login.ruolo-admin`); `/api/telefoni` lo controlla il
   controller (ognuno vede il suo telefono).
 - CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
   (`sessione.ts`), perché la risposta porta a Keycloak, su un'altra origine.
+- **Path pubblici** (senza login, solo GET): `/salute`, `/error`, i file della
+  PWA, e per i link di condivisione `/c/*`, `/api/condivise/**` e i bundle di
+  Angular (`/main-*.js`, `/chunk-*.js`, `/polyfills-*.js`, `/styles-*.css`:
+  codice, niente dati; `index.html` lo serve `CondiviseController` solo da
+  `/c/{token}`). Ogni endpoint sotto `/api/condivise/{token}` passa da
+  `CondivisioniService.valida` (token, scadenza, revoca) e, per una foto, da
+  `foto(c, id)` (404 se non è nel link). Una risposta pubblica nuova usa
+  record suoi (`FotoCondivisa`), mai `Foto`: niente percorso, nome del file,
+  tag, descrizione, fotocamera, GPS (salvo `posizione`). Le immagini passano
+  dalla vista ridotta senza EXIF (`vistaCondivisa`). `LimiteRichieste` frena
+  per IP. Non allargare i `permitAll` senza un test in `CondivisioniTest`.
+- La pagina `/c/<token>` è la stessa app: `main.ts` vede `/c/` e avvia solo
+  `Condivisa` (con `fetch`, senza l'interceptor del 401), così non parte
+  nessuna chiamata privata e nessun redirect a Keycloak.
 - `fototimeline.importazione` limita "Importa cartella" e il navigatore a una
   radice (sul server `/cloud`). L'archivio e le miniature si saltano sempre.
 
@@ -215,6 +274,34 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - `utenti` (`RegistroUtenti`): ogni login (`RuoliKeycloak`) e ogni `GET /api/io`
   aggiornano username, nome, email, admin, ultimo accesso. `GET /api/utenti` è
   da admin. Niente API admin di Keycloak.
+
+## Foto quasi uguali
+
+- Pacchetto `quasiuguali`. `Foto.impronta` è un pHash a 64 bit (`Impronta`,
+  Java puro: 32×32 riquadri di luminosità, DCT, 8×8 basse frequenze contro la
+  mediana) calcolato dalla **miniatura**, mai dall'originale: si fa in
+  `FotoService.anteprime` per foto e HEIC (non i video); se non riesce resta
+  null e la riempie "Calcola impronte".
+- `CalcoloImpronte` (thread `impronte`, uno alla volta, annullabile) prende le
+  foto senza impronta per `_id` crescente a blocchi: idempotente, e una foto
+  che non riesce non si ripesca nello stesso giro. `POST /api/quasi-uguali/calcola`
+  è da admin; `risolvi` e `ignora` hanno i permessi dell'eliminazione.
+- `Raggruppamento`: niente confronto di tutte le coppie. L'impronta si divide
+  in `soglia + 1` bande: per il principio dei cassetti due impronte a distanza
+  ≤ soglia hanno una banda identica, quindi si confrontano solo le foto nello
+  stesso cassetto; poi union-find. Le raffiche (data EXIF entro
+  `finestra-raffica`, 10 s) hanno una soglia più larga (`soglia-raffica`, 12),
+  cercata scorrendo le foto in ordine di data. Le ricompressioni passano dalle
+  bande, senza guardare la data (WhatsApp la cambia).
+- Soglia 6 (`fototimeline.quasi-uguali.soglia`): in `ImprontaTest` le copie
+  ridimensionate e ricompresse (anche JPEG al 10%) stanno a 0–6 bit, foto
+  diverse a 20 o più. Alzarla costa: con 150.000 impronte casuali i gruppi si fanno in
+  ~0,2 s a 6 e ~3 s a 8 (bande più strette, cassetti più pieni).
+- `QuasiUguali` tiene i gruppi in cache (si rifanno se cambia il numero di foto
+  o dopo 10 minuti); `risolvi` e `ignora` la aggiornano senza ricalcolare.
+  "Non sono doppioni" salva il gruppo in `quasi_uguali_ignorati`: le foto di uno
+  stesso documento non si uniscono più tra loro (risolvi lo fa per le tenute,
+  se più d'una). Le preferite: `tieni` sempre vero e `risolvi` le rifiuta (400).
 
 ## Git e CI
 

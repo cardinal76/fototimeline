@@ -3,7 +3,23 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { CaricateDa, Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
+import {
+  CaricateDa,
+  Caricamento,
+  CopiaBackup,
+  ElencoLuoghi,
+  Filtro,
+  Foto,
+  Giorno,
+  Io,
+  LavoroImportazione,
+  Modifica,
+  Operazione,
+  Salute,
+  StatoCloud,
+  StatoConversioni,
+  VoceMese,
+} from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** Le estensioni che il backend accetta (FotoService.TIPI). */
@@ -36,6 +52,8 @@ export class Galleria {
   readonly album = signal<string[]>([]);
   /** Chi ha portato foto, per il filtro e per "Caricata da Anna". */
   readonly caricateDa = signal<CaricateDa[]>([]);
+  /** Luoghi con i conteggi: per il filtro e per "Calcola luoghi". */
+  readonly luoghi = signal<ElencoLuoghi | null>(null);
   readonly selezionate = signal<ReadonlySet<string>>(new Set());
   readonly caricamento = signal<StatoCaricamento | null>(null);
   readonly avviso = signal<string | null>(null);
@@ -45,8 +63,12 @@ export class Galleria {
   /** Ultimo backup dei metadati (solo per gli admin). */
   readonly ultimoBackup = signal<CopiaBackup | null>(null);
   readonly backupInCorso = signal(false);
+  /** L'ultimo controllo della pagina "Salute" (solo per gli admin), per il pallino nella barra. */
+  readonly salute = signal<Salute | null>(null);
   /** Importazione da seguire con la barra; null quando non ce n'è una da mostrare. */
   readonly importazione = signal<LavoroImportazione | null>(null);
+  /** Coda delle versioni compatibili dei video (solo admin); null quando non c'è niente da mostrare. */
+  readonly conversioni = signal<StatoConversioni | null>(null);
   /** Originali raggiungibili: sul PC sempre, sul server solo col cloud montato. */
   readonly archivioDisponibile = computed(() => {
     const c = this.cloud();
@@ -84,6 +106,9 @@ export class Galleria {
 
   private pagina = 0;
   private importazioneTimer?: ReturnType<typeof setTimeout>;
+  private conversioniTimer?: ReturnType<typeof setTimeout>;
+  /** La barra delle conversioni è stata chiusa: torna quando la coda riparte. */
+  private conversioniChiuse = false;
   /** L'ultima importazione già vista finita: non la si riannuncia. */
   private importazioneVista?: string;
   private richiesta?: Subscription;
@@ -94,10 +119,13 @@ export class Galleria {
       this.io.set(io);
       if (io.admin) {
         this.aggiornaBackup();
+        this.seguiConversioni();
+        this.seguiSalute();
       }
     });
     this.aggiornaCloud();
     this.ricarica();
+    this.aggiornaLuoghi();
     // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
     this.api.importazioneCorrente().subscribe((l) => {
       if (l && l.stato !== 'IN_CORSO') {
@@ -120,6 +148,17 @@ export class Galleria {
     const lavoro = await firstValueFrom(this.api.indicizza());
     this.importazione.set(lavoro);
     this.seguiImportazione();
+  }
+
+  /** "Calcola luoghi": stessa barra delle importazioni. */
+  async avviaLuoghi(tutte: boolean): Promise<void> {
+    const lavoro = await firstValueFrom(this.api.calcolaLuoghi(tutte));
+    this.importazione.set(lavoro);
+    this.seguiImportazione();
+  }
+
+  aggiornaLuoghi(): void {
+    this.api.luoghi().subscribe({ next: (l) => this.luoghi.set(l), error: () => {} });
   }
 
   annullaImportazione(): void {
@@ -147,12 +186,70 @@ export class Galleria {
           this.importazione.set(l);
           if (l.stato !== 'IN_CORSO' && prima?.stato === 'IN_CORSO') {
             this.ricarica();
+            this.aggiornaLuoghi();
           }
         }
         this.importazioneTimer = setTimeout(() => this.seguiImportazione(), l?.stato === 'IN_CORSO' ? 1000 : 60000);
       },
       error: () => (this.importazioneTimer = setTimeout(() => this.seguiImportazione(), 60000)),
     });
+  }
+
+  // ------------------------------------------------------------ conversioni dei video
+
+  async convertiVideo(): Promise<void> {
+    this.conversioniChiuse = false;
+    this.conversioni.set(await firstValueFrom(this.api.convertiVideo()));
+    this.seguiConversioni();
+  }
+
+  annullaConversioni(): void {
+    this.api.annullaConversioni().subscribe((s) => {
+      this.conversioni.set(s);
+      this.seguiConversioni();
+    });
+  }
+
+  chiudiConversioni(): void {
+    this.conversioniChiuse = true;
+    this.conversioni.set(null);
+  }
+
+  /**
+   * Come le importazioni: ogni 2 secondi mentre la coda lavora, ogni minuto
+   * altrimenti (si accorge dei video entrati in coda con un'importazione).
+   */
+  private seguiConversioni(): void {
+    clearTimeout(this.conversioniTimer);
+    this.api.conversioni().subscribe({
+      next: (s) => {
+        const attiva = s.inCorso || s.daFare > 0;
+        if (attiva) {
+          this.conversioniChiuse = false;
+        }
+        if (!this.conversioniChiuse && (attiva || this.conversioni())) {
+          this.conversioni.set(s);
+        }
+        this.conversioniTimer = setTimeout(() => this.seguiConversioni(), s.inCorso && !s.inAttesa ? 2000 : 60000);
+      },
+      error: () => (this.conversioniTimer = setTimeout(() => this.seguiConversioni(), 60000)),
+    });
+  }
+
+  /** Il pallino della salute: subito e poi ogni 5 minuti. */
+  private seguiSalute(): void {
+    this.aggiornaSalute();
+    setInterval(() => this.aggiornaSalute(), 5 * 60_000);
+  }
+
+  aggiornaSalute(): Promise<Salute | null> {
+    return firstValueFrom(this.api.salute()).then(
+      (s) => {
+        this.salute.set(s);
+        return s;
+      },
+      () => null,
+    );
   }
 
   aggiornaBackup(): void {
@@ -338,6 +435,7 @@ export class Galleria {
       this.caricamento.set({ ...stato, errori: [...stato.errori] });
     }
     this.ricarica();
+    this.aggiornaLuoghi();
   }
 
   private caricaGruppo(gruppo: File[], stato: StatoCaricamento): Promise<Caricamento[]> {

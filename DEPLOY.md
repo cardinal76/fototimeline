@@ -17,6 +17,7 @@ login: Keycloak di presenze, realm "fototimeline"
 | Originali | LifetimeCloud, cartella `FotoTimeline/AAAA/MM/GG/` |
 | Foto da importare | qualunque cartella di LifetimeCloud (l'app vede la radice come `/cloud`) |
 | Miniature | volume Docker `fototimeline_miniature` su server2 (si rigenerano dagli originali) |
+| Video compatibili (H.264) | LifetimeCloud, `FotoTimeline/.compatibili/<id>.mp4` (si rifanno con "Converti video") |
 | Metadati (date, tag, album) | MongoDB, volume `fototimeline_mongo` su server2 |
 | Configurazione e segreti | `~/fototimeline/.env` e `~/fototimeline/rclone/rclone.conf` su server2 |
 
@@ -320,6 +321,143 @@ deploy/foto-da-pcloud.sh pulisci      # dopo 7 giorni
 I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
 (cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
 foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
+
+### Luoghi dal GPS (GeoNames)
+
+Il nome del posto (Sperlonga, Lazio · Italia) si ricava dalle coordinate sul
+server, senza chiamare servizi esterni: nell'immagine ci sono i centri abitati
+di [GeoNames](https://www.geonames.org/), che il Dockerfile scarica nello
+stage `geonames` da `https://download.geonames.org/export/dump/` e mette in
+`/app/geonames` (`FOTOTIMELINE_LUOGHI`):
+
+| File | Cosa | Peso nell'immagine |
+|---|---|---|
+| `cities500.txt` | ~225 mila centri sopra i 500 abitanti (anche molte frazioni italiane), senza la colonna dei nomi alternativi | ~25 MB |
+| `alternateNames-it.txt` | i nomi in italiano (Roma, Parigi, Baviera), filtrati da `alternateNamesV2.zip` (200 MB, scaricato e buttato nello stage) | ~0,9 MB |
+| `admin1CodesASCII.txt`, `countryInfo.txt` | regioni e nazioni | ~0,2 MB |
+
+In tutto circa **26 MB** in più nell'immagine. All'avvio l'app li legge in un
+paio di secondi in un indice compatto (array di primitivi, k-d tree): circa
+**10 MB di heap** sui 384 della JVM. Oltre 30 km dal centro abitato più vicino
+(`FOTOTIMELINE_LUOGHI_DISTANZA`) il luogo resta sconosciuto: mare aperto.
+Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
+"Luoghi spenti").
+
+- Le foto nuove prendono il luogo all'importazione e all'indicizzazione.
+- Per quelle già in archivio: da admin **Calcola luoghi** (`POST
+  /api/archivio/luoghi`), in sottofondo con la barra delle importazioni. Legge
+  solo MongoDB, non il cloud: va anche da smontato, 150 mila foto in meno di
+  un minuto. Rilanciarlo non rifà quelle già calcolate (anche quelle in mare
+  aperto, segnate con `luogoCalcolato`); se tutte ce l'hanno chiede se
+  ricalcolarle tutte (`?tutte=true`), utile dopo un aggiornamento del dataset.
+- **Aggiornare il dataset**: lo stage resta nella cache di Docker e non si
+  riscarica a ogni rilascio (se la cache viene pulita, si riscarica da sé: ~215
+  MB, un minuto). Per prendere quello nuovo, su server2 dal checkout del runner
+  e con `C` come in "Comandi utili su server2": `$C build --no-cache app`, poi
+  il rilascio e **Calcola luoghi** → ricalcola tutte.
+- **Attribuzione**: i dati GeoNames sono sotto licenza
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): l'app lo dice nel
+  pannello del filtro "Luogo" e nel visore, accanto alla posizione. Non
+  toglierlo.
+- Nelle grandi città straniere il più vicino può essere un quartiere che
+  GeoNames tiene come centro a sé ("Paris 16 Passy", "City of Westminster"); i
+  quartieri segnati come tali (PPLX, per esempio Trastevere) si saltano.
+
+### Video compatibili (HEVC → H.264)
+
+I video HEVC dell'iPhone (e VP9, ProRes, H.264 a 10 bit, audio PCM) non si
+vedono in tutti i browser: Firefox e Chrome su Linux e su molti Windows senza
+accelerazione hardware non li riproducono. L'app ne fa una **versione
+compatibile** H.264/AAC in MP4 (`-preset veryfast -crf 23 -movflags +faststart`,
+lato corto al massimo 1080, rotazione del telefono applicata) e il browser
+riceve quella; l'originale resta com'è e si scarica dal visore.
+
+- I video nuovi entrano in coda all'importazione, se ffprobe dice che servono;
+  per quelli già in archivio, da admin e col cloud montato, **Converti video**
+  (`POST /api/archivio/video/converti`). Quelli mai analizzati la coda li guarda
+  prima con ffprobe e li converte solo se serve. Un H.264 col `moov` in fondo
+  (senza faststart) non si converte: il browser lo legge a pezzi con `Range`.
+- **Un video alla volta**, su un thread solo, con `nice -n 19` e al massimo
+  `FOTOTIMELINE_VIDEO_THREAD` thread di ffmpeg (2 di predefinito). Lo stato sta
+  in MongoDB, sulla scheda (`conversione`: `IN_CODA`, `IN_CORSO`, `FATTA`,
+  `ERRORE`): dopo un rilascio la coda riparte da sola, dal video che era a metà.
+  Un video che non riesce finisce in `ERRORE` col motivo e la coda va avanti;
+  "Converti video" ci riprova. Col cloud smontato la coda **aspetta** (i video
+  restano in coda) e riparte entro un minuto dal montaggio.
+- **Dove**: `FotoTimeline/.compatibili/` nel cloud, accanto agli originali, non
+  sul disco di server2 come le miniature e le viste JPEG degli HEIC. Una
+  miniatura pesa 30 KB, un video convertito decine di MB: tutti insieme
+  riempirebbero il disco del VPS. Nel cloud lo spazio c'è, e il video si
+  legge da lì esattamente come l'originale (stesso montaggio, stessa cache di
+  rclone). Si può cambiare con `FOTOTIMELINE_VIDEO_DESTINAZIONE` (una cartella
+  fuori dall'archivio, per esempio un volume locale, non dipende dal cloud).
+  "Indicizza archivio" salta la cartella perché comincia col punto.
+- **Disco locale**: ffmpeg scrive il convertito in `/tmp` del container, poi lo
+  copia nel cloud; l'originale passa dalla cache di rclone (massimo 5 GB). Per
+  un video di 10 minuti servono qualche centinaio di MB liberi su server2.
+
+**Quanto costa** (stime per minuto di video, su un VPS a 4 vCPU con 2 thread;
+provato: 10 s di HEVC 4K30 → 1080p in 32 s):
+
+| Originale | CPU per minuto di video | Convertito, per minuto |
+|---|---|---|
+| HEVC 1080p30 (iPhone "HD") | ~1 minuto | 40–60 MB |
+| HEVC 4K30 | ~3 minuti | 40–60 MB (l'originale ~170 MB) |
+| HEVC 4K60 | ~6 minuti | 50–80 MB (l'originale ~400 MB) |
+
+Mentre converte prende `FOTOTIMELINE_VIDEO_THREAD` core (a priorità bassa:
+build e app hanno la precedenza). Per un trasloco grande lo si può alzare nel
+`.env` e rifare il rilascio; per lasciare più CPU ai runner, `1` (circa il
+doppio del tempo). `FOTOTIMELINE_VIDEO_ATTIVA=false` le spegne del tutto
+(i video si servono come sono); `FOTOTIMELINE_VIDEO_RISOLUZIONE=720` le fa più
+leggere e più veloci.
+
+## Salute e avvisi su Telegram
+
+Il bottone **Salute** in alto a destra (solo admin) mostra con un pallino
+verde, giallo o rosso: rclone, cloud montato, ultimo backup dei metadati,
+sincronizzazione dei telefoni, importazioni (e file in attesa nella cartella
+automatica), spazio sul disco delle miniature, su `lifetime:` e sui remote dei
+telefoni (`pcloud:`, ...),
+numeri dell'archivio. Il pallino sul bottone è lo stato peggiore; si aggiorna
+ogni 5 minuti. `/salute` resta l'healthcheck di Docker e non cambia.
+
+Soglie: backup più vecchio di due intervalli (con `P1D`, due giorni) rosso,
+mai fatto giallo; i telefoni sono una voce sola, rossa se un telefono attivo
+è fermo da più di due dei suoi intervalli o ha l'ultimo giro in errore, col
+nome del telefono nel messaggio (gli errori del token di pCloud, per esempio
+`2094`, lo dicono); spazio libero sotto il 10% giallo, sotto il 5% rosso;
+cloud smontato giallo, rclone che non risponde rosso.
+
+Ogni 15 minuti l'app ricontrolla e scrive su Telegram **solo quando una voce
+cambia**: diventa rossa, o torna a posto ("risolto"). Il giallo non avvisa,
+salvo `FOTOTIMELINE_TELEGRAM_ATTENZIONE=true`. Gli stati visti stanno in
+Mongo: un riavvio o un rilascio non rimandano niente.
+
+Per accenderli, una volta:
+
+1. su Telegram scrivi a **@BotFather**: `/newbot`, un nome, un nome utente che
+   finisce con `bot`. Ti risponde con il **token** (`123456789:AA...`);
+2. apri la chat con il tuo bot e scrivigli qualcosa (un bot non può scrivere
+   per primo);
+3. prendi il **chat id**: apri
+   `https://api.telegram.org/bot<TOKEN>/getUpdates` e cerca `"chat":{"id":...}`
+   (un numero; per un gruppo è negativo e il bot deve essere nel gruppo);
+4. mettili nel `.env` di server2 (`nano ~/fototimeline/.env`):
+
+   ```bash
+   FOTOTIMELINE_TELEGRAM_TOKEN=123456789:AA...
+   FOTOTIMELINE_TELEGRAM_CHAT=987654321
+   ```
+
+5. rilascia (workflow **Rilascio**, come sopra): le variabili entrano nel
+   container solo così;
+6. **Salute → Messaggio di prova**: deve arrivare su Telegram. Se no, il
+   messaggio d'errore dice cosa risponde Telegram (`chat not found`: chat id
+   sbagliato o non hai scritto al bot; `Unauthorized`: token sbagliato).
+
+Il token non finisce nei log né nelle risposte dell'app. Il link nei messaggi
+è `https://$FOTOTIMELINE_DOMINIO`.
 
 ## Comandi utili su server2
 

@@ -65,10 +65,19 @@ public class ConfigurazioneSicurezza {
             // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
             a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
                     .permitAll();
-            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**")
+            // I link di condivisione: la pagina, i suoi dati e i file dell'app Angular che la disegna
+            // (codice compilato, uguale per tutti, senza dati). Il token lo controlla CondiviseController
+            // a ogni richiesta; LimiteRichieste frena chi prova token a caso. Solo GET: nient'altro si apre.
+            a.requestMatchers(HttpMethod.GET, "/c/*", "/api/condivise/**").permitAll();
+            a.requestMatchers(HttpMethod.GET, "/main-*.js", "/chunk-*.js", "/polyfills-*.js", "/styles-*.css")
+                    .permitAll();
+            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**",
+                    "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**")
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
             // Chi è entrato nell'app: email e ruoli, solo per gli admin.
-            a.requestMatchers("/api/utenti").hasAuthority("ROLE_" + login.ruoloAdmin());
+            a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            // La pagina "Salute" e la prova di Telegram (/salute, l'healthcheck, resta pubblico qui sopra).
+            a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);

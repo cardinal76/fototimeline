@@ -7,11 +7,16 @@ import java.util.TreeSet;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document("foto")
-@CompoundIndex(name = "timeline", def = "{'scattataIl': -1, '_id': -1}")
+@CompoundIndexes({
+        @CompoundIndex(name = "timeline", def = "{'scattataIl': -1, '_id': -1}"),
+        // Il filtro per luogo manda nazione, regione e luogo: basta il prefisso.
+        @CompoundIndex(name = "luoghi", def = "{'codiceNazione': 1, 'regione': 1, 'luogo': 1}")
+})
 public class Foto {
 
     @Id
@@ -53,6 +58,16 @@ public class Foto {
     private Double latitudine;
     private Double longitudine;
 
+    /** Dal GPS, con GeoNames (GeocodificaInversa): il centro abitato più vicino. */
+    private String luogo;
+    private String regione;
+    /** In italiano: "Francia". */
+    private String nazione;
+    /** ISO a due lettere: "FR". */
+    private String codiceNazione;
+    /** Luogo già cercato, anche se non trovato (mare aperto): "Calcola luoghi" la salta. */
+    private boolean luogoCalcolato;
+
     /** Percorso dell'originale, relativo alla cartella dell'archivio. */
     @Indexed
     private String percorso;
@@ -61,6 +76,25 @@ public class Foto {
     private boolean video;
     /** Durata del video, in secondi. */
     private Double durata;
+
+    /** Codec del video e dell'audio come li dice ffprobe ("hevc", "aac"); null per le foto. */
+    private String codecVideo;
+    private String codecAudio;
+    /**
+     * True se ogni browser sa riprodurre l'originale (H.264 + AAC/MP3 in
+     * MP4/MOV); false se serve la versione compatibile; null se il video non
+     * è ancora stato analizzato (archivi di prima, "Converti video" lo fa).
+     */
+    private Boolean compatibile;
+    /** La versione compatibile: in coda, fatta, non riuscita; null se non serve o non è chiesta. */
+    @Indexed(sparse = true)
+    private StatoConversione conversione;
+    private String erroreConversione;
+    /**
+     * Impronta percettiva (pHash a 64 bit) della miniatura, per trovare le foto
+     * quasi uguali; null per i video e finché non è calcolata.
+     */
+    private Long impronta;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -125,6 +159,21 @@ public class Foto {
     public Double getLongitudine() { return longitudine; }
     public void setLongitudine(Double longitudine) { this.longitudine = longitudine; }
 
+    public String getLuogo() { return luogo; }
+    public void setLuogo(String luogo) { this.luogo = luogo; }
+
+    public String getRegione() { return regione; }
+    public void setRegione(String regione) { this.regione = regione; }
+
+    public String getNazione() { return nazione; }
+    public void setNazione(String nazione) { this.nazione = nazione; }
+
+    public String getCodiceNazione() { return codiceNazione; }
+    public void setCodiceNazione(String codiceNazione) { this.codiceNazione = codiceNazione; }
+
+    public boolean isLuogoCalcolato() { return luogoCalcolato; }
+    public void setLuogoCalcolato(boolean luogoCalcolato) { this.luogoCalcolato = luogoCalcolato; }
+
     public String getPercorso() { return percorso; }
     public void setPercorso(String percorso) { this.percorso = percorso; }
 
@@ -133,4 +182,22 @@ public class Foto {
 
     public Double getDurata() { return durata; }
     public void setDurata(Double durata) { this.durata = durata; }
+
+    public String getCodecVideo() { return codecVideo; }
+    public void setCodecVideo(String codecVideo) { this.codecVideo = codecVideo; }
+
+    public String getCodecAudio() { return codecAudio; }
+    public void setCodecAudio(String codecAudio) { this.codecAudio = codecAudio; }
+
+    public Boolean getCompatibile() { return compatibile; }
+    public void setCompatibile(Boolean compatibile) { this.compatibile = compatibile; }
+
+    public StatoConversione getConversione() { return conversione; }
+    public void setConversione(StatoConversione conversione) { this.conversione = conversione; }
+
+    public String getErroreConversione() { return erroreConversione; }
+    public void setErroreConversione(String erroreConversione) { this.erroreConversione = erroreConversione; }
+
+    public Long getImpronta() { return impronta; }
+    public void setImpronta(Long impronta) { this.impronta = impronta; }
 }
