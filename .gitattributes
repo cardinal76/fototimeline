@@ -1,0 +1,4 @@
+# Gli script girano in Linux/WSL: sempre "a capo" Unix, anche se git su Windows converte.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
