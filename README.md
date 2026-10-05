@@ -52,9 +52,15 @@ Il server: [DEPLOY.md](DEPLOY.md).
   stessa barra delle importazioni.
 - **Importazione automatica**: una cartella (per esempio quella dove il
   telefono carica nel cloud) che ogni 15 minuti si svuota nell'archivio.
-- **Foto dal telefono via pCloud** (admin, sul server): ogni tot ore copia le
-  foto nuove da pCloud ("Automatic Upload") nella cartella automatica e, dopo
-  qualche giorno, le toglie da pCloud se sono state importate (DEPLOY.md).
+- **Foto dai telefoni via pCloud** (sul server): un elenco di telefoni, uno per
+  familiare, ognuno con la sua cartella su pCloud (anche su account diversi),
+  il suo proprietario e i suoi orari. Ogni tot ore copia le foto nuove nella
+  cartella automatica e, dopo qualche giorno, le toglie da pCloud se sono
+  state importate. L'admin li aggiunge e li cambia; ognuno vede lo stato del
+  proprio e può lanciarne un giro (DEPLOY.md).
+- **Archivio di famiglia**: tutti vedono tutte le foto, ma ogni foto sa chi
+  l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
+  o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
 - **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
   informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
   tag, album, data; si scarica l'originale o si elimina.
@@ -67,7 +73,8 @@ Il server: [DEPLOY.md](DEPLOY.md).
 - **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
-  fotocamera), tag, album, solo preferite.
+  fotocamera), tag, album, solo preferite, "Caricate da" (chi le ha portate,
+  con quante foto).
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
@@ -137,6 +144,7 @@ java -jar target/fototimeline-1.0.0.jar
 | `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
+| `FOTOTIMELINE_TELEFONO_PROPRIETARIO` | (vuoto)                      | Di chi è il telefono migrato da quando era uno solo; vuoto = del primo admin che entra |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -150,21 +158,25 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
 | GET    | `/api/importazioni/corrente` | Importazione in corso o ultima finita (204 se nessuna)     |
 | POST   | `/api/importazioni/annulla`  | Ferma quella in corso                                      |
 | GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
-| GET    | `/api/io`                    | Utente collegato, se è admin, radice di importazione       |
+| GET    | `/api/io`                    | Utente collegato (`username`, `nome`), se è admin, radice di importazione; registra l'utente in `utenti` |
+| GET    | `/api/utenti`                | Utenti entrati almeno una volta: username, nome, email, primo e ultimo accesso, admin (ruolo `fototimeline-admin`) |
+| GET    | `/api/caricate-da`           | Chi ha portato foto e quante (`username`, `nome`, `conteggio`), per il filtro |
 | GET    | `/api/cloud`                 | Cloud montato o no                                         |
 | GET    | `/api/backup`                | Backup dei metadati presenti                               |
 | POST   | `/api/backup`                | Fa subito un backup (ruolo `fototimeline-admin`)           |
 | POST   | `/api/cloud/monta`, `/smonta`| Monta o smonta il cloud (ruolo `fototimeline-admin`)       |
-| GET    | `/api/telefono`              | Sincronizzazione del telefono: impostazioni, ultimo giro, `disponibile`/`motivo`, `inCorso` (ruolo `fototimeline-admin`) |
-| PUT    | `/api/telefono`              | `{ attiva, sorgente, intervalloOre, giorniPrimaDiCancellare }` (400 fuori misura; admin) |
-| POST   | `/api/telefono/sincronizza`  | Un giro subito, in sottofondo: 202, 409 se già in corso (admin) |
+| GET    | `/api/telefoni`              | `{ disponibile, motivo, destinazione, telefoni: [...] }`: ogni telefono con impostazioni, `inCorso`/`inCoda`, ultimo giro, giro in corso, prossimo giro. L'admin li vede tutti, gli altri solo i propri |
+| POST   | `/api/telefoni`              | Aggiunge un telefono: `{ nome, proprietario, sorgente, attiva, intervalloOre, giorniPrimaDiCancellare, copieInParallelo }` (201; 400 fuori misura o cartella già usata; admin) |
+| PUT    | `/api/telefoni/{id}`         | Cambia un telefono, stessi campi (null = com'è; admin) |
+| DELETE | `/api/telefoni/{id}`         | Toglie un telefono; il registro delle copie resta (204; 409 durante un giro; admin) |
+| POST   | `/api/telefoni/{id}/sincronizza` | Un giro subito, in coda dietro agli altri: 202, 409 se già in coda (admin o proprietario) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |

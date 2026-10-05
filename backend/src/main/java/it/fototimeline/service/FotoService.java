@@ -105,11 +105,15 @@ public class FotoService {
 
     /** Come {@link #importa(String, Path, Instant, String)}, da byte in memoria (test, file piccoli). */
     public Caricamento importa(String nome, byte[] contenuto, Instant ultimaModifica, String album) {
+        return importa(nome, contenuto, ultimaModifica, album, null);
+    }
+
+    public Caricamento importa(String nome, byte[] contenuto, Instant ultimaModifica, String album, String caricataDa) {
         Path temporaneo = null;
         try {
             temporaneo = Files.createTempFile("fototimeline-", "." + estensione(nome));
             Files.write(temporaneo, contenuto);
-            return importa(nome, temporaneo, ultimaModifica, album);
+            return importa(nome, temporaneo, ultimaModifica, album, caricataDa);
         } catch (IOException e) {
             return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
         } finally {
@@ -124,6 +128,15 @@ public class FotoService {
      * errore senza lanciare.
      */
     public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album) {
+        return importa(nome, file, ultimaModifica, album, null);
+    }
+
+    /**
+     * @param caricataDa lo username di chi la porta (chi carica, chi importa, il
+     *                   proprietario del telefono); null se non si sa. Un
+     *                   duplicato tiene quello che aveva.
+     */
+    public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa) {
         archivio.verificaDisponibile();
         Letto letto;
         try {
@@ -133,6 +146,7 @@ public class FotoService {
         }
         Foto foto = letto.foto();
         foto.setAlbum(pulisciAlbum(album));
+        foto.setCaricataDa(vuotoANull(caricataDa));
         if (ultimaModifica != null) {
             data(foto, letto.data(), LocalDateTime.ofInstant(ultimaModifica, clock.getZone()), OrigineData.FILE);
         } else {
@@ -444,6 +458,20 @@ public class FotoService {
                 .toList();
     }
 
+    /** Per il filtro "Caricate da": chi ha portato foto e quante, dal più attivo. Senza le foto di nessuno. */
+    public List<Caricatore> caricateDa() {
+        var aggregazione = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("caricataDa").ne(null)),
+                Aggregation.group("caricataDa").count().as("conteggio"),
+                Aggregation.sort(Sort.by(Sort.Order.desc("conteggio"), Sort.Order.asc("_id"))));
+        return mongo.aggregate(aggregazione, Foto.class, Document.class).getMappedResults().stream()
+                .map(d -> new Caricatore(d.getString("_id"), ((Number) d.get("conteggio")).longValue()))
+                .toList();
+    }
+
+    public record Caricatore(String username, long conteggio) {
+    }
+
     public Path fileOriginale(Foto foto) {
         return archivio.originale(foto.getPercorso());
     }
@@ -628,6 +656,9 @@ public class FotoService {
         }
         if (Boolean.TRUE.equals(f.preferite())) {
             e.add(Criteria.where("preferita").is(true));
+        }
+        if (f.caricataDa() != null && !f.caricataDa().isBlank()) {
+            e.add(Criteria.where("caricataDa").is(f.caricataDa().trim()));
         }
         if (f.dal() != null || f.al() != null) {
             Criteria data = Criteria.where("scattataIl");

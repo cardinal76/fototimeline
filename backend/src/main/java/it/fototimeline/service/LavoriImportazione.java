@@ -53,6 +53,7 @@ public class LavoriImportazione {
     private final ImportazioneCartelle importazione;
     private final ImportazioneAutomaticaProperties automatica;
     private final ArchivioFile archivio;
+    private final List<ProvenienzaFile> provenienze;
     private final Clock clock;
     private final ExecutorService esecutore = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "importazione");
@@ -62,16 +63,38 @@ public class LavoriImportazione {
     private final AtomicReference<Lavoro> ultimo = new AtomicReference<>();
 
     public LavoriImportazione(ImportazioneCartelle importazione, ImportazioneAutomaticaProperties automatica,
-            ArchivioFile archivio, Optional<Clock> clock) {
+            ArchivioFile archivio, List<ProvenienzaFile> provenienze, Optional<Clock> clock) {
         this.importazione = importazione;
         this.automatica = automatica;
         this.archivio = archivio;
+        this.provenienze = List.copyOf(provenienze);
         this.clock = clock.orElse(Clock.systemUTC());
     }
 
-    /** Lancia l'importazione in sottofondo. Una alla volta: con un'altra in corso, IllegalStateException. */
-    public StatoLavoro avvia(Path cartella, boolean albumDaCartella, boolean sposta, Origine origine) {
-        return avvia(cartella, origine, lavoro -> importazione.importa(cartella, albumDaCartella, sposta, lavoro));
+    /**
+     * Lancia l'importazione in sottofondo. Una alla volta: con un'altra in
+     * corso, IllegalStateException. Le foto nuove hanno {@code caricataDa}
+     * (chi l'ha lanciata); dalla cartella automatica, chi ha portato il file.
+     */
+    public StatoLavoro avvia(Path cartella, boolean albumDaCartella, boolean sposta, Origine origine,
+            String caricataDa) {
+        return avvia(cartella, origine, lavoro -> importazione.importa(cartella, albumDaCartella, sposta, lavoro,
+                origine == Origine.AUTOMATICA ? this::provenienza : file -> caricataDa));
+    }
+
+    /** Il primo che sa da chi arriva il file (oggi solo i telefoni). */
+    private String provenienza(Path file) {
+        for (ProvenienzaFile p : provenienze) {
+            try {
+                String chi = p.caricataDa(file);
+                if (chi != null) {
+                    return chi;
+                }
+            } catch (RuntimeException e) {
+                log.warn("Non so da chi arriva {}: {}", file, e.getMessage());
+            }
+        }
+        return null;
     }
 
     /**
@@ -136,7 +159,7 @@ public class LavoriImportazione {
                 return;
             }
             log.info("Foto nuove in {}: le importo", cartella);
-            avvia(cartella, true, true, Origine.AUTOMATICA);
+            avvia(cartella, true, true, Origine.AUTOMATICA, null);
         } catch (IllegalStateException | ArchivioNonDisponibile e) {
             log.debug("Importazione automatica rimandata: {}", e.getMessage());
         } catch (Exception e) {

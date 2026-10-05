@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -31,9 +33,19 @@ import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.Origine;
 import it.fototimeline.service.LavoriImportazione.Stato;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
+import it.fototimeline.service.ProvenienzaFile;
 
 @SpringBootTest(properties = "de.flapdoodle.mongodb.embedded.version=7.0.14")
 class LavoriImportazioneTest {
+
+    /** Al posto dei telefoni: i file che iniziano con "anna-" li ha portati Anna. */
+    @TestConfiguration
+    static class Provenienza {
+        @Bean
+        ProvenienzaFile daAnna() {
+            return file -> file.getFileName().toString().startsWith("anna-") ? "anna" : null;
+        }
+    }
 
     @TempDir
     static Path disco;
@@ -70,7 +82,7 @@ class LavoriImportazioneTest {
         }
         Files.writeString(cartella.resolve("note.txt"), "non è una foto");
 
-        StatoLavoro partito = lavori.avvia(cartella, false, false, Origine.MANUALE);
+        StatoLavoro partito = lavori.avvia(cartella, false, false, Origine.MANUALE, "marco");
         assertThat(partito.stato()).isEqualTo(Stato.IN_CORSO);
 
         StatoLavoro fine = aspettaFine();
@@ -80,6 +92,8 @@ class LavoriImportazioneTest {
         assertThat(fine.importate()).isEqualTo(5);
         assertThat(fine.finitoIl()).isAfterOrEqualTo(fine.iniziatoIl());
         assertThat(repository.count()).isEqualTo(5);
+        // Chi ha lanciato "Importa cartella" le ha portate tutte.
+        assertThat(repository.findAll()).extracting(Foto::getCaricataDa).containsOnly("marco");
     }
 
     @Test
@@ -87,8 +101,8 @@ class LavoriImportazioneTest {
         for (int i = 0; i < 40; i++) {
             Files.write(cartella.resolve("f" + i + ".png"), immagine(new Color(i * 6, i * 3, 200)));
         }
-        lavori.avvia(cartella, false, false, Origine.MANUALE);
-        assertThatThrownBy(() -> lavori.avvia(cartella, false, false, Origine.MANUALE))
+        lavori.avvia(cartella, false, false, Origine.MANUALE, null);
+        assertThatThrownBy(() -> lavori.avvia(cartella, false, false, Origine.MANUALE, null))
                 .isInstanceOf(IllegalStateException.class);
         lavori.annulla();
         assertThat(aspettaFine().stato()).isIn(Stato.ANNULLATA, Stato.FINITA);
@@ -100,15 +114,21 @@ class LavoriImportazioneTest {
         Files.createDirectories(telefono.resolve("WhatsApp"));
         Files.write(telefono.resolve("IMG_1.png"), immagine(Color.RED));
         Files.write(telefono.resolve("WhatsApp/IMG_2.png"), immagine(Color.GREEN));
+        Files.write(telefono.resolve("anna-IMG_3.png"), immagine(Color.BLUE));
 
         lavori.controllaCartellaAutomatica();
         StatoLavoro fine = aspettaFine();
 
         assertThat(fine.origine()).isEqualTo(Origine.AUTOMATICA);
-        assertThat(fine.importate()).isEqualTo(2);
-        assertThat(fine.rimossi()).isEqualTo(2);
+        assertThat(fine.importate()).isEqualTo(3);
+        assertThat(fine.rimossi()).isEqualTo(3);
         assertThat(telefono).exists().isEmptyDirectory();
         assertThat(service.album()).containsExactly("WhatsApp");
+        // Di chi è lo dice la provenienza (i telefoni), non chi ha lanciato niente.
+        assertThat(repository.findAll()).extracting(Foto::getNomeOriginale, Foto::getCaricataDa)
+                .containsExactlyInAnyOrder(org.assertj.core.groups.Tuple.tuple("IMG_1.png", null),
+                        org.assertj.core.groups.Tuple.tuple("IMG_2.png", null),
+                        org.assertj.core.groups.Tuple.tuple("anna-IMG_3.png", "anna"));
 
         // Vuota: il controllo successivo non fa partire niente.
         lavori.controllaCartellaAutomatica();

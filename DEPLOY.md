@@ -118,8 +118,12 @@ ID=$($KC get clients -r fototimeline -q clientId=fototimeline --fields id --form
 $KC get clients/$ID/client-secret -r fototimeline
 ```
 
-Altri utenti: `create users` e `set-password` come sopra; senza
-`fototimeline-admin` vedono e gestiscono le foto ma non montano né smontano.
+Altri utenti (i familiari): `create users` e `set-password` come sopra,
+meglio con nome e email (`-s firstName=Anna -s lastName=Rossi -s email=...`):
+il nome è quello che l'app mostra in "Caricata da". Senza `fototimeline-admin`
+vedono e gestiscono le foto ma non montano né smontano, e dei telefoni vedono
+solo il proprio. Il telefono si aggiunge poi nell'app (GUIDA.md, "Aggiungere
+un familiare").
 Chi riceve il ruolo deve uscire e rientrare: il ruolo entra nel token al login.
 
 Se il deploy di presenze riconcilia i realm (`riconcilia-realm.py`), controlla
@@ -175,29 +179,39 @@ l'app guarda in quella cartella di LifetimeCloud e, se ci sono foto o video
 Basta far caricare all'app di LifetimeCloud sul telefono le foto in quella
 cartella.
 
-### Foto nuove dal telefono (pCloud)
+### Foto nuove dai telefoni (pCloud)
 
-Il telefono carica le foto su **pCloud** (cartella "Automatic Upload", con una
-sottocartella per dispositivo). L'app le porta da sola nella cartella
-automatica qui sopra (sul server `/cloud/telefono`, cioè `lifetime:telefono`):
+Ogni familiare ha il suo telefono, che carica le foto su **pCloud** (cartella
+"Automatic Upload", con una sottocartella per dispositivo), sul proprio account
+o su quello di famiglia. L'app ha un **elenco di telefoni** (in alto a destra,
+**Telefoni**): ognuno ha un nome ("Telefono di Anna"), un **proprietario** (lo
+username Keycloak di chi ce l'ha), la sua cartella (`pcloud:Automatic Upload`,
+o `pcloud-anna:Automatic Upload` per un altro account) e i suoi orari. Le foto
+finiscono tutte nella cartella automatica qui sopra (sul server
+`/cloud/telefono`, cioè `lifetime:telefono`):
 
-1. ogni `N` ore (da **Telefono**, predefinito 6) copia da pCloud i file
+1. ogni `N` ore (predefinito 6, per telefono) copia dalla sua cartella i file
    **nuovi** (foto, HEIC, video; niente PDF né file col punto) nella cartella
    automatica, senza sottocartelle: `Pixel 8/IMG_1.jpg` diventa
    `Pixel 8 - IMG_1.jpg`, così il nome del dispositivo non diventa un album. Un
-   nome già presente prende ` (2)`. Ogni copia si controlla (stessa
-   dimensione) e si segna in MongoDB (`copie_telefono`): un file già copiato
-   non si ricopia più;
+   nome già presente (anche di un altro telefono) prende ` (2)`. Ogni copia si
+   controlla (stessa dimensione) e si segna in MongoDB (`copie_telefono`, con
+   la cartella, il telefono e il proprietario): un file già copiato non si
+   ricopia più;
 2. l'importazione automatica (ogni 15 minuti, col cloud montato) li sposta
-   nell'archivio;
-3. dopo `N` giorni dalla copia (predefinito 7; 0 = mai) li toglie da pCloud,
-   **solo se** non sono più nella cartella automatica, cioè se l'importazione
-   li ha presi. Quelli rimasti lì (importazione non riuscita) restano anche su
-   pCloud.
+   nell'archivio; per ogni file cerca nel registro la copia con quella
+   destinazione e mette nella foto **"caricata da"** il proprietario del
+   telefono. Per questo la cartella resta piatta: una sottocartella per
+   telefono diventerebbe un album;
+3. dopo `N` giorni dalla copia (predefinito 7; 0 = mai) li toglie dalla sua
+   cartella, **solo se** non sono più nella cartella automatica, cioè se
+   l'importazione li ha presi. Quelli rimasti lì (importazione non riuscita)
+   restano anche su pCloud.
 
-La copia passa dall'API di rclone (`operations/list`, `copyfile`, `stat`,
-`deletefile`), non dal montaggio: funziona anche col cloud smontato, e le foto
-aspettano nella cartella automatica finché non lo si monta.
+I telefoni girano uno alla volta: se due sono in ritardo, il secondo aspetta
+"in coda". La copia passa dall'API di rclone (`operations/list`, `copyfile`,
+`stat`, `deletefile`), non dal montaggio: funziona anche col cloud smontato, e
+le foto aspettano nella cartella automatica finché non lo si monta.
 
 **Il remote `pcloud`**, una volta sola, su server2:
 
@@ -211,15 +225,43 @@ docker run --rm -it -v ~/fototimeline/rclone:/config/rclone rclone/rclone:1.68 c
 docker restart fototimeline-rclone-1
 ```
 
+Per un familiare con **un altro account pCloud** serve un altro remote, con un
+altro nome (`pcloud-anna`), fatto allo stesso modo col suo login: i passi sono
+in [GUIDA.md](GUIDA.md), "Aggiungere un familiare".
+
 Il riavvio di rclone smonta il cloud: rimontalo dall'app (**Monta**). Poi,
-sempre da admin, **Telefono** in alto a destra: controlla la cartella su pCloud
-(`pcloud:Automatic Upload`), **Attiva** e **Salva**. **Sincronizza ora** fa
-subito un giro; sotto c'è com'è andato l'ultimo (copiati, già copiati, tolti da
-pCloud, errori) e quando parte il prossimo. Impostazioni e stato stanno in
-MongoDB (`impostazioni`, documento `sincronizzazione-telefono`).
+da admin, **Telefoni** → **Aggiungi** (o **Modifica**): nome, proprietario
+(si sceglie tra gli utenti già entrati o si scrive lo username), cartella,
+**Attivo**, **Aggiungi**/**Salva**. **Sincronizza ora** fa subito un giro di
+quel telefono; nell'elenco c'è com'è andato l'ultimo (copiati, già copiati,
+tolti da pCloud, errori), i contatori di quello in corso e quando parte il
+prossimo. **Elimina** toglie il telefono ma non il suo registro: rimesso con la
+stessa cartella, non ricopia niente. Telefoni e stato stanno in MongoDB
+(`sorgenti_telefono`).
+
+Chi non è admin vede in **Telefoni** solo i telefoni di cui è proprietario e
+può lanciarne un giro, ma non cambiarli né aggiungerne.
+
+**Dal telefono unico all'elenco.** Prima la sincronizzazione era una sola
+(`impostazioni/sincronizzazione-telefono`). All'avvio quel documento diventa il
+primo telefono, "Telefono" (id `telefono`), con le stesse impostazioni e
+l'ultimo giro, e poi si cancella; il registro resta com'è (la chiave è la
+cartella) e le sue voci prendono l'id del telefono: niente si ricopia. Il
+proprietario è `FOTOTIMELINE_TELEFONO_PROPRIETARIO` nel `.env`, altrimenti il
+primo amministratore già entrato, altrimenti il primo amministratore che entra
+dopo il rilascio.
 
 Si attiva solo sul server (serve rclone) e con `FOTOTIMELINE_CARTELLA_AUTOMATICA`
 dentro `RCLONE_PUNTO_MONTAGGIO`: altrimenti la finestra dice perché.
+
+### Chi ha caricato cosa
+
+Ogni foto nuova ha `caricataDa`, lo username Keycloak di chi l'ha portata:
+chi l'ha caricata dal browser o ha lanciato "Importa cartella", e per la
+cartella automatica il proprietario del telefono (i file messi lì a mano
+restano senza). Le foto di prima restano senza ("—" nel visore). Gli utenti si
+registrano da soli in MongoDB (`utenti`) quando entrano: username, nome, email,
+ultimo accesso, admin. Non serve l'API admin di Keycloak.
 
 ### Foto già ordinate nel cloud
 

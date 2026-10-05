@@ -3,9 +3,11 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
+  CaricateDa,
   Caricamento,
   Cartella,
   CopiaBackup,
+  ElencoTelefoni,
   Filtro,
   Foto,
   Io,
@@ -18,6 +20,7 @@ import {
   Ricordo,
   StatoCloud,
   StatoTelefono,
+  Utente,
   VoceMese,
 } from './modelli';
 
@@ -53,6 +56,16 @@ export class FotoApi {
 
   album(): Observable<string[]> {
     return this.http.get<string[]>('/api/album');
+  }
+
+  /** Chi ha portato foto e quante, per il filtro "Caricate da". */
+  caricateDa(): Observable<CaricateDa[]> {
+    return this.http.get<CaricateDa[]>('/api/caricate-da');
+  }
+
+  /** Gli utenti entrati almeno una volta (solo admin). */
+  utenti(): Observable<Utente[]> {
+    return this.http.get<Utente[]>('/api/utenti');
   }
 
   carica(file: File[], album?: string): Observable<HttpEvent<Caricamento[]>> {
@@ -111,17 +124,25 @@ export class FotoApi {
     return this.http.post<StatoCloud>('/api/cloud/smonta', {});
   }
 
-  /** Sincronizzazione del telefono da pCloud (solo admin). */
-  telefono(): Observable<StatoTelefono> {
-    return this.http.get<StatoTelefono>('/api/telefono');
+  /** I telefoni della famiglia: l'admin li vede tutti, gli altri il proprio. */
+  telefoni(): Observable<ElencoTelefoni> {
+    return this.http.get<ElencoTelefoni>('/api/telefoni');
   }
 
-  salvaTelefono(modifica: ModificaTelefono): Observable<StatoTelefono> {
-    return this.http.put<StatoTelefono>('/api/telefono', modifica);
+  creaTelefono(modifica: ModificaTelefono): Observable<StatoTelefono> {
+    return this.http.post<StatoTelefono>('/api/telefoni', modifica);
   }
 
-  sincronizzaTelefono(): Observable<StatoTelefono> {
-    return this.http.post<StatoTelefono>('/api/telefono/sincronizza', {});
+  salvaTelefono(id: string, modifica: ModificaTelefono): Observable<StatoTelefono> {
+    return this.http.put<StatoTelefono>(`/api/telefoni/${encodeURIComponent(id)}`, modifica);
+  }
+
+  eliminaTelefono(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/telefoni/${encodeURIComponent(id)}`);
+  }
+
+  sincronizzaTelefono(id: string): Observable<StatoTelefono> {
+    return this.http.post<StatoTelefono>(`/api/telefoni/${encodeURIComponent(id)}/sincronizza`, {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

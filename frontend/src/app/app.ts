@@ -14,7 +14,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, ModificaTelefono, StatoTelefono } from './modelli';
+import { Cartella, ElencoTelefoni, Foto, ModificaTelefono, StatoTelefono, Utente } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
@@ -56,17 +56,15 @@ export class App {
   /** Sul server (cartella del cloud) si sposta, come deciso; sul PC si copia. */
   protected sposta = false;
   protected ricerca = '';
-  protected readonly dialogoTelefono = signal(false);
-  protected readonly telefono = signal<StatoTelefono | null>(null);
+  protected readonly dialogoTelefoni = signal(false);
+  protected readonly telefoni = signal<ElencoTelefoni | null>(null);
+  /** Gli utenti visti finora, per scegliere il proprietario (solo admin). */
+  protected readonly utenti = signal<Utente[]>([]);
+  /** Il telefono nel sotto-dialogo di modifica: un id, "nuovo" per aggiungerne uno, null se chiuso. */
+  protected readonly telefonoInModifica = signal<string | null>(null);
   protected readonly salvandoTelefono = signal(false);
-  protected moduloTelefono: ModificaTelefono = {
-    attiva: false,
-    sorgente: '',
-    intervalloOre: 6,
-    giorniPrimaDiCancellare: 7,
-    copieInParallelo: 6,
-  };
-  private telefonoTimer?: ReturnType<typeof setTimeout>;
+  protected moduloTelefono: ModificaTelefono = nuovoTelefono();
+  private telefoniTimer?: ReturnType<typeof setTimeout>;
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -155,6 +153,10 @@ export class App {
     this.galleria.imposta({ album: album || undefined });
   }
 
+  protected scegliCaricataDa(username: string): void {
+    this.galleria.imposta({ caricataDa: username || undefined });
+  }
+
   protected azzera(): void {
     this.ricerca = '';
     this.galleria.filtro.set({});
@@ -163,14 +165,14 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa);
   }
 
   // ------------------------------------------------------------ selezione
 
   /**
    * Esc chiude quello che è aperto sopra la timeline: il dialogo di
-   * importazione o del telefono, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   * importazione o dei telefoni, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
    */
   protected esc(): void {
     if (this.aperta()) {
@@ -178,8 +180,10 @@ export class App {
     }
     if (this.dialogoImporta()) {
       this.chiudiImporta();
-    } else if (this.dialogoTelefono()) {
-      this.chiudiTelefono();
+    } else if (this.telefonoInModifica()) {
+      this.telefonoInModifica.set(null);
+    } else if (this.dialogoTelefoni()) {
+      this.chiudiTelefoni();
     } else if (this.selezione()) {
       this.esciSelezione();
     }
@@ -311,34 +315,76 @@ export class App {
     this.dialogoImporta.set(false);
   }
 
-  // ------------------------------------------------------------ telefono
+  // ------------------------------------------------------------ telefoni
 
-  protected apriTelefono(): void {
-    this.dialogoTelefono.set(true);
-    this.telefono.set(null);
-    this.api.telefono().subscribe({
+  protected apriTelefoni(): void {
+    this.dialogoTelefoni.set(true);
+    this.telefonoInModifica.set(null);
+    this.telefoni.set(null);
+    if (this.galleria.io()?.admin && this.galleria.io()?.login) {
+      this.api.utenti().subscribe({ next: (u) => this.utenti.set(u), error: () => this.utenti.set([]) });
+    }
+    this.aggiornaTelefoni(true);
+  }
+
+  /** Chiede l'elenco; mentre un giro è in coda o in corso lo riguarda ogni 3 secondi. */
+  private aggiornaTelefoni(prima = false): void {
+    clearTimeout(this.telefoniTimer);
+    this.api.telefoni().subscribe({
       next: (t) => {
-        this.moduloTelefono = {
-          attiva: t.attiva,
-          sorgente: t.sorgente,
-          intervalloOre: t.intervalloOre,
-          giorniPrimaDiCancellare: t.giorniPrimaDiCancellare,
-          copieInParallelo: t.copieInParallelo,
-        };
-        this.mostraTelefono(t);
+        if (!this.dialogoTelefoni()) return;
+        this.telefoni.set(t);
+        if (t.telefoni.some((s) => s.inCorso)) {
+          this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 3000);
+        }
       },
       error: (e: unknown) => {
-        this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione del telefono non leggibile');
-        this.chiudiTelefono();
+        if (prima) {
+          this.galleria.avvisa(dettaglio(e) ?? 'Telefoni non leggibili');
+          this.chiudiTelefoni();
+        } else if (this.dialogoTelefoni()) {
+          this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 3000);
+        }
       },
     });
   }
 
+  /** Il nome di un utente visto finora, per l'elenco; altrimenti lo username. */
+  protected nomeUtente(username?: string): string {
+    if (!username) return 'nessuno';
+    if (username === this.galleria.io()?.username) return this.galleria.io()?.nome ?? username;
+    return this.utenti().find((u) => u.username === username)?.nome ?? this.galleria.nomeDi(username);
+  }
+
+  protected aggiungiTelefono(): void {
+    this.moduloTelefono = nuovoTelefono();
+    this.telefonoInModifica.set('nuovo');
+  }
+
+  protected modificaTelefono(t: StatoTelefono): void {
+    this.moduloTelefono = {
+      nome: t.nome,
+      proprietario: t.proprietario ?? '',
+      attiva: t.attiva,
+      sorgente: t.sorgente,
+      intervalloOre: t.intervalloOre,
+      giorniPrimaDiCancellare: t.giorniPrimaDiCancellare,
+      copieInParallelo: t.copieInParallelo,
+    };
+    this.telefonoInModifica.set(t.id);
+  }
+
   protected async salvaTelefono(): Promise<void> {
+    const id = this.telefonoInModifica();
+    if (!id) return;
     this.salvandoTelefono.set(true);
     try {
-      this.mostraTelefono(await firstValueFrom(this.api.salvaTelefono(this.moduloTelefono)));
-      this.galleria.avvisa('Impostazioni del telefono salvate');
+      await firstValueFrom(
+        id === 'nuovo' ? this.api.creaTelefono(this.moduloTelefono) : this.api.salvaTelefono(id, this.moduloTelefono),
+      );
+      this.galleria.avvisa(id === 'nuovo' ? `${this.moduloTelefono.nome} aggiunto` : 'Impostazioni del telefono salvate');
+      this.telefonoInModifica.set(null);
+      this.aggiornaTelefoni();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Salvataggio non riuscito');
     } finally {
@@ -346,9 +392,28 @@ export class App {
     }
   }
 
-  protected async sincronizzaOra(): Promise<void> {
+  protected async eliminaTelefono(t: StatoTelefono): Promise<void> {
+    if (
+      !confirm(
+        `Togliere "${t.nome}"? Le foto già arrivate restano; le copie restano registrate, ` +
+          'così se lo rimetti con la stessa cartella non ricopia niente.',
+      )
+    ) {
+      return;
+    }
     try {
-      this.mostraTelefono(await firstValueFrom(this.api.sincronizzaTelefono()));
+      await firstValueFrom(this.api.eliminaTelefono(t.id));
+      this.galleria.avvisa(`${t.nome} tolto`);
+      this.aggiornaTelefoni();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non riesco a toglierlo');
+    }
+  }
+
+  protected async sincronizzaOra(t: StatoTelefono): Promise<void> {
+    try {
+      await firstValueFrom(this.api.sincronizzaTelefono(t.id));
+      this.aggiornaTelefoni();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione non partita');
     }
@@ -363,25 +428,10 @@ export class App {
       : quando.toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
-  /** Mostra lo stato; mentre un giro è in corso lo riguarda ogni 3 secondi. */
-  private mostraTelefono(t: StatoTelefono): void {
-    this.telefono.set(t);
-    clearTimeout(this.telefonoTimer);
-    if (t.inCorso && this.dialogoTelefono()) {
-      this.telefonoTimer = setTimeout(
-        () =>
-          this.api.telefono().subscribe({
-            next: (n) => this.dialogoTelefono() && this.mostraTelefono(n),
-            error: () => this.dialogoTelefono() && this.mostraTelefono(t),
-          }),
-        3000,
-      );
-    }
-  }
-
-  protected chiudiTelefono(): void {
-    clearTimeout(this.telefonoTimer);
-    this.dialogoTelefono.set(false);
+  protected chiudiTelefoni(): void {
+    clearTimeout(this.telefoniTimer);
+    this.telefonoInModifica.set(null);
+    this.dialogoTelefoni.set(false);
   }
 
   protected logout(): void {
@@ -391,4 +441,16 @@ export class App {
 
 function dettaglio(e: unknown): string | undefined {
   return (e as { error?: { detail?: string } }).error?.detail;
+}
+
+function nuovoTelefono(): ModificaTelefono {
+  return {
+    nome: '',
+    proprietario: '',
+    attiva: false,
+    sorgente: 'pcloud:Automatic Upload',
+    intervalloOre: 6,
+    giorniPrimaDiCancellare: 7,
+    copieInParallelo: 6,
+  };
 }

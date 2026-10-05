@@ -29,6 +29,14 @@
         <option [value]="a">{{ a }}</option>
       }
     </select>
+    @if (galleria.caricateDa().length) {
+      <select aria-label="Caricate da" [ngModel]="galleria.filtro().caricataDa ?? ''" (ngModelChange)="scegliCaricataDa($event)">
+        <option value="">Caricate da tutti</option>
+        @for (c of galleria.caricateDa(); track c.username) {
+          <option [value]="c.username">{{ c.nome }} ({{ c.conteggio }})</option>
+        }
+      </select>
+    }
     <button
       type="button"
       class="interruttore"
@@ -77,7 +85,9 @@
           Indicizza archivio
         </button>
       }
-      <button type="button" class="link" title="Foto nuove dal telefono, da pCloud" (click)="apriTelefono()">Telefono</button>
+    }
+    @if (galleria.io()?.admin || galleria.io()?.login) {
+      <button type="button" class="link" title="Foto nuove dai telefoni della famiglia, da pCloud" (click)="apriTelefoni()">Telefoni</button>
     }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
@@ -341,94 +351,149 @@
   </div>
 }
 
-@if (dialogoTelefono()) {
-  <div class="velo" (click)="chiudiTelefono()">
-    <form class="dialogo" role="dialog" aria-labelledby="titolo-telefono" (click)="$event.stopPropagation()" (ngSubmit)="salvaTelefono()">
-      <h2 id="titolo-telefono">Foto dal telefono</h2>
-      @if (telefono(); as t) {
+@if (dialogoTelefoni()) {
+  <div class="velo" (click)="chiudiTelefoni()">
+    <section class="dialogo telefoni" role="dialog" aria-labelledby="titolo-telefoni" (click)="$event.stopPropagation()">
+      <h2 id="titolo-telefoni">Foto dai telefoni</h2>
+      @if (telefoni(); as e) {
         <p class="tenue">
-          Copia le foto nuove da pCloud nella cartella automatica <code>{{ t.destinazione ?? '' }}</code>: da lì entrano
-          nell'archivio. Dopo i giorni scelti le toglie da pCloud, ma solo quelle già importate.
+          Ogni telefono copia le foto nuove dalla sua cartella su pCloud nella cartella automatica
+          <code>{{ e.destinazione ?? '' }}</code>: da lì entrano nell'archivio, "caricate da" chi ha il telefono. Dopo i
+          giorni scelti le toglie da pCloud, ma solo quelle già importate.
         </p>
-        @if (!t.disponibile) {
-          <p class="errore">Non si può attivare: {{ t.motivo }}</p>
+        @if (!e.disponibile) {
+          <p class="errore">Non si può attivare: {{ e.motivo }}</p>
         }
 
-        <label class="spunta-riga">
-          <input type="checkbox" name="attiva" [(ngModel)]="moduloTelefono.attiva" [disabled]="!t.disponibile && !moduloTelefono.attiva" />
-          Attiva
-        </label>
-        <label>
-          Cartella su pCloud
-          <input name="sorgente" [(ngModel)]="moduloTelefono.sorgente" placeholder="pcloud:Automatic Upload" required />
-        </label>
-        <div class="campi">
-          <label>
-            Ogni quante ore
-            <input type="number" name="intervalloOre" min="1" max="168" [(ngModel)]="moduloTelefono.intervalloOre" required />
-          </label>
-          <label>
-            Togli da pCloud dopo giorni (0 = mai)
-            <input type="number" name="giorniPrimaDiCancellare" min="0" [(ngModel)]="moduloTelefono.giorniPrimaDiCancellare" required />
-          </label>
-          <label>
-            File copiati insieme (1–32)
-            <input type="number" name="copieInParallelo" min="1" max="32" [(ngModel)]="moduloTelefono.copieInParallelo" required />
-          </label>
-        </div>
-
-        <section class="giro" aria-live="polite">
-          <h3>Ultimo giro</h3>
-          @if (t.inCorso) {
-            <p><span class="rotella piccola" aria-hidden="true"></span> Sincronizzazione in corso…</p>
-            @if (t.giroInCorso; as g) {
+        <ul class="elenco-telefoni" aria-live="polite">
+          @for (t of e.telefoni; track t.id) {
+            <li class="giro">
+              <div class="riga">
+                <h3>{{ t.nome }}</h3>
+                <span class="tenue">{{ t.attiva ? 'attivo' : 'spento' }}</span>
+              </div>
               <p class="tenue">
-                {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati
-                @if (g.errori) {
-                  · <span class="errore">{{ g.errori }} errori</span>
-                }
+                Di <b>{{ nomeUtente(t.proprietario) }}</b> · <code>{{ t.sorgente }}</code> · ogni {{ t.intervalloOre }} ore
               </p>
-            }
-          }
-          @if (t.ultimoGiro; as g) {
-            <p>
-              {{ g.iniziatoIl | date: 'd MMM y, HH:mm' }} ·
-              <b [class.errore]="g.esito === 'ERRORE'">{{ g.esito === 'OK' ? 'riuscito' : 'con errori' }}</b>
-              @if (g.messaggio && g.esito === 'ERRORE') {
-                · {{ g.messaggio }}
-              }
-            </p>
-            <p class="tenue">
-              {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati ·
-              {{ g.cancellati }} tolti da pCloud
-              @if (g.errori) {
-                · <span class="errore">{{ g.errori }} errori</span>
-              }
-            </p>
-            @if (g.messaggiErrori.length) {
-              <ul class="errori">
-                @for (m of g.messaggiErrori; track $index) {
-                  <li>{{ m }}</li>
+              @if (t.inCoda) {
+                <p><span class="rotella piccola" aria-hidden="true"></span> In coda: aspetta il giro di un altro telefono…</p>
+              } @else if (t.inCorso) {
+                <p><span class="rotella piccola" aria-hidden="true"></span> Sincronizzazione in corso…</p>
+                @if (t.giroInCorso; as g) {
+                  <p class="tenue">
+                    {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati
+                    @if (g.errori) {
+                      · <span class="errore">{{ g.errori }} errori</span>
+                    }
+                  </p>
                 }
-              </ul>
-            }
-          } @else if (!t.inCorso) {
-            <p class="tenue">Nessun giro finora.</p>
+              }
+              @if (t.ultimoGiro; as g) {
+                <p>
+                  Ultimo giro {{ g.iniziatoIl | date: 'd MMM y, HH:mm' }} ·
+                  <b [class.errore]="g.esito === 'ERRORE'">{{ g.esito === 'OK' ? 'riuscito' : 'con errori' }}</b>
+                  @if (g.messaggio && g.esito === 'ERRORE') {
+                    · {{ g.messaggio }}
+                  }
+                </p>
+                <p class="tenue">
+                  {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati ·
+                  {{ g.cancellati }} tolti da pCloud
+                  @if (g.errori) {
+                    · <span class="errore">{{ g.errori }} errori</span>
+                  }
+                </p>
+                @if (g.messaggiErrori.length) {
+                  <ul class="errori">
+                    @for (m of g.messaggiErrori; track $index) {
+                      <li>{{ m }}</li>
+                    }
+                  </ul>
+                }
+              } @else if (!t.inCorso) {
+                <p class="tenue">Nessun giro finora.</p>
+              }
+              @if (prossimoGiro(t); as p) {
+                <p class="tenue">Prossimo giro: {{ p }}</p>
+              }
+              <div class="piede">
+                @if (galleria.io()?.admin) {
+                  <button type="button" class="pericolo" [disabled]="t.inCorso" (click)="eliminaTelefono(t)">Elimina</button>
+                  <button type="button" (click)="modificaTelefono(t)">Modifica</button>
+                }
+                <button type="button" [disabled]="!e.disponibile || t.inCorso" (click)="sincronizzaOra(t)">
+                  {{ t.inCoda ? 'In coda…' : t.inCorso ? 'In corso…' : 'Sincronizza ora' }}
+                </button>
+              </div>
+            </li>
+          } @empty {
+            <li class="tenue">
+              {{ galleria.io()?.admin ? 'Nessun telefono: aggiungine uno.' : 'Nessun telefono a tuo nome: chiedi a un amministratore di aggiungerlo.' }}
+            </li>
           }
-          @if (prossimoGiro(t); as p) {
-            <p class="tenue">Prossimo giro: {{ p }}</p>
-          }
-        </section>
+        </ul>
       } @else {
         <span class="rotella" aria-label="Caricamento"></span>
       }
 
       <div class="piede">
-        <button type="button" (click)="chiudiTelefono()">Chiudi</button>
-        <button type="button" [disabled]="!telefono()?.disponibile || telefono()?.inCorso" (click)="sincronizzaOra()">
-          {{ telefono()?.inCorso ? 'In corso…' : 'Sincronizza ora' }}
-        </button>
-        <button type="submit" class="primario" [disabled]="!telefono() || salvandoTelefono()">Salva</button>
+        <button type="button" (click)="chiudiTelefoni()">Chiudi</button>
+        @if (galleria.io()?.admin) {
+          <button type="button" class="primario" [disabled]="!telefoni()" (click)="aggiungiTelefono()">Aggiungi</button>
+        }
+      </div>
+    </section>
+  </div>
+}
+
+@if (telefonoInModifica(); as id) {
+  <div class="velo" (click)="telefonoInModifica.set(null)">
+    <form class="dialogo" role="dialog" aria-labelledby="titolo-telefono" (click)="$event.stopPropagation()" (ngSubmit)="salvaTelefono()">
+      <h2 id="titolo-telefono">{{ id === 'nuovo' ? 'Aggiungi un telefono' : moduloTelefono.nome }}</h2>
+      <div class="campi">
+        <label>
+          Nome
+          <input name="nome" [(ngModel)]="moduloTelefono.nome" placeholder="Telefono di Anna" required />
+        </label>
+        <label>
+          Proprietario <small>(username)</small>
+          <input name="proprietario" [(ngModel)]="moduloTelefono.proprietario" list="utenti-noti" placeholder="anna" required />
+          <datalist id="utenti-noti">
+            @for (u of utenti(); track u.username) {
+              <option [value]="u.username">{{ u.nome }}</option>
+            }
+          </datalist>
+        </label>
+      </div>
+      <label class="spunta-riga">
+        <input type="checkbox" name="attiva" [(ngModel)]="moduloTelefono.attiva" [disabled]="!telefoni()?.disponibile && !moduloTelefono.attiva" />
+        Attivo
+      </label>
+      <label>
+        Cartella su pCloud <small>(remote di rclone e cartella)</small>
+        <input name="sorgente" [(ngModel)]="moduloTelefono.sorgente" placeholder="pcloud:Automatic Upload" required />
+      </label>
+      <p class="tenue">
+        Un altro account pCloud vuole un altro remote di rclone, per esempio <code>pcloud-anna:Automatic Upload</code>
+        (vedi GUIDA.md).
+      </p>
+      <div class="campi">
+        <label>
+          Ogni quante ore
+          <input type="number" name="intervalloOre" min="1" max="168" [(ngModel)]="moduloTelefono.intervalloOre" required />
+        </label>
+        <label>
+          Togli da pCloud dopo giorni (0 = mai)
+          <input type="number" name="giorniPrimaDiCancellare" min="0" [(ngModel)]="moduloTelefono.giorniPrimaDiCancellare" required />
+        </label>
+        <label>
+          File copiati insieme (1–32)
+          <input type="number" name="copieInParallelo" min="1" max="32" [(ngModel)]="moduloTelefono.copieInParallelo" required />
+        </label>
+      </div>
+      <div class="piede">
+        <button type="button" (click)="telefonoInModifica.set(null)">Annulla</button>
+        <button type="submit" class="primario" [disabled]="salvandoTelefono()">{{ id === 'nuovo' ? 'Aggiungi' : 'Salva' }}</button>
       </div>
     </form>
   </div>

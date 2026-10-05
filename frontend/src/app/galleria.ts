@@ -3,7 +3,7 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
+import { CaricateDa, Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** Le estensioni che il backend accetta (FotoService.TIPI). */
@@ -34,6 +34,8 @@ export class Galleria {
   readonly mesi = signal<VoceMese[]>([]);
   readonly tag = signal<string[]>([]);
   readonly album = signal<string[]>([]);
+  /** Chi ha portato foto, per il filtro e per "Caricata da Anna". */
+  readonly caricateDa = signal<CaricateDa[]>([]);
   readonly selezionate = signal<ReadonlySet<string>>(new Set());
   readonly caricamento = signal<StatoCaricamento | null>(null);
   readonly avviso = signal<string | null>(null);
@@ -211,6 +213,12 @@ export class Galleria {
     this.api.timeline(this.filtro()).subscribe((m) => this.mesi.set(m));
     this.api.tag().subscribe((t) => this.tag.set(t));
     this.api.album().subscribe((a) => this.album.set(a));
+    this.api.caricateDa().subscribe((c) => this.caricateDa.set(c));
+  }
+
+  /** Il nome di chi ha portato una foto, se è entrato almeno una volta; altrimenti lo username. */
+  nomeDi(username: string): string {
+    return this.caricateDa().find((c) => c.username === username)?.nome ?? username;
   }
 
   prossimaPagina(primaPagina = false): void {
