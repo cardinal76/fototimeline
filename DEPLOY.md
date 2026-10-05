@@ -175,6 +175,52 @@ l'app guarda in quella cartella di LifetimeCloud e, se ci sono foto o video
 Basta far caricare all'app di LifetimeCloud sul telefono le foto in quella
 cartella.
 
+### Foto nuove dal telefono (pCloud)
+
+Il telefono carica le foto su **pCloud** (cartella "Automatic Upload", con una
+sottocartella per dispositivo). L'app le porta da sola nella cartella
+automatica qui sopra (sul server `/cloud/telefono`, cioè `lifetime:telefono`):
+
+1. ogni `N` ore (da **Telefono**, predefinito 6) copia da pCloud i file
+   **nuovi** (foto, HEIC, video; niente PDF né file col punto) nella cartella
+   automatica, senza sottocartelle: `Pixel 8/IMG_1.jpg` diventa
+   `Pixel 8 - IMG_1.jpg`, così il nome del dispositivo non diventa un album. Un
+   nome già presente prende ` (2)`. Ogni copia si controlla (stessa
+   dimensione) e si segna in MongoDB (`copie_telefono`): un file già copiato
+   non si ricopia più;
+2. l'importazione automatica (ogni 15 minuti, col cloud montato) li sposta
+   nell'archivio;
+3. dopo `N` giorni dalla copia (predefinito 7; 0 = mai) li toglie da pCloud,
+   **solo se** non sono più nella cartella automatica, cioè se l'importazione
+   li ha presi. Quelli rimasti lì (importazione non riuscita) restano anche su
+   pCloud.
+
+La copia passa dall'API di rclone (`operations/list`, `copyfile`, `stat`,
+`deletefile`), non dal montaggio: funziona anche col cloud smontato, e le foto
+aspettano nella cartella automatica finché non lo si monta.
+
+**Il remote `pcloud`**, una volta sola, su server2:
+
+```bash
+docker run --rm -it -v ~/fototimeline/rclone:/config/rclone rclone/rclone:1.68 config
+#  n (nuovo remote) → nome: pcloud → tipo: pcloud
+#  client_id e client_secret: vuoti → advanced config: n
+#  auto config: n   ← server2 non ha un browser
+#  sul PC: rclone authorize "pcloud"   → login nel browser, poi copia il risultato
+#  incolla il risultato in server2 → y (conferma) → q (esci)
+docker restart fototimeline-rclone-1
+```
+
+Il riavvio di rclone smonta il cloud: rimontalo dall'app (**Monta**). Poi,
+sempre da admin, **Telefono** in alto a destra: controlla la cartella su pCloud
+(`pcloud:Automatic Upload`), **Attiva** e **Salva**. **Sincronizza ora** fa
+subito un giro; sotto c'è com'è andato l'ultimo (copiati, già copiati, tolti da
+pCloud, errori) e quando parte il prossimo. Impostazioni e stato stanno in
+MongoDB (`impostazioni`, documento `sincronizzazione-telefono`).
+
+Si attiva solo sul server (serve rclone) e con `FOTOTIMELINE_CARTELLA_AUTOMATICA`
+dentro `RCLONE_PUNTO_MONTAGGIO`: altrimenti la finestra dice perché.
+
 ### Foto già ordinate nel cloud
 
 Le foto caricate su LifetimeCloud da fuori (per esempio con uno script),

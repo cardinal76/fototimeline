@@ -14,7 +14,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto } from './modelli';
+import { Cartella, Foto, ModificaTelefono, StatoTelefono } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
@@ -56,6 +56,11 @@ export class App {
   /** Sul server (cartella del cloud) si sposta, come deciso; sul PC si copia. */
   protected sposta = false;
   protected ricerca = '';
+  protected readonly dialogoTelefono = signal(false);
+  protected readonly telefono = signal<StatoTelefono | null>(null);
+  protected readonly salvandoTelefono = signal(false);
+  protected moduloTelefono: ModificaTelefono = { attiva: false, sorgente: '', intervalloOre: 6, giorniPrimaDiCancellare: 7 };
+  private telefonoTimer?: ReturnType<typeof setTimeout>;
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -159,7 +164,7 @@ export class App {
 
   /**
    * Esc chiude quello che è aperto sopra la timeline: il dialogo di
-   * importazione, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   * importazione o del telefono, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
    */
   protected esc(): void {
     if (this.aperta()) {
@@ -167,6 +172,8 @@ export class App {
     }
     if (this.dialogoImporta()) {
       this.chiudiImporta();
+    } else if (this.dialogoTelefono()) {
+      this.chiudiTelefono();
     } else if (this.selezione()) {
       this.esciSelezione();
     }
@@ -296,6 +303,78 @@ export class App {
 
   protected chiudiImporta(): void {
     this.dialogoImporta.set(false);
+  }
+
+  // ------------------------------------------------------------ telefono
+
+  protected apriTelefono(): void {
+    this.dialogoTelefono.set(true);
+    this.telefono.set(null);
+    this.api.telefono().subscribe({
+      next: (t) => {
+        this.moduloTelefono = {
+          attiva: t.attiva,
+          sorgente: t.sorgente,
+          intervalloOre: t.intervalloOre,
+          giorniPrimaDiCancellare: t.giorniPrimaDiCancellare,
+        };
+        this.mostraTelefono(t);
+      },
+      error: (e: unknown) => {
+        this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione del telefono non leggibile');
+        this.chiudiTelefono();
+      },
+    });
+  }
+
+  protected async salvaTelefono(): Promise<void> {
+    this.salvandoTelefono.set(true);
+    try {
+      this.mostraTelefono(await firstValueFrom(this.api.salvaTelefono(this.moduloTelefono)));
+      this.galleria.avvisa('Impostazioni del telefono salvate');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Salvataggio non riuscito');
+    } finally {
+      this.salvandoTelefono.set(false);
+    }
+  }
+
+  protected async sincronizzaOra(): Promise<void> {
+    try {
+      this.mostraTelefono(await firstValueFrom(this.api.sincronizzaTelefono()));
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione non partita');
+    }
+  }
+
+  /** Il prossimo giro, o "entro pochi minuti" se l'ora è già passata (il controllo è ogni 5 minuti). */
+  protected prossimoGiro(t: StatoTelefono): string | null {
+    if (!t.prossimoGiroIl) return null;
+    const quando = new Date(t.prossimoGiroIl);
+    return quando.getTime() <= Date.now()
+      ? 'entro pochi minuti'
+      : quando.toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  /** Mostra lo stato; mentre un giro è in corso lo riguarda ogni 3 secondi. */
+  private mostraTelefono(t: StatoTelefono): void {
+    this.telefono.set(t);
+    clearTimeout(this.telefonoTimer);
+    if (t.inCorso && this.dialogoTelefono()) {
+      this.telefonoTimer = setTimeout(
+        () =>
+          this.api.telefono().subscribe({
+            next: (n) => this.dialogoTelefono() && this.mostraTelefono(n),
+            error: () => this.dialogoTelefono() && this.mostraTelefono(t),
+          }),
+        3000,
+      );
+    }
+  }
+
+  protected chiudiTelefono(): void {
+    clearTimeout(this.telefonoTimer);
+    this.dialogoTelefono.set(false);
   }
 
   protected logout(): void {

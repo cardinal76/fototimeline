@@ -49,6 +49,9 @@ Gestore di foto con timeline, da usare in locale sul proprio PC.
   stessa barra delle importazioni.
 - **Importazione automatica**: una cartella (per esempio quella dove il
   telefono carica nel cloud) che ogni 15 minuti si svuota nell'archivio.
+- **Foto dal telefono via pCloud** (admin, sul server): ogni tot ore copia le
+  foto nuove da pCloud ("Automatic Upload") nella cartella automatica e, dopo
+  qualche giorno, le toglie da pCloud se sono state importate (DEPLOY.md).
 - **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
   informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
   tag, album, data; si scarica l'originale o si elimina.
@@ -156,6 +159,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/backup`                | Backup dei metadati presenti                               |
 | POST   | `/api/backup`                | Fa subito un backup (ruolo `fototimeline-admin`)           |
 | POST   | `/api/cloud/monta`, `/smonta`| Monta o smonta il cloud (ruolo `fototimeline-admin`)       |
+| GET    | `/api/telefono`              | Sincronizzazione del telefono: impostazioni, ultimo giro, `disponibile`/`motivo`, `inCorso` (ruolo `fototimeline-admin`) |
+| PUT    | `/api/telefono`              | `{ attiva, sorgente, intervalloOre, giorniPrimaDiCancellare }` (400 fuori misura; admin) |
+| POST   | `/api/telefono/sincronizza`  | Un giro subito, in sottofondo: 202, 409 se già in corso (admin) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |

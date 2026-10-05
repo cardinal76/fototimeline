@@ -157,3 +157,44 @@ export interface CopiaBackup {
   dimensione: number;
   fattoIl: string;
 }
+
+/** Com'è andato un giro della sincronizzazione del telefono. */
+export interface GiroTelefono {
+  iniziatoIl: string;
+  finitoIl?: string;
+  esito: 'OK' | 'ERRORE';
+  messaggio?: string;
+  /** File di pCloud nei formati dell'archivio. */
+  trovati: number;
+  copiati: number;
+  giaCopiati: number;
+  /** Tolti da pCloud perché già importati. */
+  cancellati: number;
+  errori: number;
+  messaggiErrori: string[];
+}
+
+/** Sincronizzazione del telefono (pCloud → cartella automatica), solo admin. */
+export interface StatoTelefono {
+  attiva: boolean;
+  /** Remote di rclone e cartella: "pcloud:Automatic Upload". */
+  sorgente: string;
+  intervalloOre: number;
+  /** 0 = non togliere mai da pCloud. */
+  giorniPrimaDiCancellare: number;
+  disponibile: boolean;
+  /** Perché non si può attivare, se non disponibile. */
+  motivo?: string;
+  /** Dove finiscono le copie: "lifetime:telefono". */
+  destinazione?: string;
+  inCorso: boolean;
+  ultimoGiro?: GiroTelefono;
+  prossimoGiroIl?: string;
+}
+
+export interface ModificaTelefono {
+  attiva: boolean;
+  sorgente: string;
+  intervalloOre: number;
+  giorniPrimaDiCancellare: number;
+}

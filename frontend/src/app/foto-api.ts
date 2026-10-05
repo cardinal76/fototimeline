@@ -11,11 +11,13 @@ import {
   Io,
   LavoroImportazione,
   Modifica,
+  ModificaTelefono,
   Operazione,
   PaginaFoto,
   PuntoMappa,
   Ricordo,
   StatoCloud,
+  StatoTelefono,
   VoceMese,
 } from './modelli';
 
@@ -107,6 +109,19 @@ export class FotoApi {
 
   smonta(): Observable<StatoCloud> {
     return this.http.post<StatoCloud>('/api/cloud/smonta', {});
+  }
+
+  /** Sincronizzazione del telefono da pCloud (solo admin). */
+  telefono(): Observable<StatoTelefono> {
+    return this.http.get<StatoTelefono>('/api/telefono');
+  }
+
+  salvaTelefono(modifica: ModificaTelefono): Observable<StatoTelefono> {
+    return this.http.put<StatoTelefono>('/api/telefono', modifica);
+  }
+
+  sincronizzaTelefono(): Observable<StatoTelefono> {
+    return this.http.post<StatoTelefono>('/api/telefono/sincronizza', {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {
