@@ -189,7 +189,8 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 
 - **Cloud smontato / Monta**: dopo ogni rilascio o riavvio il cloud è smontato; la timeline si
   vede, ma originali e importazioni vogliono il cloud montato.
-- **Carica foto**: dal browser, direttamente in archivio.
+- **Carica foto**: dal browser, direttamente in archivio. Dal telefono Android anche con
+  **Condividi → FotoTimeline** dalla galleria (qui sotto).
 - **Importa cartella**: una cartella di LifetimeCloud (caricata via WebDAV), con "sposta".
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
 - **Converti video**: una volta, dopo il trasloco o l'indicizzazione, per i video vecchi in HEVC
@@ -223,6 +224,33 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   "Accadde oggi". Nei giorni senza foto non arriva niente. Si cambiano in **Salute → Ricordi su
   Telegram** (admin): acceso o spento, l'ora, quante foto, "Nessun ricordo oggi"; **Manda ora una
   prova** li manda subito. Le foto partono ridotte e senza dati GPS; nessun link pubblico.
+
+### Dal telefono: Condividi → FotoTimeline
+
+Per mandare nell'archivio qualche foto o video scelti a mano (una foto di WhatsApp, quelle di una
+festa) senza aspettare la sincronizzazione da pCloud. Funziona su **Android con Chrome** (o Edge,
+Samsung Internet): è l'app installata che compare tra quelle a cui condividere.
+
+1. **Una volta**: apri il sito in Chrome, entra col tuo utente, menu ⋮ → **Installa app** (o
+   **Aggiungi a schermata Home** → Installa). Apri l'app installata almeno una volta. Compare con
+   l'icona di FotoTimeline e il nome **Foto**.
+2. Dalla galleria (Google Foto, Galleria Samsung o Xiaomi, File...) seleziona foto e video →
+   **Condividi** → **Foto** (l'icona di FotoTimeline).
+3. Si apre l'app con **Carica N foto dal telefono**: le anteprime, un album se vuoi (suggerisce
+   quelli esistenti), **Carica**. Vanno su una alla volta, con la barra; alla fine quante nuove,
+   quante c'erano già e gli errori.
+
+- Se la sessione è scaduta si passa dal login: le foto aspettano sul telefono e il dialogo torna
+  dopo. Aspettano anche con **Più tardi**, se si chiude l'app o se il **cloud è smontato** (il
+  dialogo lo dice; un amministratore lo può montare da lì): riaprendo l'app ricompare. Dopo un
+  giorno quelle mai caricate si buttano. **Annulla** le toglie subito.
+- Se FotoTimeline non compare tra le app di "Condividi": Chrome aggiorna l'app installata da solo,
+  ma può metterci un giorno; altrimenti toglila dalla Home e reinstallala.
+- Se compare "La condivisione non è arrivata all'app": l'app non era ancora pronta a riceverla
+  (prima apertura). Riaprila dalla Home e condividi di nuovo.
+- **iPhone (Safari)**: Apple non permette alle app web di comparire in "Condividi". Si usa **Carica
+  foto** dall'app: apre la galleria del telefono e si scelgono lì le foto.
+- I file salgono dalla rete del telefono: per tanti video meglio il Wi-Fi.
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.

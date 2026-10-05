@@ -790,6 +790,10 @@
   <app-visore [foto]="f" (chiudi)="aperta.set(null)" (cambia)="aperta.set($event)" />
 }
 
+@if (dialogoDalTelefono()) {
+  <app-ricevi-condivisi (chiudi)="dialogoDalTelefono.set(false)" />
+}
+
 @if (galleria.avviso(); as a) {
   <div class="avviso" role="status">{{ a }}</div>
 }

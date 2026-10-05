@@ -86,6 +86,13 @@ Il server: [DEPLOY.md](DEPLOY.md).
   era giù, appena riparte. Impostazioni nel dialogo **Salute** (admin).
 - **App sul telefono**: dal browser "Aggiungi a schermata Home" / "Installa
   app" (manifest, icone, service worker); si apre a schermo intero.
+- **Condividi → FotoTimeline** (Android, Chrome/Edge; non iPhone): dalla
+  galleria si scelgono foto e video, "Condividi" e l'app installata. Il service
+  worker li tiene sul telefono (IndexedDB) e apre l'app su "Carica N foto dal
+  telefono": anteprime, album facoltativo, caricamento uno alla volta col
+  normale `POST /api/foto` (login, CSRF, doppioni come sempre). Se la sessione
+  è scaduta o il cloud è smontato i file aspettano lì (fino a 24 ore) e il
+  dialogo torna alla riapertura. Dettagli sotto, "Condividi dal telefono".
 - **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
 - **Salute** (admin): rclone, cloud, backup, telefoni, importazioni, spazio e
@@ -248,6 +255,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | PUT    | `/api/ricordi-telegram`      | `{ attivo, ora: "HH:mm", foto: 1–10, nessunRicordo }`: salvati in Mongo, 400 se non validi (admin) |
 | POST   | `/api/ricordi-telegram/prova` | I ricordi di oggi subito, anche se già mandati (senza ricordi "Nessun ricordo oggi"): `{ messaggio }`, 409 se Telegram non è configurato, 502 se rifiuta (admin) |
 | GET    | `/salute`                    | Healthcheck di Docker: `ok`, senza login                   |
+| POST   | `/ricevi-condivisi`          | Action dello `share_target`: la prende il service worker; se arriva al server, 303 verso `/?condivisi=senza-app` senza leggere i file |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
@@ -313,6 +321,29 @@ Link di condivisione (dietro login come il resto):
   minuti, 429 per 15 minuti. Gli IPv6 contano per la loro /64.
   `fototimeline.condivisioni.*` in `application.yml`.
 - La pagina risponde con `Referrer-Policy: no-referrer` e `X-Robots-Tag: noindex`.
+
+### Condividi dal telefono
+
+- Il manifest ha uno `share_target` (`POST /ricevi-condivisi`, multipart, campo
+  `file` per `image/*` e `video/*`, anche `.heic` e `.mov`; titolo e testo si
+  ignorano). Android lo aggiunge al foglio "Condividi" per la PWA installata.
+- La POST la prende `sw.js`: mette ogni file in IndexedDB
+  (`fototimeline-condivisi`, archivio `file`: nome, tipo, dimensione, data di
+  modifica, momento d'arrivo, il file) e risponde 303 verso
+  `/?condivisi=<lotto>`. Non serve il login: i file restano sul telefono.
+- L'app (`ricevi-condivisi.ts`, `condivisi-in-attesa.ts`) all'avvio, con o
+  senza `?condivisi=`, guarda se ci sono file in attesa e apre il dialogo. Ogni
+  file è una `POST /api/foto` a sé e si toglie da IndexedDB appena il server
+  risponde (nuova, già presente o rifiutata); con 503 (cloud smontato), rete
+  assente o 401 si ferma e i rimasti aspettano. Dopo 24 ore li butta il service
+  worker (o l'app).
+- **Senza service worker** (prima apertura, browser senza) la POST arriva al
+  server senza token CSRF: il CSRF la respinge come ogni altra, e solo per quel
+  percorso invece del 403 c'è un 303 verso `/?condivisi=senza-app` (l'app dice
+  di riaprirla e riprovare; senza login quell'indirizzo porta a Keycloak). Il
+  CSRF non ha eccezioni e i file non si leggono: si carica solo da
+  `/api/foto`. `RiceviCondivisiController` risponde allo stesso modo se una
+  POST col token arrivasse fin lì. Test in `SicurezzaTest`.
 
 ## Test
 

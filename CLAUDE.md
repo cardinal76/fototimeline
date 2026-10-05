@@ -82,11 +82,22 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   (`PuntoMappa.video`) hanno un ▶ sopra la miniatura e nel popup.
 - "Accadde oggi" (`ricordi.ts`, `GET /api/ricordi`) cerca `giorno` che finisce
   con `-MM-GG` negli anni prima di quello corrente.
-- PWA: `public/manifest.webmanifest`, `public/icone/`, `public/sw.js` (solo
-  pagina offline, non mette in cache foto né API: sono private). Questi file
+- PWA: `public/manifest.webmanifest`, `public/icone/`, `public/sw.js` (pagina
+  offline e condivisione dal telefono; non mette in cache foto né API: sono private). Questi file
   sono `permitAll` in `ConfigurazioneSicurezza`, perché il browser li chiede
   senza cookie; `ConfigurazioneWeb` dà al manifest il tipo
   `application/manifest+json`.
+- "Condividi → FotoTimeline" (Android): `share_target` nel manifest verso
+  `POST /ricevi-condivisi`, che prende `sw.js` e mette i file in IndexedDB
+  (`fototimeline-condivisi`; `condivisi-in-attesa.ts` legge lo stesso database:
+  nome, versione e campi vanno cambiati insieme) con 303 a `/?condivisi=<lotto>`;
+  `ricevi-condivisi.ts` li carica uno alla volta con `POST /api/foto` e li toglie
+  appena arrivati. Se la POST arriva al server (niente service worker) il CSRF la
+  respinge e `ConfigurazioneSicurezza.condivisiSenzaApp` cambia il 403 in un 303
+  a `/?condivisi=senza-app`: niente eccezioni al CSRF, i file non si leggono.
+  L'`AccessDeniedHandler` è esplicito: `defaultAccessDeniedHandlerFor` con una
+  sola voce varrebbe per tutti gli indirizzi. Le cache di `sw.js` con un altro
+  nome si cancellano in `activate`: niente file da tenere in Cache Storage.
 - Nei test con Playwright non usare `page.clock.setFixedTime`: ferma i timer
   e Leaflet non si disegna.
 

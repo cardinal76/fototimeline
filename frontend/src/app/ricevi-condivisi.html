@@ -1,0 +1,91 @@
+<div class="velo">
+  <section class="dialogo" role="dialog" aria-modal="true" aria-labelledby="titolo-condivisi">
+    @switch (fase()) {
+      @case ('leggo') {
+        <span class="rotella" aria-label="Caricamento"></span>
+      }
+      @case ('scelta') {
+        <h2 id="titolo-condivisi">Carica {{ totale() }} foto dal telefono</h2>
+        <p class="tenue">
+          Arrivati con "Condividi → FotoTimeline" ({{ peso() < 1048576 ? (peso() / 1024 | number: '1.0-0') + ' KB' : (peso() / 1048576 | number: '1.0-1') + ' MB' }}). Si caricano uno alla
+          volta; quelli già nell'archivio non entrano due volte.
+        </p>
+        <ul class="anteprime">
+          @for (v of voci(); track v.f.id) {
+            <li [title]="v.f.nome">
+              @if (v.anteprima && v.video) {
+                <video [src]="v.anteprima" muted preload="metadata"></video>
+                <span class="segno" aria-hidden="true">▶</span>
+              } @else if (v.anteprima) {
+                <img [src]="v.anteprima" [alt]="v.f.nome" loading="lazy" />
+              } @else {
+                <span class="nome">{{ v.f.nome }}</span>
+              }
+            </li>
+          }
+        </ul>
+        <label>
+          Album (facoltativo)
+          <input name="album" [(ngModel)]="album" list="album-noti" maxlength="120" placeholder="Per esempio: Vacanze 2026" />
+          <datalist id="album-noti">
+            @for (a of galleria.album(); track a) {
+              <option [value]="a"></option>
+            }
+          </datalist>
+        </label>
+        @if (!galleria.archivioDisponibile()) {
+          <p class="avviso-cloud">
+            Il cloud è smontato: le foto non si possono salvare adesso. Restano sul telefono fino a domani: riapri
+            l'app quando è montato.
+            @if (galleria.io()?.admin) {
+              <button type="button" class="link" [disabled]="galleria.cambioCloud()" (click)="galleria.commutaCloud()">
+                Monta adesso
+              </button>
+            } @else {
+              Chiedi a un amministratore di montarlo.
+            }
+          </p>
+        }
+        <div class="piede">
+          <button type="button" (click)="scarta()">Annulla</button>
+          <button type="button" (click)="chiudi.emit()" title="Restano sul telefono fino a domani">Più tardi</button>
+          <button type="button" class="primario" [disabled]="!galleria.archivioDisponibile()" (click)="carica()">
+            Carica
+          </button>
+        </div>
+      }
+      @default {
+        <h2 id="titolo-condivisi">{{ fase() === 'invio' ? 'Carico ' + totale() + ' foto dal telefono…' : fermato() ? 'Caricamento interrotto' : 'Caricamento finito' }}</h2>
+        <progress [value]="percentuale()" max="100"></progress>
+        <p role="status">
+          {{ fatti() }} di {{ totale() }} · {{ nuove() }} nuove · {{ gia() }} già presenti
+          @if (errori().length) {
+            · <span class="errore">{{ errori().length }} errori</span>
+          }
+        </p>
+        @if (fermato(); as motivo) {
+          <p class="avviso-cloud">
+            {{ motivo }} {{ rimasti() }} {{ rimasti() === 1 ? 'resta' : 'restano' }} sul telefono fino a domani:
+            riprova più tardi (basta riaprire l'app).
+          </p>
+        }
+        @if (fase() === 'finito' && errori().length) {
+          <ul class="errori">
+            @for (v of errori().slice(0, 8); track v.f.id) {
+              <li>{{ v.f.nome }}: {{ v.messaggio }}</li>
+            }
+          </ul>
+        }
+        @if (fase() === 'finito') {
+          <div class="piede">
+            @if (rimasti()) {
+              <button type="button" (click)="scarta()">Lascia stare</button>
+              <button type="button" (click)="riprova()">Riprova</button>
+            }
+            <button type="button" class="primario" (click)="chiudi.emit()">Chiudi</button>
+          </div>
+        }
+      }
+    }
+  </section>
+</div>

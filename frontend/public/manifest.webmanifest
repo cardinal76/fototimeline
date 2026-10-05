@@ -12,5 +12,35 @@
     { "src": "/icone/icona-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icone/icona-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "/icone/icona-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
+  ],
+  "share_target": {
+    "action": "/ricevi-condivisi",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "titolo",
+      "text": "testo",
+      "url": "indirizzo",
+      "files": [
+        {
+          "name": "file",
+          "accept": [
+            "image/*",
+            "video/*",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".webp",
+            ".heic",
+            ".heif",
+            ".mp4",
+            ".m4v",
+            ".mov"
+          ]
+        }
+      ]
+    }
+  }
 }

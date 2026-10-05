@@ -31,6 +31,8 @@ import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { QuasiUguali } from './quasi-uguali';
+import { inAttesa } from './condivisi-in-attesa';
+import { RiceviCondivisi } from './ricevi-condivisi';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -41,7 +43,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FiltroLuogo, FormsModule, Mappa, QuasiUguali, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FiltroLuogo, FormsModule, Mappa, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -94,6 +96,8 @@ export class App {
   protected moduloRicordi: ImpostazioniRicordiTelegram = { attivo: true, ora: '08:00', foto: 6, nessunRicordo: false };
   protected readonly salvandoRicordi = signal(false);
   protected readonly provaRicordiInCorso = signal(false);
+  /** "Carica N foto dal telefono": file arrivati con "Condividi → FotoTimeline" (sw.js). */
+  protected readonly dialogoDalTelefono = signal(false);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -108,6 +112,39 @@ export class App {
         { root: this.scorrimento().nativeElement, rootMargin: '1200px' },
       ).observe(this.fondo().nativeElement);
     });
+    void this.condivisiDalTelefono();
+  }
+
+  // ------------------------------------------------------------ dal telefono
+
+  /**
+   * Il service worker manda a /?condivisi=<lotto> dopo aver messo da parte i
+   * file; senza service worker il server manda a /?condivisi=senza-app. Il
+   * dialogo si apre anche senza parametro se ci sono file in attesa (per
+   * esempio dopo un login o un "Più tardi").
+   */
+  private async condivisiDalTelefono(): Promise<void> {
+    const parametri = new URLSearchParams(location.search);
+    const condivisi = parametri.get('condivisi');
+    if (condivisi !== null) {
+      parametri.delete('condivisi');
+      const resto = parametri.toString();
+      history.replaceState(history.state, '', location.pathname + (resto ? `?${resto}` : '') + location.hash);
+      if (condivisi === 'senza-app') {
+        this.galleria.avvisa("La condivisione non è arrivata all'app: riapri FotoTimeline e riprova a condividere");
+      } else if (condivisi === 'errore') {
+        this.galleria.avvisa('Il telefono non è riuscito a tenere i file condivisi (spazio pieno?)');
+      } else if (condivisi === 'vuoto') {
+        this.galleria.avvisa('Nessun file arrivato dalla condivisione');
+      }
+    }
+    try {
+      if ((await inAttesa()).length) {
+        this.dialogoDalTelefono.set(true);
+      }
+    } catch {
+      // Senza IndexedDB (navigazione privata di alcuni browser): niente da caricare.
+    }
   }
 
   // ------------------------------------------------------------ griglia
@@ -205,6 +242,10 @@ export class App {
    */
   protected esc(): void {
     if (this.aperta()) {
+      return;
+    }
+    if (this.dialogoDalTelefono()) {
+      // Lo gestisce RiceviCondivisi (non durante l'invio).
       return;
     }
     if (this.dialogoCondividi()) {

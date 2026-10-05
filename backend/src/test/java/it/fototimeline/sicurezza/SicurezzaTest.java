@@ -307,6 +307,45 @@ class SicurezzaTest {
                 .andExpect(jsonPath("$.origine").value("INDICIZZAZIONE"));
     }
 
+    /**
+     * "Condividi → FotoTimeline" senza service worker: la POST del telefono non ha il token CSRF.
+     * Torna all'app (che dice di riprovare) e nessun file entra, con o senza login.
+     */
+    @Test
+    void laCondivisioneSenzaServiceWorkerTornaAllAppSenzaCaricareNiente() throws Exception {
+        var immagine = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(12, 7, java.awt.image.BufferedImage.TYPE_INT_RGB),
+                "png", immagine);
+        var file = new MockMultipartFile("file", "dal-telefono.png", "image/png", immagine.toByteArray());
+        long prima = mongo.count(new Query(), it.fototimeline.dominio.Foto.class);
+
+        // Senza login: il CSRF la respinge prima di tutto, si torna all'app (che poi chiede il login).
+        mvc.perform(multipart("/ricevi-condivisi").file(file).param("titolo", "x"))
+                .andExpect(status().isSeeOther())
+                .andExpect(redirectedUrl("/?condivisi=senza-app"));
+        // Anche con un token valido, senza login non si passa: Keycloak.
+        mvc.perform(multipart("/ricevi-condivisi").file(file).with(csrf()))
+                .andExpect(status().isFound())
+                .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+        // Con login: di nuovo all'app, i file non si leggono.
+        mvc.perform(multipart("/ricevi-condivisi").file(file).with(ANNA))
+                .andExpect(status().isSeeOther())
+                .andExpect(redirectedUrl("/?condivisi=senza-app"));
+        mvc.perform(multipart("/ricevi-condivisi").file(file).with(ANNA).with(csrf()))
+                .andExpect(status().isSeeOther())
+                .andExpect(redirectedUrl("/?condivisi=senza-app"));
+        assertThat(mongo.count(new Query(), it.fototimeline.dominio.Foto.class)).isEqualTo(prima);
+
+        // Il caricamento vero resta chiuso senza token, e il redirect vale solo per quell'indirizzo.
+        mvc.perform(multipart("/api/foto").file(file).with(ANNA)).andExpect(status().isForbidden());
+        mvc.perform(multipart("/api/foto").file(file)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/cloud/smonta").with(ANNA)).andExpect(status().isForbidden());
+        assertThat(mongo.count(new Query(), it.fototimeline.dominio.Foto.class)).isEqualTo(prima);
+        // Una GET non è la condivisione: per chi non è entrato, il login come ogni pagina.
+        mvc.perform(get("/ricevi-condivisi")).andExpect(status().isFound())
+                .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+    }
+
     @Test
     void ruoliDiRealmDallAccessToken() {
         String payload = Base64.getUrlEncoder().withoutPadding()
