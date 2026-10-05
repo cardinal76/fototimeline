@@ -99,7 +99,10 @@ public class Cloud {
                     .body(Map.of(
                             "fs", properties.remoto(),
                             "mountPoint", properties.puntoMontaggio(),
-                            "mountOpt", Map.of("AllowOther", true),
+                            // /cloud è già un bind mount nel container di rclone: senza
+                            // AllowNonEmpty rclone lo scambia per "già montato" e rifiuta.
+                            // Il doppio montaggio lo evita il listmounts qui sopra.
+                            "mountOpt", Map.of("AllowOther", true, "AllowNonEmpty", true),
                             "vfsOpt", opzioniVfs()))
                     .retrieve()
                     .toBodilessEntity();

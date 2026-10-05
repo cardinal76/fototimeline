@@ -47,7 +47,7 @@ class CloudTest {
                 .andRespond(withSuccess(NESSUNO, MediaType.TEXT_PLAIN));
         rclone.expect(requestTo("http://rclone:5572/mount/mount"))
                 .andExpect(content().json("""
-                        {"fs":"lifetime:","mountPoint":"/cloud","mountOpt":{"AllowOther":true},
+                        {"fs":"lifetime:","mountPoint":"/cloud","mountOpt":{"AllowOther":true,"AllowNonEmpty":true},
                          "vfsOpt":{"CacheMode":3,"UID":1000,"GID":1000,"Umask":2}}"""))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         rclone.expect(requestTo("http://rclone:5572/mount/listmounts"))
