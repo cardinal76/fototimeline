@@ -14,7 +14,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, ModificaTelefono, StatoTelefono } from './modelli';
+import { Cartella, Foto, ModificaTelefono, StatoSalute, StatoTelefono } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
@@ -67,6 +67,9 @@ export class App {
     copieInParallelo: 6,
   };
   private telefonoTimer?: ReturnType<typeof setTimeout>;
+  protected readonly dialogoSalute = signal(false);
+  protected readonly controlloSalute = signal(false);
+  protected readonly provaInCorso = signal(false);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -170,7 +173,7 @@ export class App {
 
   /**
    * Esc chiude quello che è aperto sopra la timeline: il dialogo di
-   * importazione o del telefono, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   * importazione, del telefono o della salute, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
    */
   protected esc(): void {
     if (this.aperta()) {
@@ -180,6 +183,8 @@ export class App {
       this.chiudiImporta();
     } else if (this.dialogoTelefono()) {
       this.chiudiTelefono();
+    } else if (this.dialogoSalute()) {
+      this.chiudiSalute();
     } else if (this.selezione()) {
       this.esciSelezione();
     }
@@ -382,6 +387,44 @@ export class App {
   protected chiudiTelefono(): void {
     clearTimeout(this.telefonoTimer);
     this.dialogoTelefono.set(false);
+  }
+
+  // ------------------------------------------------------------ salute
+
+  protected apriSalute(): void {
+    this.dialogoSalute.set(true);
+    void this.aggiornaSalute();
+  }
+
+  protected async aggiornaSalute(): Promise<void> {
+    this.controlloSalute.set(true);
+    try {
+      if (!(await this.galleria.aggiornaSalute())) {
+        this.galleria.avvisa('Salute non leggibile');
+      }
+    } finally {
+      this.controlloSalute.set(false);
+    }
+  }
+
+  protected async provaTelegram(): Promise<void> {
+    this.provaInCorso.set(true);
+    try {
+      await firstValueFrom(this.api.provaTelegram());
+      this.galleria.avvisa('Messaggio di prova mandato su Telegram');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Messaggio di prova non mandato');
+    } finally {
+      this.provaInCorso.set(false);
+    }
+  }
+
+  protected chiudiSalute(): void {
+    this.dialogoSalute.set(false);
+  }
+
+  protected nomeStato(s: StatoSalute): string {
+    return s === 'OK' ? 'tutto a posto' : s === 'ATTENZIONE' ? 'da guardare' : 'qualcosa non va';
   }
 
   protected logout(): void {

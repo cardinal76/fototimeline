@@ -78,6 +78,15 @@
         </button>
       }
       <button type="button" class="link" title="Foto nuove dal telefono, da pCloud" (click)="apriTelefono()">Telefono</button>
+      <button
+        type="button"
+        class="link"
+        [title]="galleria.salute() ? 'Salute: ' + nomeStato(galleria.salute()!.stato) : 'Salute del server'"
+        (click)="apriSalute()"
+      >
+        <span class="pallino" [attr.data-stato]="galleria.salute()?.stato ?? null" aria-hidden="true"></span>
+        Salute
+      </button>
     }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
@@ -431,6 +440,60 @@
         <button type="submit" class="primario" [disabled]="!telefono() || salvandoTelefono()">Salva</button>
       </div>
     </form>
+  </div>
+}
+
+@if (dialogoSalute()) {
+  <div class="velo" (click)="chiudiSalute()">
+    <div class="dialogo" role="dialog" aria-labelledby="titolo-salute" (click)="$event.stopPropagation()">
+      <h2 id="titolo-salute">Salute</h2>
+      @if (galleria.salute(); as s) {
+        <p class="tenue">
+          Controllato alle {{ s.controllatoIl | date: 'HH:mm:ss' }}:
+          <b>{{ nomeStato(s.stato) }}</b>
+        </p>
+        <ul class="voci-salute">
+          @for (v of s.voci; track v.chiave) {
+            <li>
+              <span class="pallino" [attr.data-stato]="v.stato" [attr.aria-label]="nomeStato(v.stato)"></span>
+              <div>
+                <b>{{ v.titolo }}</b>
+                <p>{{ v.messaggio }}</p>
+                @if (v.dettagli.length) {
+                  <ul class="errori">
+                    @for (d of v.dettagli; track $index) {
+                      <li>{{ d }}</li>
+                    }
+                  </ul>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+        @if (!s.avvisiTelegram) {
+          <p class="tenue">
+            Avvisi su Telegram spenti: si accendono con <code>FOTOTIMELINE_TELEGRAM_TOKEN</code> e
+            <code>FOTOTIMELINE_TELEGRAM_CHAT</code> nel <code>.env</code> del server (DEPLOY.md).
+          </p>
+        } @else {
+          <p class="tenue">Su Telegram arriva un messaggio quando una voce diventa rossa e quando torna a posto.</p>
+        }
+      } @else {
+        <span class="rotella" aria-label="Caricamento"></span>
+      }
+
+      <div class="piede">
+        <button type="button" (click)="chiudiSalute()">Chiudi</button>
+        @if (galleria.salute()?.avvisiTelegram) {
+          <button type="button" [disabled]="provaInCorso()" (click)="provaTelegram()">
+            {{ provaInCorso() ? 'Invio…' : 'Messaggio di prova' }}
+          </button>
+        }
+        <button type="button" class="primario" [disabled]="controlloSalute()" (click)="aggiornaSalute()">
+          {{ controlloSalute() ? 'Controllo…' : 'Aggiorna' }}
+        </button>
+      </div>
+    </div>
   </div>
 }
 

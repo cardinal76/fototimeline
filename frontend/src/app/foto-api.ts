@@ -16,6 +16,7 @@ import {
   PaginaFoto,
   PuntoMappa,
   Ricordo,
+  Salute,
   StatoCloud,
   StatoTelefono,
   VoceMese,
@@ -122,6 +123,16 @@ export class FotoApi {
 
   sincronizzaTelefono(): Observable<StatoTelefono> {
     return this.http.post<StatoTelefono>('/api/telefono/sincronizza', {});
+  }
+
+  /** La pagina "Salute" (solo admin). */
+  salute(): Observable<Salute> {
+    return this.http.get<Salute>('/api/salute');
+  }
+
+  /** Un messaggio di prova su Telegram: 409 se non è configurato. */
+  provaTelegram(): Observable<void> {
+    return this.http.post<void>('/api/salute/prova', {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

@@ -188,6 +188,10 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Salute**: il pallino dice se va tutto bene (verde), se c'è da guardare (giallo) o se qualcosa
+  non va (rosso); il dialogo spiega cosa, voce per voce. Con il bot di Telegram (DEPLOY.md,
+  "Salute e avvisi su Telegram") arriva un messaggio quando una voce diventa rossa e quando torna
+  a posto: per esempio se il token di pCloud scade, o se il backup non si fa da due giorni.
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.
