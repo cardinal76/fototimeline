@@ -412,6 +412,72 @@ doppio del tempo). `FOTOTIMELINE_VIDEO_ATTIVA=false` le spegne del tutto
 (i video si servono come sono); `FOTOTIMELINE_VIDEO_RISOLUZIONE=720` le fa più
 leggere e più veloci.
 
+### Google Foto (Takeout e Picker)
+
+I passi per l'utente sono in [GUIDA.md](GUIDA.md), sezione 6. Qui quello che
+serve sul server.
+
+**Importa da Google Takeout** (admin, pulsante *Google Foto*):
+
+- Takeout consegna gli zip su Google Drive (cartella `Takeout`). Serve un
+  remote di rclone di tipo `drive`, nome a scelta (predefinito `gdrive`),
+  configurato sul PC col browser e copiato in `~/fototimeline/rclone/rclone.conf`
+  come quello di pCloud. Il `rclone.conf` è montato in sola lettura: rclone
+  rinnova l'access token di Drive in memoria a ogni avvio (il refresh token nel
+  file resta valido), e nel log può dire che non riesce a salvarlo: è normale.
+  Con client_id vuoto usa quello di rclone; con un client tuo in stato "Test"
+  il token scadrebbe dopo 7 giorni.
+- Gli zip si scaricano **uno alla volta** con `operations/copyfile` asincrono
+  in `$FOTOTIMELINE_DATI/takeout`, montata come `/takeout` sia in rclone (che
+  scrive) sia nell'app (che legge, estrae un file alla volta accanto allo zip
+  e poi cancella). La cartella deve essere di `marco` (uid 1000): la crea il
+  workflow di rilascio; a mano `mkdir -p ~/fototimeline/takeout`. Prima di ogni
+  zip l'app controlla lo spazio libero lì: zip + `FOTOTIMELINE_TAKEOUT_RISERVA`
+  (2 GB); se manca si ferma con un messaggio e non scarica niente. Le foto poi
+  vanno nel cloud passando dalla cache del VFS di rclone (al massimo 5 GB, sul
+  disco di server2).
+- Registro in MongoDB, `takeout_zip` (nome + dimensione + data dello zip su
+  Drive, stato, contatori, fin dove è arrivato); impostazioni in
+  `impostazioni/google-takeout`. Uno zip a metà riparte dal file a cui era
+  arrivato, anche dopo un riavvio (se l'importazione era in corso riparte da
+  sola); se lo zip scaricato è ancora in `/takeout` non si riscarica.
+- I metadati di Google (data, GPS, descrizione, preferita, album) valgono solo
+  dove la foto non li ha già, e stanno solo nella scheda in MongoDB: i file non
+  si riscrivono (nell'immagine non c'è exiftool). Il backup dei metadati li
+  contiene.
+- **Cosa Takeout non porta**: le persone/volti riconosciuti, i commenti e le
+  foto degli album condivisi di altri (dipende da Google), la cartella
+  bloccata; le modifiche fatte in Google Foto arrivano come file a parte
+  (`-edited`/`-modificato`), che entra come foto in più; le foto in movimento e
+  le Live Photo arrivano come foto + video separati, e così entrano. I formati
+  che l'archivio non accetta (`.avi`, `.3gp`, `.mkv`, RAW...) si contano come
+  "saltati" e restano nello zip.
+- Con *Togli gli zip da Drive dopo N giorni* > 0, ogni 6 ore (e alla fine di
+  ogni giro) gli zip importati **senza errori** da più di N giorni si cancellano
+  da Drive, solo se lì c'è ancora lo stesso file (stessa dimensione). Serve lo
+  scope `drive` completo nel remote.
+
+**Scegli da Google Foto** (chiunque sia entrato):
+
+- Un progetto Google Cloud con la **Google Photos Picker API** abilitata, un
+  client OAuth **Applicazione web** col redirect
+  `https://<dominio>/api/google/callback` (GUIDA.md, 6.4). Nel `.env`:
+  `FOTOTIMELINE_GOOGLE_CLIENT_ID`, `FOTOTIMELINE_GOOGLE_CLIENT_SECRET` (vuoti =
+  il pulsante non c'è per chi non è admin) e `FOTOTIMELINE_GOOGLE_CHIAVE`
+  (`openssl rand -base64 32`). Il secret non esce mai: non va nei log, nelle
+  risposte, né nell'indirizzo del consenso.
+- I refresh token stanno in `google_token`, uno per utente, cifrati con
+  AES-256-GCM (chiave = SHA-256 di `FOTOTIMELINE_GOOGLE_CHIAVE`, o del client
+  secret se la chiave è vuota). Se la chiave cambia i token salvati non si
+  leggono più e l'app chiede a ognuno di ricollegare Google.
+- Limiti di Google: fino a 2000 foto per scelta; gli indirizzi di download
+  valgono 60 minuti; la Picker API ha quote per progetto (richieste al minuto)
+  ampiamente sopra l'uso di una famiglia. Con l'app OAuth in stato "Test" il
+  collegamento scade dopo 7 giorni (fino a 100 utenti di prova).
+- Le foto scaricate (`=d`, con l'EXIF; i video `=dv`) entrano come *Carica
+  foto*: doppioni saltati, "caricate da" chi sceglie, `createTime` di Google come
+  data se l'EXIF non c'è. Serve il cloud montato.
+
 ## Salute e avvisi su Telegram
 
 Il bottone **Salute** in alto a destra (solo admin) mostra con un pallino

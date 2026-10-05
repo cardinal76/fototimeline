@@ -292,6 +292,28 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   aggiornano username, nome, email, admin, ultimo accesso. `GET /api/utenti` è
   da admin. Niente API admin di Keycloak.
 
+## Google Foto
+
+- Pacchetto `google`. **Takeout** (`ImportazioneTakeout`, admin, thread
+  `takeout`): zip da `gdrive:Takeout` scaricati uno alla volta con
+  `operations/copyfile` asincrono (`_async` + `job/status`) in `/takeout`
+  (volume condiviso fra rclone e app), aperti con `ZipFile` (ZIP64, niente
+  estrazione completa), un file alla volta in `FotoService.importa(...,
+  MetadatiEsterni)`. Registro `takeout_zip` (nome+dimensione+data, `fatti` per
+  ripartire), impostazioni in `impostazioni/google-takeout` (`richiesto` =
+  riparte dopo un riavvio). Spazio controllato prima di scaricare.
+- L'abbinamento file ↔ JSON è in `SidecarTakeout` (supplemental-metadata
+  troncato, nomi a 46–51 caratteri, `(n)` spostato, `-edited`, Live Photo):
+  un caso nuovo va anche in `SidecarTakeoutTest`. I dati del JSON valgono solo
+  dove l'EXIF manca (`OrigineData.GOOGLE`); i file non si riscrivono.
+- **Picker** (`SceltaGoogleFoto`, `ClientGoogle`, niente SDK): OAuth con `state`
+  in sessione legato all'utente, solo lo scope `photospicker.mediaitems.readonly`;
+  refresh token cifrato AES-GCM in `google_token` (`CifraturaToken`).
+  `GoogleProperties` e `TokenGoogle` hanno `toString` senza segreti: un campo
+  segreto nuovo non deve finire in un record stampabile né in una risposta.
+- `/api/google/takeout/**` è da admin in `ConfigurazioneSicurezza`; il resto di
+  `/api/google/**` (callback compreso) basta il login.
+
 ## Foto quasi uguali
 
 - Pacchetto `quasiuguali`. `Foto.impronta` è un pHash a 64 bit (`Impronta`,

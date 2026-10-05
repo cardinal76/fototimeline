@@ -49,6 +49,9 @@ import it.fototimeline.backup.BackupMetadati;
 import it.fototimeline.backup.BackupProperties;
 import it.fototimeline.cloud.CloudProperties;
 import it.fototimeline.cloud.Rclone;
+import it.fototimeline.google.ImportazioneTakeout;
+import it.fototimeline.google.ZipTakeout;
+import it.fototimeline.google.ZipTakeout.StatoZip;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
 import it.fototimeline.service.LavoriImportazione;
@@ -88,6 +91,8 @@ class SaluteTest {
     SincronizzazioneTelefono telefono;
     @Autowired
     LavoriImportazione lavori;
+    @Autowired
+    ImportazioneTakeout takeout;
 
     private final Instant adesso = Instant.now();
     private FintoRclone rclone;
@@ -99,6 +104,7 @@ class SaluteTest {
         mongo.remove(Query.query(Criteria.where("_id").in("sincronizzazione-telefono", "backup-metadati",
                 StatiAvvisati.ID)), "impostazioni");
         mongo.remove(new Query(), SorgenteTelefono.class);
+        mongo.remove(new Query(), ZipTakeout.class);
         if (Files.isDirectory(backup.cartella())) {
             try (Stream<Path> s = Files.list(backup.cartella())) {
                 for (Path p : s.toList()) {
@@ -111,7 +117,7 @@ class SaluteTest {
         // Un thread solo: il server finto risponde a una richiesta alla volta.
         esecutore = Executors.newSingleThreadExecutor();
         salute = new Salute(CLOUD, new Rclone(CLOUD, builder), archivioFile, backup, backupProperties, telefono,
-                lavori, AUTOMATICA, mongo, Clock.fixed(adesso, ZoneOffset.UTC), esecutore);
+                lavori, AUTOMATICA, takeout, mongo, Clock.fixed(adesso, ZoneOffset.UTC), esecutore);
     }
 
     @AfterEach
@@ -154,6 +160,32 @@ class SaluteTest {
         assertThat(rclone.chiamate).contains("config/listremotes");
         assertThat(rclone.parametri.get("operations/list")).containsEntry("remote", "telefono")
                 .containsEntry("fs", "lifetime:");
+    }
+
+    private ZipTakeout zip(String nome, StatoZip stato, int errori, String errore) {
+        return new ZipTakeout(nome, "gdrive:Takeout", nome, 1000, adesso, stato, adesso, adesso, 10, 10,
+                10 - errori, 0, 0, 0, errori, errori > 0 ? List.of("IMG_1.jpg: Immagine illeggibile") : List.of(),
+                errore, null);
+    }
+
+    @Test
+    void googleTakeoutSoloSeUsatoERossoSeUnoZipNonEntrato() {
+        assertThat(salute.controlla().voci()).extracting(VoceSalute::chiave).doesNotContain("google-takeout");
+
+        mongo.insert(zip("takeout-001.zip", StatoZip.FATTO, 0, null));
+        VoceSalute v = voce(salute.controlla(), "google-takeout");
+        assertThat(v.stato()).isEqualTo(StatoSalute.OK);
+        assertThat(v.messaggio()).contains("1 zip importati");
+
+        mongo.insert(zip("takeout-002.zip", StatoZip.CON_ERRORI, 1, null));
+        v = voce(salute.controlla(), "google-takeout");
+        assertThat(v.stato()).isEqualTo(StatoSalute.ATTENZIONE);
+        assertThat(v.dettagli()).anySatisfy(d -> assertThat(d).contains("takeout-002.zip"));
+
+        mongo.insert(zip("takeout-003.zip", StatoZip.FALLITO, 0, "zip illeggibile"));
+        v = voce(salute.controlla(), "google-takeout");
+        assertThat(v.stato()).isEqualTo(StatoSalute.ERRORE);
+        assertThat(v.messaggio()).contains("1 zip non importati").contains("zip illeggibile");
     }
 
     @Test

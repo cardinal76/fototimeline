@@ -55,6 +55,9 @@ import it.fototimeline.telefono.SorgenteTelefono;
         "fototimeline.telegram.chat=42",
         // Niente ricordi mandati dallo scheduler con quel token.
         "fototimeline.ricordi-telegram.attivo=false",
+        // "Scegli da Google Foto" configurato, con un secret finto che non deve mai uscire.
+        "fototimeline.google.client-id=id-di-prova.apps.googleusercontent.com",
+        "fototimeline.google.client-secret=GOCSPX-segreto-di-prova",
 })
 @AutoConfigureMockMvc
 class SicurezzaTest {
@@ -344,6 +347,81 @@ class SicurezzaTest {
         // Una GET non è la condivisione: per chi non è entrato, il login come ogni pagina.
         mvc.perform(get("/ricevi-condivisi")).andExpect(status().isFound())
                 .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+    }
+
+    @Test
+    void googleFotoSoloDopoIlLoginEIlTakeoutSoloPerLAmministratore() throws Exception {
+        for (String indirizzo : new String[] {"/api/google", "/api/google/collega", "/api/google/callback",
+                "/api/google/scelta", "/api/google/takeout"}) {
+            mvc.perform(get(indirizzo)).andExpect(status().isUnauthorized());
+        }
+        mvc.perform(post("/api/google/scelta").with(csrf())).andExpect(status().isUnauthorized());
+
+        // Chi è del realm: Google Foto sì (col suo account), il Takeout no.
+        String corpo = mvc.perform(get("/api/google").with(ANNA)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.configurato").value(true))
+                .andExpect(jsonPath("$.collegato").value(false))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(corpo).doesNotContain("GOCSPX").doesNotContain("segreto");
+        mvc.perform(get("/api/google/takeout").with(ANNA)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/google/takeout/avvia").with(ANNA).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/google/takeout/annulla").with(ANNA).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(put("/api/google/takeout").with(ANNA).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sorgente\":\"gdrive:Altro\"}")).andExpect(status().isForbidden());
+        // CSRF su tutte le POST; con il token: non collegato → 409.
+        mvc.perform(post("/api/google/scelta").with(ANNA)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/google/scelta").with(ANNA).with(csrf())).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Collega Google")));
+        mvc.perform(post("/api/google/scollega").with(ANNA)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/google/scollega").with(ANNA).with(csrf())).andExpect(status().isNoContent());
+
+        // Il consenso: a Google con lo state in sessione, mai il secret nell'indirizzo.
+        var sessione = new org.springframework.mock.web.MockHttpSession();
+        String verso = mvc.perform(get("/api/google/collega").with(ANNA).session(sessione))
+                .andExpect(status().isFound())
+                .andReturn().getResponse().getRedirectedUrl();
+        assertThat(verso).startsWith("https://accounts.google.com/o/oauth2/v2/auth?")
+                .contains("client_id=id-di-prova.apps.googleusercontent.com")
+                .contains("photospicker.mediaitems.readonly")
+                .contains("redirect_uri=http://localhost/api/google/callback")
+                .doesNotContain("GOCSPX");
+        String stato = org.springframework.web.util.UriComponentsBuilder.fromUriString(verso).build()
+                .getQueryParams().getFirst("state");
+        assertThat(stato).hasSizeGreaterThan(30);
+        // State sbagliato: niente scambio del codice, si torna all'app con un errore. E lo state si consuma.
+        mvc.perform(get("/api/google/callback").param("code", "c").param("state", "falso").with(ANNA).session(sessione))
+                .andExpect(status().isFound()).andExpect(redirectedUrl("/?google=errore"));
+        mvc.perform(get("/api/google/callback").param("error", "access_denied").param("state", stato).with(ANNA)
+                .session(sessione))
+                .andExpect(status().isFound()).andExpect(redirectedUrl("/?google=errore"));
+        // State giusto ma consenso negato: si torna all'app senza chiamare Google.
+        mvc.perform(get("/api/google/collega").with(ANNA).session(sessione)).andExpect(status().isFound());
+        String nuovo = ((it.fototimeline.google.SceltaGoogleFoto.StatoOAuth) sessione
+                .getAttribute("it.fototimeline.google.GoogleController.stato")).valore();
+        mvc.perform(get("/api/google/callback").param("error", "access_denied").param("state", nuovo).with(MARCO)
+                .session(sessione))
+                .andExpect(redirectedUrl("/?google=errore"));
+        mvc.perform(get("/api/google/collega").with(ANNA).session(sessione)).andExpect(status().isFound());
+        nuovo = ((it.fototimeline.google.SceltaGoogleFoto.StatoOAuth) sessione
+                .getAttribute("it.fototimeline.google.GoogleController.stato")).valore();
+        mvc.perform(get("/api/google/callback").param("error", "access_denied").param("state", nuovo).with(ANNA)
+                .session(sessione))
+                .andExpect(redirectedUrl("/?google=negato"));
+
+        // L'amministratore vede il pannello del Takeout; qui non c'è rclone, quindi non parte.
+        corpo = mvc.perform(get("/api/google/takeout").with(MARCO)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.disponibile").value(false))
+                .andExpect(jsonPath("$.sorgente").value("gdrive:Takeout"))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(corpo).doesNotContain("GOCSPX");
+        mvc.perform(post("/api/google/takeout/avvia").with(MARCO)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/google/takeout/avvia").with(MARCO).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(put("/api/google/takeout").with(MARCO).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sorgente\":\"senza-due-punti\"}")).andExpect(status().isBadRequest());
+        mvc.perform(put("/api/google/takeout").with(MARCO).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sorgente\":\"gdrive:Takeout\",\"giorniPrimaDiCancellare\":30}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.giorniPrimaDiCancellare").value(30));
     }
 
     @Test

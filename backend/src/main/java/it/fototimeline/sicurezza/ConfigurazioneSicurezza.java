@@ -91,6 +91,9 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // "Ricordi su Telegram": impostazioni e prova.
             a.requestMatchers("/api/ricordi-telegram", "/api/ricordi-telegram/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            // "Importa da Google Takeout": tutta la libreria di Google Foto nell'archivio, solo l'admin.
+            // "Scegli da Google Foto" (/api/google/**, callback compreso) è per chiunque sia entrato.
+            a.requestMatchers("/api/google/takeout", "/api/google/takeout/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);

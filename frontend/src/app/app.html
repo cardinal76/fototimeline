@@ -122,6 +122,11 @@
     @if (galleria.io()?.admin || galleria.io()?.login) {
       <button type="button" class="link" title="Foto nuove dai telefoni della famiglia, da pCloud" (click)="apriTelefoni()">Telefoni</button>
     }
+    @if (google()?.configurato || galleria.io()?.admin) {
+      <button type="button" class="link" title="Scegli foto da Google Foto; per l'amministratore anche Google Takeout" (click)="apriGoogle()">
+        Google Foto
+      </button>
+    }
     <button type="button" class="link" title="Le mie condivisioni: i link mandati" (click)="apriCondivisioni()">Condivisioni</button>
     <button type="button" class="link" title="Raffiche, copie ricompresse o ridimensionate" (click)="dialogoQuasiUguali.set(true)">
       Quasi uguali
@@ -680,6 +685,15 @@
       </div>
     </div>
   </div>
+}
+
+@if (dialogoGoogle()) {
+  <app-google-foto
+    [admin]="!!galleria.io()?.admin"
+    [utenti]="utenti()"
+    (cambiato)="google.set($event)"
+    (chiudi)="dialogoGoogle.set(false)"
+  />
 }
 
 @if (dialogoQuasiUguali()) {

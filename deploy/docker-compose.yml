@@ -43,6 +43,8 @@ services:
     volumes:
       - ${FOTOTIMELINE_DATI:?}/rclone:/config/rclone:ro
       - rclone-cache:/cache
+      # Google Takeout: rclone ci scarica uno zip alla volta, l'app lo apre (stesso percorso nei due container).
+      - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
       # rshared: il montaggio fatto qui dentro si vede sull'host e quindi nell'app.
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
@@ -93,9 +95,18 @@ services:
       FOTOTIMELINE_RICORDI_CHAT: ${FOTOTIMELINE_RICORDI_CHAT:-}
       FOTOTIMELINE_RICORDI_NESSUNO: ${FOTOTIMELINE_RICORDI_NESSUNO:-false}
       FOTOTIMELINE_DOMINIO: ${FOTOTIMELINE_DOMINIO:?}
+      # "Importa da Google Takeout": dove sono gli zip (valore iniziale, poi dall'app) e quanto spazio lasciare.
+      FOTOTIMELINE_TAKEOUT_SORGENTE: ${FOTOTIMELINE_TAKEOUT_SORGENTE:-gdrive:Takeout}
+      FOTOTIMELINE_TAKEOUT_CARTELLA: /takeout
+      FOTOTIMELINE_TAKEOUT_RISERVA: ${FOTOTIMELINE_TAKEOUT_RISERVA:-2GB}
+      # "Scegli da Google Foto" (Picker API): client OAuth di Google; vuoti = funzione nascosta.
+      FOTOTIMELINE_GOOGLE_CLIENT_ID: ${FOTOTIMELINE_GOOGLE_CLIENT_ID:-}
+      FOTOTIMELINE_GOOGLE_CLIENT_SECRET: ${FOTOTIMELINE_GOOGLE_CLIENT_SECRET:-}
+      FOTOTIMELINE_GOOGLE_CHIAVE: ${FOTOTIMELINE_GOOGLE_CHIAVE:-}
     volumes:
       # Miniature sul disco di server2: dal cloud la timeline sarebbe lenta.
       - miniature:/miniature
+      - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
         target: /cloud

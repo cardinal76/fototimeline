@@ -1,4 +1,4 @@
-export type OrigineData = 'EXIF' | 'FILE' | 'CARTELLA' | 'CARICAMENTO' | 'MANUALE';
+export type OrigineData = 'EXIF' | 'FILE' | 'CARTELLA' | 'CARICAMENTO' | 'GOOGLE' | 'MANUALE';
 
 export interface Foto {
   id: string;
@@ -458,4 +458,102 @@ export interface RicordiTelegram extends ImpostazioniRicordiTelegram {
   ultimoGiorno?: string;
   ultimoInvioIl?: string;
   ultimoEsito?: string;
+}
+
+// ------------------------------------------------------------ Google Foto
+
+export type FaseScelta = 'ATTESA_SCELTA' | 'SCARICO' | 'FINITA' | 'ANNULLATA' | 'SCADUTA' | 'FALLITA';
+
+/** "Scegli da Google Foto": una scelta col Picker, in corso o l'ultima. */
+export interface SceltaGoogle {
+  id: string;
+  fase: FaseScelta;
+  inCorso: boolean;
+  /** La pagina di Google dove scegliere (con /autoclose). */
+  pickerUri: string;
+  iniziataIl: string;
+  finitaIl?: string;
+  totali: number;
+  fatte: number;
+  nuove: number;
+  giaPresenti: number;
+  errori: number;
+  messaggi: string[];
+  errore?: string;
+}
+
+/** Il collegamento a Google di chi usa l'app; configurato = la funzione c'è sul server. */
+export interface CollegamentoGoogle {
+  configurato: boolean;
+  collegato: boolean;
+  collegatoIl?: string;
+  scelta?: SceltaGoogle | null;
+}
+
+export type FaseTakeout = 'ELENCO' | 'SCARICO' | 'IMPORTO' | 'ATTESA_CLOUD' | 'PULIZIA' | 'FINITO' | 'ANNULLATO' | 'FALLITO';
+
+export interface AvanzamentoTakeout {
+  fase: FaseTakeout;
+  inCorso: boolean;
+  iniziatoIl: string;
+  finitoIl?: string;
+  zip?: string;
+  zipIndice: number;
+  zipTotali: number;
+  scaricati: number;
+  daScaricare: number;
+  fileFatti: number;
+  fileTotali: number;
+  nuove: number;
+  giaPresenti: number;
+  senzaJson: number;
+  saltati: number;
+  errori: number;
+  errore?: string;
+  messaggi: string[];
+}
+
+export type StatoZip = 'IN_CORSO' | 'FATTO' | 'CON_ERRORI' | 'FALLITO';
+
+/** Uno zip del registro di Google Takeout. */
+export interface ZipTakeout {
+  id: string;
+  sorgente: string;
+  nome: string;
+  dimensione: number;
+  modificatoIl?: string;
+  stato: StatoZip;
+  iniziatoIl?: string;
+  finitoIl?: string;
+  file: number;
+  fatti: number;
+  nuove: number;
+  giaPresenti: number;
+  senzaJson: number;
+  saltati: number;
+  errori: number;
+  messaggi: string[];
+  errore?: string;
+  cancellatoIl?: string;
+}
+
+export interface StatoTakeout {
+  disponibile: boolean;
+  motivo?: string;
+  /** Remote di rclone e cartella: "gdrive:Takeout". */
+  sorgente: string;
+  /** "Caricate da"; vuoto = chi preme Avvia. */
+  proprietario?: string;
+  /** 0 = non togliere mai gli zip da Drive. */
+  giorniPrimaDiCancellare: number;
+  /** Dove si scarica uno zip alla volta, sul server. */
+  cartella: string;
+  lavoro?: AvanzamentoTakeout | null;
+  registro: ZipTakeout[];
+}
+
+export interface ModificaTakeout {
+  sorgente: string;
+  proprietario: string;
+  giorniPrimaDiCancellare: number;
 }

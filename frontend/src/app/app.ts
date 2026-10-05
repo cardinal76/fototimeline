@@ -15,8 +15,10 @@ import { firstValueFrom } from 'rxjs';
 import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
+import { GoogleFoto } from './google-foto';
 import {
   Cartella,
+  CollegamentoGoogle,
   Condivisione,
   ElencoTelefoni,
   Foto,
@@ -43,7 +45,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FiltroLuogo, FormsModule, Mappa, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -98,6 +100,9 @@ export class App {
   protected readonly provaRicordiInCorso = signal(false);
   /** "Carica N foto dal telefono": file arrivati con "Condividi → FotoTimeline" (sw.js). */
   protected readonly dialogoDalTelefono = signal(false);
+  /** "Google Foto": il bottone c'è se il server ha le credenziali di Google (o per l'admin, il Takeout). */
+  protected readonly google = signal<CollegamentoGoogle | null>(null);
+  protected readonly dialogoGoogle = signal(false);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -113,6 +118,35 @@ export class App {
       ).observe(this.fondo().nativeElement);
     });
     void this.condivisiDalTelefono();
+    this.ritornoDaGoogle();
+    this.api.google().subscribe({ next: (g) => this.google.set(g), error: () => this.google.set(null) });
+  }
+
+  /** Dopo il consenso Google torna a /?google=collegato (o negato, errore): si riapre il dialogo. */
+  private ritornoDaGoogle(): void {
+    const parametri = new URLSearchParams(location.search);
+    const esito = parametri.get('google');
+    if (esito === null) {
+      return;
+    }
+    parametri.delete('google');
+    const resto = parametri.toString();
+    history.replaceState(history.state, '', location.pathname + (resto ? `?${resto}` : '') + location.hash);
+    this.galleria.avvisa(
+      esito === 'collegato'
+        ? 'Google collegato: ora puoi scegliere le foto'
+        : esito === 'negato'
+          ? 'Collegamento a Google annullato'
+          : 'Collegamento a Google non riuscito: riprova',
+    );
+    this.apriGoogle();
+  }
+
+  protected apriGoogle(): void {
+    if (this.galleria.io()?.admin && this.galleria.io()?.login && !this.utenti().length) {
+      this.api.utenti().subscribe({ next: (u) => this.utenti.set(u), error: () => this.utenti.set([]) });
+    }
+    this.dialogoGoogle.set(true);
   }
 
   // ------------------------------------------------------------ dal telefono
@@ -248,7 +282,9 @@ export class App {
       // Lo gestisce RiceviCondivisi (non durante l'invio).
       return;
     }
-    if (this.dialogoCondividi()) {
+    if (this.dialogoGoogle()) {
+      this.dialogoGoogle.set(false);
+    } else if (this.dialogoCondividi()) {
       this.dialogoCondividi.set(null);
     } else if (this.dialogoCondivisioni()) {
       this.dialogoCondivisioni.set(false);
