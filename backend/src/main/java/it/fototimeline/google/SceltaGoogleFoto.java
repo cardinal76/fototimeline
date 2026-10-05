@@ -259,16 +259,20 @@ public class SceltaGoogleFoto {
     }
 
     private void esegui(String utente, Lavoro l, SessionePicker sessione) {
+        // La fase si scrive solo dopo aver chiuso la sessione Picker: chi vede FINITA trova tutto fatto.
+        Fase fase = Fase.FALLITA;
+        String errore = null;
         try {
             SessionePicker s = sessione;
             Instant limite = clock.instant().plus(s.tempoMassimo());
             while (!s.scelte()) {
                 if (l.annullata) {
-                    l.finisci(Fase.ANNULLATA, null, clock.instant());
+                    fase = Fase.ANNULLATA;
                     return;
                 }
                 if (clock.instant().isAfter(limite) || s.scade() != null && clock.instant().isAfter(s.scade())) {
-                    l.finisci(Fase.SCADUTA, "Nessuna foto scelta in tempo: riprova", clock.instant());
+                    fase = Fase.SCADUTA;
+                    errore = "Nessuna foto scelta in tempo: riprova";
                     return;
                 }
                 Thread.sleep(s.attesa());
@@ -285,24 +289,26 @@ public class SceltaGoogleFoto {
             log.info("Google Foto: {} ha scelto {} file", utente, tutte.size());
             for (Scelta scelta : tutte) {
                 if (l.annullata) {
-                    l.finisci(Fase.ANNULLATA, null, clock.instant());
+                    fase = Fase.ANNULLATA;
                     return;
                 }
                 importa(utente, scelta, l);
             }
-            l.finisci(Fase.FINITA, null, clock.instant());
+            fase = Fase.FINITA;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            l.finisci(Fase.ANNULLATA, null, clock.instant());
+            fase = Fase.ANNULLATA;
         } catch (RuntimeException e) {
             log.warn("Google Foto: scelta di {} non riuscita: {}", utente, e.getMessage());
-            l.finisci(Fase.FALLITA, e.getMessage(), clock.instant());
+            fase = Fase.FALLITA;
+            errore = e.getMessage();
         } finally {
             try {
                 client.eliminaSessione(accesso(utente), l.sessione);
             } catch (RuntimeException e) {
                 log.debug("Sessione {} non chiusa: {}", l.sessione, e.getMessage());
             }
+            l.finisci(fase, errore, clock.instant());
             StatoScelta fine = l.stato();
             log.info("Google Foto: scelta di {} {}: {} nuove, {} già presenti, {} errori", utente, fine.fase(),
                     fine.nuove(), fine.giaPresenti(), fine.errori());
