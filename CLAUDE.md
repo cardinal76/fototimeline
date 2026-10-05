@@ -188,6 +188,34 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `@Scheduled` ogni `fototimeline.telefono.controllo` (PT5M) controlla se sono
   passate `intervalloOre`. `/api/telefono/**` è da admin anche in GET.
 
+## Foto quasi uguali
+
+- Pacchetto `quasiuguali`. `Foto.impronta` è un pHash a 64 bit (`Impronta`,
+  Java puro: 32×32 riquadri di luminosità, DCT, 8×8 basse frequenze contro la
+  mediana) calcolato dalla **miniatura**, mai dall'originale: si fa in
+  `FotoService.anteprime` per foto e HEIC (non i video); se non riesce resta
+  null e la riempie "Calcola impronte".
+- `CalcoloImpronte` (thread `impronte`, uno alla volta, annullabile) prende le
+  foto senza impronta per `_id` crescente a blocchi: idempotente, e una foto
+  che non riesce non si ripesca nello stesso giro. `POST /api/quasi-uguali/calcola`
+  è da admin; `risolvi` e `ignora` hanno i permessi dell'eliminazione.
+- `Raggruppamento`: niente confronto di tutte le coppie. L'impronta si divide
+  in `soglia + 1` bande: per il principio dei cassetti due impronte a distanza
+  ≤ soglia hanno una banda identica, quindi si confrontano solo le foto nello
+  stesso cassetto; poi union-find. Le raffiche (data EXIF entro
+  `finestra-raffica`, 10 s) hanno una soglia più larga (`soglia-raffica`, 12),
+  cercata scorrendo le foto in ordine di data. Le ricompressioni passano dalle
+  bande, senza guardare la data (WhatsApp la cambia).
+- Soglia 6 (`fototimeline.quasi-uguali.soglia`): in `ImprontaTest` le copie
+  ridimensionate e ricompresse (anche JPEG al 10%) stanno a 0–6 bit, foto
+  diverse a 20 o più. Alzarla costa: con 150.000 impronte casuali i gruppi si fanno in
+  ~0,2 s a 6 e ~3 s a 8 (bande più strette, cassetti più pieni).
+- `QuasiUguali` tiene i gruppi in cache (si rifanno se cambia il numero di foto
+  o dopo 10 minuti); `risolvi` e `ignora` la aggiornano senza ricalcolare.
+  "Non sono doppioni" salva il gruppo in `quasi_uguali_ignorati`: le foto di uno
+  stesso documento non si uniscono più tra loro (risolvi lo fa per le tenute,
+  se più d'una). Le preferite: `tieni` sempre vero e `risolvi` le rifiuta (400).
+
 ## Git e CI
 
 - Lavora su un branch e apri una pull request verso `main`; la GitHub Action

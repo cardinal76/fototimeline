@@ -56,6 +56,12 @@ fototimeline:
   # admin): ogni quanto controllare se è ora di un giro.
   telefono:
     controllo: PT5M
+  # Foto quasi uguali: bit di differenza massimi tra le impronte (dHash a 64
+  # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
+  quasi-uguali:
+    soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
+    finestra-raffica: PT10S
+    soglia-raffica: 12
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

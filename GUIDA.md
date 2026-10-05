@@ -188,6 +188,12 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Quasi uguali**: raffiche e copie della stessa foto (ridimensionate, passate da WhatsApp). Per
+  ogni gruppo la suggerita è segnata **Tieni**; un clic su una foto cambia tieni/togli, poi
+  **Togli le altre** (chiede conferma; serve il cloud montato), **Non sono doppioni** o **Salta**.
+  Le preferite non si propongono mai da togliere. La prima volta, da admin, **Calcola impronte**
+  (nel dialogo) per le foto già in archivio: legge solo le miniature, non serve il cloud. Le foto
+  nuove la prendono da sole.
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.
