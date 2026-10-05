@@ -12,6 +12,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
+import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { Cartella, Condivisione, Foto, ModificaTelefono, StatoSalute, StatoTelefono } from './modelli';
@@ -29,7 +30,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Mappa, QuasiUguali, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FiltroLuogo, FormsModule, Mappa, QuasiUguali, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -175,7 +176,7 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.nazione || f.regione || f.luogo);
   }
 
   // ------------------------------------------------------------ selezione
@@ -319,6 +320,23 @@ export class App {
       await this.galleria.avviaIndicizzazione();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Indicizzazione non riuscita');
+    }
+  }
+
+  /**
+   * "Calcola luoghi": le foto col GPS senza luogo; se non ce ne sono, chiede
+   * se rifarle tutte (per esempio dopo un aggiornamento del dataset).
+   */
+  protected async calcolaLuoghi(): Promise<void> {
+    const daCalcolare = this.galleria.luoghi()?.daCalcolare ?? 0;
+    const tutte = daCalcolare === 0;
+    if (tutte && !confirm('Tutte le foto col GPS hanno già il luogo. Ricalcolarle tutte?')) {
+      return;
+    }
+    try {
+      await this.galleria.avviaLuoghi(tutte);
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Calcolo dei luoghi non partito');
     }
   }
 

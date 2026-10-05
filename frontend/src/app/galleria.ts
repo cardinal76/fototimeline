@@ -6,6 +6,7 @@ import { FotoApi } from './foto-api';
 import {
   Caricamento,
   CopiaBackup,
+  ElencoLuoghi,
   Filtro,
   Foto,
   Giorno,
@@ -48,6 +49,8 @@ export class Galleria {
   readonly mesi = signal<VoceMese[]>([]);
   readonly tag = signal<string[]>([]);
   readonly album = signal<string[]>([]);
+  /** Luoghi con i conteggi: per il filtro e per "Calcola luoghi". */
+  readonly luoghi = signal<ElencoLuoghi | null>(null);
   readonly selezionate = signal<ReadonlySet<string>>(new Set());
   readonly caricamento = signal<StatoCaricamento | null>(null);
   readonly avviso = signal<string | null>(null);
@@ -119,6 +122,7 @@ export class Galleria {
     });
     this.aggiornaCloud();
     this.ricarica();
+    this.aggiornaLuoghi();
     // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
     this.api.importazioneCorrente().subscribe((l) => {
       if (l && l.stato !== 'IN_CORSO') {
@@ -141,6 +145,17 @@ export class Galleria {
     const lavoro = await firstValueFrom(this.api.indicizza());
     this.importazione.set(lavoro);
     this.seguiImportazione();
+  }
+
+  /** "Calcola luoghi": stessa barra delle importazioni. */
+  async avviaLuoghi(tutte: boolean): Promise<void> {
+    const lavoro = await firstValueFrom(this.api.calcolaLuoghi(tutte));
+    this.importazione.set(lavoro);
+    this.seguiImportazione();
+  }
+
+  aggiornaLuoghi(): void {
+    this.api.luoghi().subscribe({ next: (l) => this.luoghi.set(l), error: () => {} });
   }
 
   annullaImportazione(): void {
@@ -168,6 +183,7 @@ export class Galleria {
           this.importazione.set(l);
           if (l.stato !== 'IN_CORSO' && prima?.stato === 'IN_CORSO') {
             this.ricarica();
+            this.aggiornaLuoghi();
           }
         }
         this.importazioneTimer = setTimeout(() => this.seguiImportazione(), l?.stato === 'IN_CORSO' ? 1000 : 60000);
@@ -410,6 +426,7 @@ export class Galleria {
       this.caricamento.set({ ...stato, errori: [...stato.errori] });
     }
     this.ricarica();
+    this.aggiornaLuoghi();
   }
 
   private caricaGruppo(gruppo: File[], stato: StatoCaricamento): Promise<Caricamento[]> {

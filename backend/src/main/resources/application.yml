@@ -70,6 +70,13 @@ fototimeline:
   # admin): ogni quanto controllare se è ora di un giro.
   telefono:
     controllo: PT5M
+  # Il nome del luogo dal GPS, offline: i file di GeoNames (CC BY 4.0) in
+  # questa cartella (cities500.txt, admin1CodesASCII.txt, ...; nel container
+  # li scarica il Dockerfile in /app/geonames). Vuota = niente luoghi.
+  luoghi:
+    cartella: ${FOTOTIMELINE_LUOGHI:}
+    # Più lontano di così dal centro abitato più vicino: luogo sconosciuto (mare aperto).
+    distanza-massima-km: ${FOTOTIMELINE_LUOGHI_DISTANZA:30}
   # Link pubblici alle foto (/c/<token>): freno per indirizzo IP sui path
   # pubblici, contro chi prova token a caso.
   condivisioni:

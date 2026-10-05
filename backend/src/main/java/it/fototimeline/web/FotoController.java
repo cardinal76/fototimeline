@@ -72,9 +72,12 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dal,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate al,
+            @RequestParam(required = false) String nazione,
+            @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String luogo,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al),
+        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -83,8 +86,11 @@ public class FotoController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String album,
-            @RequestParam(required = false) Boolean preferite) {
-        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null));
+            @RequestParam(required = false) Boolean preferite,
+            @RequestParam(required = false) String nazione,
+            @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String luogo) {
+        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo));
     }
 
     @GetMapping("/mappa")
@@ -92,8 +98,11 @@ public class FotoController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) String album,
-            @RequestParam(required = false) Boolean preferite) {
-        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null));
+            @RequestParam(required = false) Boolean preferite,
+            @RequestParam(required = false) String nazione,
+            @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String luogo) {
+        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */

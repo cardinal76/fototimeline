@@ -29,6 +29,7 @@
         <option [value]="a">{{ a }}</option>
       }
     </select>
+    <app-filtro-luogo />
     <button
       type="button"
       class="interruttore"
@@ -87,6 +88,17 @@
           (click)="convertiVideo()"
         >
           Converti video
+        </button>
+      }
+      @if (galleria.luoghi()?.disponibile) {
+        <button
+          type="button"
+          class="link"
+          [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+          [title]="(galleria.luoghi()?.daCalcolare ?? 0) + ' foto col GPS senza luogo: il nome del luogo dalle coordinate (GeoNames)'"
+          (click)="calcolaLuoghi()"
+        >
+          Calcola luoghi
         </button>
       }
       <button type="button" class="link" title="Foto nuove dal telefono, da pCloud" (click)="apriTelefono()">Telefono</button>
@@ -264,12 +276,13 @@
 @if (galleria.importazione(); as l) {
   <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
     <div class="riga">
-      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : 'Importazione';
+      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : 'Importazione';
       <b>
         @switch (l.stato) {
           @case ('IN_CORSO') {
             @switch (l.origine) {
               @case ('INDICIZZAZIONE') { Indicizzazione dell'archivio… }
+              @case ('LUOGHI') { Calcolo dei luoghi… }
               @case ('AUTOMATICA') { Importazione automatica da {{ l.cartella }}… }
               @default { Importo da {{ l.cartella }}… }
             }
@@ -286,15 +299,19 @@
       }
     </div>
     <progress [value]="percentualeImportazione()" max="100"></progress>
-    <p>
-      {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
-      @if (l.rimossi) {
-        · {{ l.rimossi }} tolte dall'origine
-      }
-      @if (l.errori) {
-        · <span class="errore">{{ l.errori }} errori</span>
-      }
-    </p>
+    @if (l.origine === 'LUOGHI') {
+      <p>{{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} con un luogo · {{ l.duplicate }} senza (mare aperto)</p>
+    } @else {
+      <p>
+        {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
+        @if (l.rimossi) {
+          · {{ l.rimossi }} tolte dall'origine
+        }
+        @if (l.errori) {
+          · <span class="errore">{{ l.errori }} errori</span>
+        }
+      </p>
+    }
     @if (l.errore) {
       <p class="errore">{{ l.errore }}</p>
     }

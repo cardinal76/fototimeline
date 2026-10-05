@@ -7,11 +7,16 @@ import java.util.TreeSet;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document("foto")
-@CompoundIndex(name = "timeline", def = "{'scattataIl': -1, '_id': -1}")
+@CompoundIndexes({
+        @CompoundIndex(name = "timeline", def = "{'scattataIl': -1, '_id': -1}"),
+        // Il filtro per luogo manda nazione, regione e luogo: basta il prefisso.
+        @CompoundIndex(name = "luoghi", def = "{'codiceNazione': 1, 'regione': 1, 'luogo': 1}")
+})
 public class Foto {
 
     @Id
@@ -45,6 +50,16 @@ public class Foto {
     private String fotocamera;
     private Double latitudine;
     private Double longitudine;
+
+    /** Dal GPS, con GeoNames (GeocodificaInversa): il centro abitato più vicino. */
+    private String luogo;
+    private String regione;
+    /** In italiano: "Francia". */
+    private String nazione;
+    /** ISO a due lettere: "FR". */
+    private String codiceNazione;
+    /** Luogo già cercato, anche se non trovato (mare aperto): "Calcola luoghi" la salta. */
+    private boolean luogoCalcolato;
 
     /** Percorso dell'originale, relativo alla cartella dell'archivio. */
     @Indexed
@@ -133,6 +148,21 @@ public class Foto {
 
     public Double getLongitudine() { return longitudine; }
     public void setLongitudine(Double longitudine) { this.longitudine = longitudine; }
+
+    public String getLuogo() { return luogo; }
+    public void setLuogo(String luogo) { this.luogo = luogo; }
+
+    public String getRegione() { return regione; }
+    public void setRegione(String regione) { this.regione = regione; }
+
+    public String getNazione() { return nazione; }
+    public void setNazione(String nazione) { this.nazione = nazione; }
+
+    public String getCodiceNazione() { return codiceNazione; }
+    public void setCodiceNazione(String codiceNazione) { this.codiceNazione = codiceNazione; }
+
+    public boolean isLuogoCalcolato() { return luogoCalcolato; }
+    public void setLuogoCalcolato(boolean luogoCalcolato) { this.luogoCalcolato = luogoCalcolato; }
 
     public String getPercorso() { return percorso; }
     public void setPercorso(String percorso) { this.percorso = percorso; }

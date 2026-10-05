@@ -63,9 +63,14 @@
   <aside class="pannello">
     <header>
       <p class="quando">{{ foto().scattataIl | date: 'EEEE d MMMM y' }}</p>
-      <p class="ora">
+      <p class="ora" [class.con-luogo]="!!luogo()">
         {{ foto().scattataIl | date: 'HH:mm:ss' }} · <span [title]="'Data ' + origine()">{{ origine() }}</span>
       </p>
+      @if (luogo(); as l) {
+        <p class="luogo">
+          <button type="button" title="Mostra le foto di questo luogo" (click)="filtraLuogo()">📍 {{ l }}</button>
+        </p>
+      }
     </header>
 
     <form (ngSubmit)="salva()" (input)="modificata.set(true)" (change)="modificata.set(true)">
@@ -134,6 +139,12 @@
           <a [href]="m" target="_blank" rel="noopener">
             {{ foto().latitudine | number: '1.4-4' }}, {{ foto().longitudine | number: '1.4-4' }}
           </a>
+          @if (foto().luogo) {
+            <small class="fonte">
+              Nome del luogo da <a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a>
+              (<a href="https://creativecommons.org/licenses/by/4.0/deed.it" target="_blank" rel="noopener">CC BY 4.0</a>)
+            </small>
+          }
         </dd>
       }
       <dt>Caricata</dt>

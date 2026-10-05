@@ -192,6 +192,10 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   smontato aspetta. Su un VPS conta qualche minuto di CPU per ogni minuto di video 4K.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
+  ce l'hanno; quelle nuove lo prendono da sole. Non serve il cloud montato, 150 mila foto in meno
+  di un minuto. Dopo il primo rilascio con i luoghi va lanciato una volta; poi il filtro
+  **📍 Luogo** nella barra sceglie nazione, regione o paese (o lo cerca per nome).
 - **Condividere con chi non ha un account**: *Seleziona* le foto (o apri un album), *Condividi…*
   (o *Condividi album*), scegli titolo e scadenza, *Crea link*, *Copia* e mandalo su WhatsApp. Chi lo
   apre vede solo quelle foto, senza login. Spunta "Permetti di scaricare" solo se servono gli

@@ -119,7 +119,7 @@ export class Mappa implements OnDestroy {
 
   private carica(): void {
     const filtro = this.galleria.filtro();
-    this.filtrata.set(!!(filtro.q || filtro.tag || filtro.album || filtro.preferite));
+    this.filtrata.set(!!(filtro.q || filtro.tag || filtro.album || filtro.preferite || filtro.nazione || filtro.luogo));
     this.api.mappa(filtro).subscribe((punti) => this.mostra(punti));
   }
 
@@ -155,7 +155,7 @@ export class Mappa implements OnDestroy {
     img.alt = p.titolo ?? '';
     img.addEventListener('click', () => this.apri.emit(p.id));
     const didascalia = document.createElement('div');
-    didascalia.textContent = [p.video ? '▶ Video' : null, p.titolo, new Date(p.giorno).toLocaleDateString('it-IT', { dateStyle: 'long' })]
+    didascalia.textContent = [p.video ? '▶ Video' : null, p.titolo, p.luogo, new Date(p.giorno).toLocaleDateString('it-IT', { dateStyle: 'long' })]
       .filter(Boolean)
       .join(' · ');
     contenuto.append(img, didascalia);

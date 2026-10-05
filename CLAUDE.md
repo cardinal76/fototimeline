@@ -90,6 +90,26 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - Nei test con Playwright non usare `page.clock.setFixedTime`: ferma i timer
   e Leaflet non si disegna.
 
+## Luoghi dal GPS
+
+- `GeocodificaInversa` (pacchetto `luoghi`) legge all'avvio i file di GeoNames
+  da `fototimeline.luoghi.cartella` (`FOTOTIMELINE_LUOGHI`; nel container
+  `/app/geonames`, scaricati dallo stage `geonames` del Dockerfile, mai nel
+  repository). Senza cartella l'app parte, senza luoghi.
+- `IndiceLuoghi` è un k-d tree implicito su vettori unitari 3D: solo array di
+  primitivi e i nomi in un `byte[]`, niente oggetti per punto (225 mila punti,
+  ~10 MB). Non aggiungere campi per punto senza pensare alla RAM (384 MB).
+- `FotoService.leggi` chiama `applica`: luogo, regione, nazione, codice nazione
+  e `luogoCalcolato` (true anche in mare aperto, così "Calcola luoghi" non li
+  rifà). "Calcola luoghi" è un lavoro di `LavoriImportazione` (origine
+  `LUOGHI`): `importate` = con un luogo, `duplicate` = senza; non chiede il
+  cloud montato.
+- Il filtro manda `nazione` (codice ISO), `regione`, `luogo`, nell'ordine
+  dell'indice composto `luoghi`. L'attribuzione CC BY 4.0 di GeoNames è nel
+  filtro e nel visore: va lasciata.
+- Nei test: `fototimeline.luoghi.cartella=classpath:geonames` (mini dataset in
+  `src/test/resources/geonames`).
+
 ## Backup dei metadati
 
 - `BackupMetadati` scrive `<archivio>/.backup/fototimeline-*.json.gz`: un

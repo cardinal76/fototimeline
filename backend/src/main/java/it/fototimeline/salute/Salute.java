@@ -317,6 +317,7 @@ public class Salute {
         String cosa = switch (l.origine()) {
             case AUTOMATICA -> "Importazione automatica";
             case INDICIZZAZIONE -> "Indicizzazione";
+            case LUOGHI -> "Calcolo dei luoghi";
             case MANUALE -> "Importazione";
         };
         dettagli.add(0, cosa + " di " + l.cartella() + ": " + l.importate() + " nuove · " + l.duplicate()
