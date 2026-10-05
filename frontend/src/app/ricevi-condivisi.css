@@ -1,0 +1,152 @@
+/* Come i dialoghi di App (app.css), che qui non arrivano. */
+.velo {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.55);
+}
+.dialogo {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  display: grid;
+  gap: 0.9rem;
+  padding: 1.4rem;
+  background: var(--superficie);
+  border: 1px solid var(--bordo);
+  border-radius: 14px;
+}
+h2 {
+  margin: 0;
+}
+p {
+  margin: 0;
+}
+.tenue {
+  color: var(--testo-tenue);
+  font-size: 0.9rem;
+}
+.errore {
+  color: var(--pericolo);
+}
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+input,
+button {
+  font: inherit;
+  color: var(--testo);
+  background: var(--superficie-2);
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+}
+button {
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) {
+  border-color: var(--testo-tenue);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: 1px;
+}
+.primario {
+  background: var(--accento);
+  border-color: var(--accento);
+  color: #fff;
+  font-weight: 600;
+}
+.link {
+  all: unset;
+  cursor: pointer;
+  color: var(--accento);
+  font-size: 0.9em;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.piede {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.anteprime {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 4px;
+  max-height: 40vh;
+  overflow: auto;
+}
+.anteprime li {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--superficie-2);
+  display: grid;
+  place-items: center;
+}
+.anteprime img,
+.anteprime video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.anteprime .segno {
+  position: absolute;
+  color: #fff;
+  text-shadow: 0 0 4px rgb(0 0 0 / 0.8);
+}
+.anteprime .nome {
+  padding: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--testo-tenue);
+  word-break: break-all;
+  text-align: center;
+}
+.avviso-cloud {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--pericolo);
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+.errori {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--testo-tenue);
+}
+progress {
+  width: 100%;
+  accent-color: var(--accento);
+}
+.rotella {
+  justify-self: center;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--bordo);
+  border-top-color: var(--accento);
+  border-radius: 50%;
+  animation: gira 0.8s linear infinite;
+}
+@keyframes gira {
+  to {
+    rotate: 360deg;
+  }
+}
