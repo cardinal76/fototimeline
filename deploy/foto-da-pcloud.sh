@@ -5,8 +5,11 @@
 #
 #   foto-da-pcloud.sh anteprima  senza copiare niente: quante foto, video e zip ci sono
 #                                in ogni cartella di RADICE, per scegliere cosa ESCLUDERE
-#   foto-da-pcloud.sh raccogli   cerca foto e video sotto RADICE, anche dentro gli zip,
-#                                e li mette in ordine in LAVORO/ordinate/AAAA/MM/GG
+#   foto-da-pcloud.sh scarica    con rclone (remote PCLOUD, di default "pcloud:"), in parallelo:
+#                                foto, video e zip di RADICE in LAVORO/specchio, saltando gli
+#                                esclusi. Molto più veloce che leggere da P: (consigliato)
+#   foto-da-pcloud.sh raccogli   cerca foto e video (da specchio/ se c'è, se no da RADICE),
+#                                anche dentro gli zip, e li mette in LAVORO/ordinate/AAAA/MM/GG
 #   foto-da-pcloud.sh carica     ordinate/ -> lifetime:FotoTimeline, poi controlla
 #   foto-da-pcloud.sh archivia   ordinate/ -> ARCHIVIO/AAAA/AAAA-MM.zip su pCloud, poi controlla
 #   foto-da-pcloud.sh pulisci    dopo GIORNI giorni da carica e archivia: cancella da pCloud
@@ -16,6 +19,7 @@
 # La prima volta (poi si ricordano in LAVORO/impostazioni):
 #   RADICE='/mnt/p' ARCHIVIO='/mnt/p/Archivio foto' foto-da-pcloud.sh anteprima
 #   ESCLUDI='TASSE:banche:avvocato' foto-da-pcloud.sh anteprima     # finché torna
+#   foto-da-pcloud.sh scarica
 #   foto-da-pcloud.sh raccogli
 # ESCLUDI: cartelle da saltare, relative a RADICE e separate da ":" (le scansioni
 # in JPG sono foto per lo script: le cartelle di documenti vanno escluse). Si
@@ -37,7 +41,7 @@ IMPOSTAZIONI="$LAVORO/impostazioni"
 mkdir -p "$LAVORO"
 # Quello dato sulla riga di comando vale più di quello ricordato.
 DATI_RADICE="${RADICE:-}" DATI_ARCHIVIO="${ARCHIVIO:-}" DATI_DESTINAZIONE="${DESTINAZIONE:-}" DATI_GIORNI="${GIORNI:-}"
-DATI_ESCLUDI="${ESCLUDI-__nessuno__}"
+DATI_ESCLUDI="${ESCLUDI-__nessuno__}" DATI_PCLOUD="${PCLOUD:-}"
 if [ -f "$IMPOSTAZIONI" ]; then
     # shellcheck disable=SC1090
     . "$IMPOSTAZIONI"
@@ -48,6 +52,7 @@ DESTINAZIONE="${DATI_DESTINAZIONE:-${DESTINAZIONE:-lifetime:FotoTimeline}}"
 GIORNI="${DATI_GIORNI:-${GIORNI:-7}}"
 [ "$DATI_ESCLUDI" != __nessuno__ ] && ESCLUDI="$DATI_ESCLUDI"
 ESCLUDI="${ESCLUDI:-}"
+PCLOUD="${DATI_PCLOUD:-${PCLOUD:-}}"
 RCLONE="${RCLONE:-rclone}"
 export TZ="${TZ:-Europe/Rome}"
 
@@ -59,6 +64,7 @@ DA_CONTROLLARE="$LAVORO/da-controllare.txt"
 ARCHIVIATI="$LAVORO/archiviati.tsv"      # AAAA/MM \t zip su pCloud
 RADICI="$LAVORO/radici.txt"              # le cartelle raccolte, una per riga
 TMP="$LAVORO/tmp"
+SPECCHIO="$LAVORO/specchio"              # copia locale di RADICE fatta da "scarica"
 ESTENSIONI=(jpg jpeg png gif bmp webp heic heif mp4 m4v mov)
 
 errore() { echo "Errore: $*" >&2; exit 1; }
@@ -141,8 +147,19 @@ controlla_archivio() {
 }
 
 salva_impostazioni() {
-    printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nDESTINAZIONE=%q\nGIORNI=%q\n' \
-        "$RADICE" "$ARCHIVIO" "$ESCLUDI" "$DESTINAZIONE" "$GIORNI" > "$IMPOSTAZIONI"
+    printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nDESTINAZIONE=%q\nGIORNI=%q\nPCLOUD=%q\n' \
+        "$RADICE" "$ARCHIVIO" "$ESCLUDI" "$DESTINAZIONE" "$GIORNI" "$PCLOUD" > "$IMPOSTAZIONI"
+}
+
+# Il remote rclone che corrisponde a RADICE: P: intero è "pcloud:", /mnt/p/Foto è "pcloud:Foto".
+remote_pcloud() {
+    if [ -n "$PCLOUD" ]; then
+        printf '%s' "$PCLOUD"
+    elif mountpoint -q "$RADICE" 2>/dev/null; then
+        printf 'pcloud:'
+    else
+        printf 'pcloud:%s' "${RADICE#/mnt/p/}"
+    fi
 }
 
 anteprima() {
@@ -184,13 +201,46 @@ anteprima() {
     echo "Quando torna:  $0 raccogli"
 }
 
+scarica() {
+    richiede "$RCLONE"
+    [ -n "$RADICE" ] || errore "manca RADICE: prima $0 anteprima"
+    [ -f "$LAVORO/anteprima.ok" ] || errore "prima: $0 anteprima (per escludere le cartelle di documenti)"
+    PCLOUD="$(remote_pcloud)"
+    salva_impostazioni
+    # Le stesse esclusioni di trova(), come filtri di rclone.
+    local filtri="$LAVORO/filtri-scarica.txt" x rel
+    {
+        rel="${ARCHIVIO#"$RADICE"/}"
+        [ "$rel" != "$ARCHIVIO" ] && printf -- '- /%s/**\n' "$rel"
+        printf -- '- Crypto Folder/**\n- System Volume Information/**\n- $RECYCLE.BIN/**\n- .Trash*/**\n- .pcloud*/**\n'
+        local IFS=:
+        for x in $ESCLUDI; do [ -n "$x" ] && printf -- '- /%s/**\n' "${x%/}"; done
+        unset IFS
+        printf -- '+ *.zip\n'
+        for x in "${ESTENSIONI[@]}"; do printf -- '+ *.%s\n' "$x"; done
+        printf -- '- *\n'
+    } > "$filtri"
+    mkdir -p "$SPECCHIO"
+    echo "Scarico da $PCLOUD in $SPECCHIO (si può interrompere e rilanciare)…"
+    rc copy "$PCLOUD" "$SPECCHIO" --filter-from "$filtri" --ignore-case \
+        --transfers 8 --checkers 16 --stats-one-line --stats 30s
+    date +%s > "$LAVORO/fase-scarica.ok"
+    echo "Scaricato: $(du -sh "$SPECCHIO" | cut -f1). Prossimo passo: $0 raccogli"
+}
+
+# Da dove legge raccogli: la copia locale se scarica è finito, se no pCloud Drive.
+base_lettura() {
+    if [ -f "$LAVORO/fase-scarica.ok" ] && [ -d "$SPECCHIO" ]; then printf '%s' "$SPECCHIO"; else printf '%s' "$RADICE"; fi
+}
+
 raccogli() {
     richiede exiftool unzip sha256sum
     [ -n "$RADICE" ] || errore "manca RADICE: prima $0 anteprima"
     [ -n "$ARCHIVIO" ] || errore "manca ARCHIVIO, la cartella di pCloud per gli zip ordinati"
     [ "$RADICE" != / ] && RADICE="${RADICE%/}"
     ARCHIVIO="${ARCHIVIO%/}"
-    [ -d "$RADICE" ] || errore "$RADICE non c'è (pCloud montato? sudo mount -t drvfs P: /mnt/p)"
+    BASE="$(base_lettura)"
+    [ -d "$BASE" ] || errore "$BASE non c'è (pCloud montato? sudo mount -t drvfs P: /mnt/p)"
     if [ ! -f "$LAVORO/anteprima.ok" ]; then
         errore "prima: $0 anteprima (per vedere cosa prenderebbe ed escludere le cartelle di documenti)"
     fi
@@ -206,34 +256,29 @@ raccogli() {
     declare -A FATTA
     while IFS=$'\t' read -r _ fonte _; do FATTA[$fonte]=1; done < "$FONTI"
 
-    echo "Cerco foto, video e zip in $RADICE (salto $ARCHIVIO)…"
+    echo "Cerco foto, video e zip in $BASE (salto $ARCHIVIO)…"
+    # Le fonti si segnano sempre col percorso sotto RADICE, anche lette dalla copia locale.
     local sciolti=() zip=() f
     while IFS= read -r -d '' f; do
-        [ -n "${FATTA[$f]:-}" ] && continue
+        [ -n "${FATTA[$(fonte_di "$f")]:-}" ] && continue
         case "${f,,}" in
             *.zip) zip+=("$f") ;;
             *) sciolti+=("$f") ;;
         esac
-    done < <(trova "$RADICE" -type f \( -iname '*.zip' "${estensioni_find[@]}" \) -print0 | sort -z)
+    done < <(trova "$BASE" -type f \( -iname '*.zip' "${estensioni_find[@]}" \) -print0 | sort -z)
     echo "${#sciolti[@]} foto e video sciolti e ${#zip[@]} zip da fare"
 
-    # File sciolti, a gruppi per cartella.
-    local cartella="" gruppo=() i
-    for ((i = 0; i <= ${#sciolti[@]}; i++)); do
-        f="${sciolti[$i]:-}"
-        if [ -n "$cartella" ] && { [ -z "$f" ] || [ "$(dirname "$f")" != "$cartella" ]; }; then
-            raccogli_sciolti "$cartella" "${gruppo[@]}"
-            gruppo=()
-        fi
-        [ -z "$f" ] && break
-        cartella="$(dirname "$f")"
-        gruppo+=("$f")
+    # File sciolti, a blocchi: exiftool si avvia una volta per blocco, non per file.
+    local i blocco=500
+    for ((i = 0; i < ${#sciolti[@]}; i += blocco)); do
+        echo "[file $((i + 1))-$((i + blocco < ${#sciolti[@]} ? i + blocco : ${#sciolti[@]}))/${#sciolti[@]}] $(dirname "${sciolti[$i]#"$BASE"/}")/"
+        raccogli_sciolti "${sciolti[@]:i:blocco}"
     done
 
     local n=0
     for f in "${zip[@]}"; do
         n=$((n + 1))
-        echo "[zip $n/${#zip[@]}] ${f#"$RADICE"/}"
+        echo "[zip $n/${#zip[@]}] ${f#"$BASE"/}"
         raccogli_zip "$f"
     done
     rm -rf "$TMP"
@@ -242,10 +287,12 @@ raccogli() {
     echo "Prossimo passo: $0 carica"
 }
 
-# Una cartella di file sciolti: li copia, li ordina, segna da dove vengono.
+# Il percorso sotto RADICE di un file letto da BASE (che può essere la copia locale).
+fonte_di() { printf '%s/%s' "$RADICE" "${1#"$BASE"/}"; }
+
+# Un blocco di file sciolti: li collega (o copia, da P:), li ordina, segna da dove vengono.
+# Dalla copia locale sono collegamenti: niente spazio in più, e ordinate/ li tiene.
 raccogli_sciolti() {
-    local cartella="$1"; shift
-    echo "[cartella] ${cartella#"$RADICE"}/ (${#} file)"
     rm -rf "$TMP"; mkdir -p "$TMP/in" "$TMP/ord"
     local -A FONTE_DI
     local f copia sha k=0
@@ -253,31 +300,38 @@ raccogli_sciolti() {
         k=$((k + 1))
         copia="$TMP/in/$k/$(basename "$f")"
         mkdir -p "$(dirname "$copia")"
-        cp --preserve=timestamps "$f" "$copia"
+        ln "$f" "$copia" 2>/dev/null || cp --preserve=timestamps "$f" "$copia"
         sha=$(sha256sum "$copia" | cut -d' ' -f1)
         FONTE_DI[$f]="$sha"
     done
     ordina_cartella "$TMP/in" "$TMP/ord"
     metti_in_ordinate "$TMP/ord"
+    local fonte
     for f in "$@"; do
         sha="${FONTE_DI[$f]}"
+        fonte="$(fonte_di "$f")"
         if [ -n "${DOVE[$sha]:-}" ]; then
-            printf '%s\t\t%s\t%s\n' "$f" "$sha" "${DOVE[$sha]}" >> "$MANIFEST"
-            printf 'file\t%s\tsi\n' "$f" >> "$FONTI"
+            printf '%s\t\t%s\t%s\n' "$fonte" "$sha" "${DOVE[$sha]}" >> "$MANIFEST"
+            printf 'file\t%s\tsi\n' "$fonte" >> "$FONTI"
         else
-            echo "non letto: $f" >> "$DA_CONTROLLARE"
-            printf 'file\t%s\tno\n' "$f" >> "$FONTI"
+            echo "non letto: $fonte" >> "$DA_CONTROLLARE"
+            printf 'file\t%s\tno\n' "$fonte" >> "$FONTI"
         fi
     done
 }
 
 # Uno zip: lo apre, ne ordina i media; si potrà cancellare solo se dentro non c'era altro.
 raccogli_zip() {
-    local z="$1" stato=0
+    local letto="$1" stato=0 z
+    z="$(fonte_di "$letto")"
     rm -rf "$TMP"; mkdir -p "$TMP/zip" "$TMP/in" "$TMP/ord"
-    cp "$z" "$TMP/zip/a.zip"
-    unzip -q -o "$TMP/zip/a.zip" -d "$TMP/in" </dev/null || stato=$?
-    rm -f "$TMP/zip/a.zip"
+    if [ "$BASE" = "$SPECCHIO" ]; then
+        unzip -q -o "$letto" -d "$TMP/in" </dev/null || stato=$?
+    else
+        cp "$letto" "$TMP/zip/a.zip"
+        unzip -q -o "$TMP/zip/a.zip" -d "$TMP/in" </dev/null || stato=$?
+        rm -f "$TMP/zip/a.zip"
+    fi
     if [ "$stato" -gt 1 ]; then
         echo "zip rovinato (unzip $stato): $z" >> "$DA_CONTROLLARE"
         printf 'zip\t%s\tno\n' "$z" >> "$FONTI"
@@ -374,10 +428,14 @@ pulisci() {
         echo "Intanto guarda la timeline nell'app e gli zip in $ARCHIVIO."
         exit 0
     fi
+    # Con scarica le cancellazioni passano da rclone (molto più veloce che da P:).
+    local con_rclone=""
+    [ -f "$LAVORO/fase-scarica.ok" ] && [ -n "$PCLOUD" ] && con_rclone=1
     local -a via=()
     local tipo fonte ok
     while IFS=$'\t' read -r tipo fonte ok; do
-        [ "$ok" = si ] && [ -e "$fonte" ] && via+=("$fonte")
+        [ "$ok" = si ] || continue
+        if [ -n "$con_rclone" ] || [ -e "$fonte" ]; then via+=("$fonte"); fi
     done < "$FONTI"
     if [ "${#via[@]}" -eq 0 ]; then
         echo "Niente da cancellare."
@@ -389,6 +447,10 @@ pulisci() {
     read -r -p "Scrivi CANCELLA per confermare: " risposta
     [ "$risposta" = CANCELLA ] || { echo "Non ho cancellato niente."; exit 0; }
     local f
+    if [ -n "$con_rclone" ]; then
+        pulisci_con_rclone "${via[@]}"
+        return
+    fi
     for f in "${via[@]}"; do rm -f -- "$f"; done
     # Solo le cartelle svuotate da qui, risalendo; mai una radice, e se la radice è
     # tutto pCloud nemmeno le cartelle in cima (Automatic Upload, My Pictures, ...).
@@ -412,6 +474,35 @@ pulisci() {
     echo "Fatto. La copia di lavoro sul PC non serve più: rm -rf '$ORDINATE'"
 }
 
+# Il percorso rclone di una fonte (/mnt/p/Backups/x.jpg -> pcloud:Backups/x.jpg).
+remoto_di() {
+    local rel="${1#"$RADICE"/}"
+    case "$PCLOUD" in *:) printf '%s%s' "$PCLOUD" "$rel" ;; *) printf '%s/%s' "$PCLOUD" "$rel" ;; esac
+}
+
+pulisci_con_rclone() {
+    local lista="$LAVORO/da-cancellare.txt" f c
+    for f in "$@"; do printf '%s\n' "${f#"$RADICE"/}"; done > "$lista"
+    echo "Cancello $(wc -l < "$lista") file da $PCLOUD…"
+    rc delete "$PCLOUD" --files-from-raw "$lista" --stats-one-line --stats 30s
+    # Le cartelle svuotate, dal fondo: rmdir fallisce (e si salta) se non sono vuote.
+    # Mai la radice né, con tutto pCloud come radice, le cartelle in cima.
+    local -A cartelle
+    for f in "$@"; do
+        c="$(dirname "$f")"
+        while [ "$c" != "$RADICE" ] && [ "$c" != / ] && [ "$c" != . ]; do
+            if mountpoint -q "$RADICE" 2>/dev/null && [ "$(dirname "$c")" = "$RADICE" ]; then break; fi
+            cartelle[$c]=1
+            c="$(dirname "$c")"
+        done
+    done
+    while IFS= read -r c; do
+        [ -n "$c" ] && rc rmdir "$(remoto_di "$c")" 2>/dev/null || true
+    done < <(printf '%s\n' "${!cartelle[@]}" | awk '{ print gsub("/", "/"), $0 }' | sort -rn | cut -d' ' -f2-)
+    date +%s > "$LAVORO/fase-pulisci.ok"
+    echo "Fatto. Le copie di lavoro sul PC non servono più: rm -rf '$ORDINATE' '$SPECCHIO'"
+}
+
 stato() {
     echo "Lavoro:      $LAVORO"
     if [ -s "$RADICI" ]; then
@@ -427,6 +518,7 @@ stato() {
     else
         echo "Raccolti:    -"
     fi
+    [ -f "$LAVORO/fase-scarica.ok" ] && echo "Scaricati:   $(data_di "$LAVORO/fase-scarica.ok") in $SPECCHIO" || echo "Scaricati:   - (consigliato: $0 scarica)"
     [ -f "$LAVORO/fase-carica.ok" ] && echo "Caricati:    $(data_di "$LAVORO/fase-carica.ok")" || echo "Caricati:    -"
     [ -f "$LAVORO/fase-archivia.ok" ] && echo "Archiviati:  $(data_di "$LAVORO/fase-archivia.ok")" || echo "Archiviati:  -"
     [ -f "$LAVORO/fase-pulisci.ok" ] && echo "Puliti:      $(data_di "$LAVORO/fase-pulisci.ok")" || echo "Puliti:      -"
@@ -434,10 +526,11 @@ stato() {
 
 case "$FASE" in
     anteprima) anteprima ;;
+    scarica) scarica ;;
     raccogli) raccogli ;;
     carica) carica ;;
     archivia) archivia ;;
     pulisci) pulisci ;;
     stato) stato ;;
-    *) errore "fase sconosciuta: $FASE (anteprima, raccogli, carica, archivia, pulisci, stato)" ;;
+    *) errore "fase sconosciuta: $FASE (anteprima, scarica, raccogli, carica, archivia, pulisci, stato)" ;;
 esac
