@@ -39,7 +39,8 @@ public class LavoriImportazione {
     private static final Logger log = LoggerFactory.getLogger(LavoriImportazione.class);
     private static final int MAX_MESSAGGI = 50;
 
-    public enum Origine { MANUALE, AUTOMATICA }
+    /** MANUALE e AUTOMATICA importano una cartella; INDICIZZAZIONE cerca nell'archivio i file senza scheda. */
+    public enum Origine { MANUALE, AUTOMATICA, INDICIZZAZIONE }
 
     public enum Stato { IN_CORSO, FINITA, ANNULLATA, FALLITA }
 
@@ -69,15 +70,34 @@ public class LavoriImportazione {
     }
 
     /** Lancia l'importazione in sottofondo. Una alla volta: con un'altra in corso, IllegalStateException. */
-    public synchronized StatoLavoro avvia(Path cartella, boolean albumDaCartella, boolean sposta, Origine origine) {
+    public StatoLavoro avvia(Path cartella, boolean albumDaCartella, boolean sposta, Origine origine) {
+        return avvia(cartella, origine, lavoro -> importazione.importa(cartella, albumDaCartella, sposta, lavoro));
+    }
+
+    /**
+     * "Indicizza archivio" in sottofondo, sullo stesso thread delle
+     * importazioni: non gira mai insieme a una di loro.
+     */
+    public StatoLavoro avviaIndicizzazione() {
+        return avvia(archivio.radice(), Origine.INDICIZZAZIONE, importazione::indicizza);
+    }
+
+    /** Quello che fa un lavoro, riferendo a {@code Avanzamento}. */
+    private interface Compito {
+        void esegui(Avanzamento avanzamento) throws Exception;
+    }
+
+    private synchronized StatoLavoro avvia(Path cartella, Origine origine, Compito compito) {
         Lavoro attuale = ultimo.get();
         if (attuale != null && attuale.inCorso()) {
-            throw new IllegalStateException("C'è già un'importazione in corso: aspetta che finisca o annullala");
+            throw new IllegalStateException(attuale.origine == Origine.INDICIZZAZIONE
+                    ? "C'è un'indicizzazione dell'archivio in corso: aspetta che finisca o annullala"
+                    : "C'è già un'importazione in corso: aspetta che finisca o annullala");
         }
         archivio.verificaDisponibile();
         Lavoro lavoro = new Lavoro(cartella.toString(), origine, clock.instant());
         ultimo.set(lavoro);
-        esecutore.submit(() -> esegui(lavoro, cartella, albumDaCartella, sposta));
+        esecutore.submit(() -> esegui(lavoro, compito));
         return lavoro.stato();
     }
 
@@ -131,17 +151,18 @@ public class LavoriImportazione {
         }
     }
 
-    private void esegui(Lavoro lavoro, Path cartella, boolean albumDaCartella, boolean sposta) {
+    private void esegui(Lavoro lavoro, Compito compito) {
+        String nome = lavoro.origine == Origine.INDICIZZAZIONE ? "Indicizzazione" : "Importazione";
         try {
-            importazione.importa(cartella, albumDaCartella, sposta, lavoro);
+            compito.esegui(lavoro);
             lavoro.finisci(lavoro.annullata ? Stato.ANNULLATA : Stato.FINITA, null, clock.instant());
         } catch (Exception e) {
-            log.warn("Importazione di {} fallita", cartella, e);
+            log.warn("{} di {} fallita", nome, lavoro.cartella, e);
             lavoro.finisci(Stato.FALLITA, e.getMessage(), clock.instant());
         }
         StatoLavoro fine = lavoro.stato();
-        log.info("Importazione {} di {}: {} importate, {} già presenti, {} errori, {} tolte dall'origine ({} in {})",
-                fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.errori(), fine.rimossi(),
+        log.info("{} {} di {}: {} nuove, {} già presenti, {} errori, {} tolte dall'origine ({} in {})",
+                nome, fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.errori(), fine.rimossi(),
                 fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
     }
 

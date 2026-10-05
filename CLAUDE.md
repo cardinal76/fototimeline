@@ -55,7 +55,8 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   `giorno` ("yyyy-MM-dd") si aggiorna nel setter di `scattataIl` e serve per
   raggruppare la timeline senza problemi di fuso: non impostarlo a parte.
 - Ordine di precedenza: EXIF → data del file (importazione da cartella) →
-  momento del caricamento. `origineData` dice quale è stata usata; una
+  momento del caricamento. Per "Indicizza archivio": EXIF → cartella
+  `AAAA/MM/GG` (`CARTELLA`) → data di modifica del file. `origineData` dice quale è stata usata; una
   modifica a mano la mette a `MANUALE`.
 
 ## Mongo: trappole note
@@ -123,8 +124,8 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   non può mandare header. Le API senza sessione rispondono 401 (Angular manda
   a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
-  token: li legge `RuoliKeycloak`. `POST /api/cloud/**` vuole
-  `fototimeline-admin` (`fototimeline.login.ruolo-admin`).
+  token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup` e
+  `/api/archivio/**` vogliono `fototimeline-admin` (`fototimeline.login.ruolo-admin`).
 - CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
@@ -160,6 +161,12 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - La cartella automatica (`fototimeline.importazione-automatica.cartella`) la
   controlla un `@Scheduled`: solo col cloud montato e nessuna importazione in
   corso; importa spostando, con le sottocartelle come album.
+- "Indicizza archivio" (`POST /api/archivio/indicizza`, admin) è un lavoro
+  dello stesso `LavoriImportazione` (origine `INDICIZZAZIONE`):
+  `ImportazioneCartelle.indicizza` percorre l'archivio saltando le cartelle col
+  punto e `FotoService.indicizza` dà la scheda ai file senza, lasciandoli dove
+  sono (o nella cartella del loro giorno). La lettura è la stessa di `importa`
+  (`FotoService.leggi`): un cambio ai formati vale per entrambi.
 - Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
   entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
 

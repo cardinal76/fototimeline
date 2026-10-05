@@ -113,6 +113,13 @@ export class Galleria {
     this.seguiImportazione();
   }
 
+  /** Come un'importazione: stessa barra, e alla fine la timeline si ricarica. */
+  async avviaIndicizzazione(): Promise<void> {
+    const lavoro = await firstValueFrom(this.api.indicizza());
+    this.importazione.set(lavoro);
+    this.seguiImportazione();
+  }
+
   annullaImportazione(): void {
     this.api.annullaImportazione().subscribe(() => this.seguiImportazione());
   }

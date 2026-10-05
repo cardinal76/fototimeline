@@ -278,6 +278,17 @@ export class App {
     }
   }
 
+  protected async indicizza(): Promise<void> {
+    if (!confirm("Cerca nell'archivio le foto che l'app non conosce e le aggiunge. Può richiedere tempo.")) {
+      return;
+    }
+    try {
+      await this.galleria.avviaIndicizzazione();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Indicizzazione non riuscita');
+    }
+  }
+
   protected percentualeImportazione(): number {
     const l = this.galleria.importazione();
     return l && l.trovate ? Math.round((l.fatte / l.trovate) * 100) : 0;

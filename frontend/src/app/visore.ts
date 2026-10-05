@@ -19,6 +19,7 @@ interface Bozza {
 const ORIGINI: Record<Foto['origineData'], string> = {
   EXIF: 'dai dati della fotocamera',
   FILE: 'dalla data del file',
+  CARTELLA: "dalla cartella dell'archivio",
   CARICAMENTO: 'dal momento del caricamento',
   MANUALE: 'impostata a mano',
 };

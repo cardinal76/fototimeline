@@ -47,6 +47,7 @@ public class Foto {
     private Double longitudine;
 
     /** Percorso dell'originale, relativo alla cartella dell'archivio. */
+    @Indexed
     private String percorso;
 
     /** Un video (MP4, MOV) invece di una foto. */

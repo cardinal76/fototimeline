@@ -175,6 +175,45 @@ l'app guarda in quella cartella di LifetimeCloud e, se ci sono foto o video
 Basta far caricare all'app di LifetimeCloud sul telefono le foto in quella
 cartella.
 
+### Foto già ordinate nel cloud
+
+Le foto caricate su LifetimeCloud da fuori (per esempio con uno script),
+direttamente in `FotoTimeline/AAAA/MM/GG/`, l'app non le conosce finché non
+le si indicizza: in alto a destra, da admin e col cloud montato, **Indicizza
+archivio** (`POST /api/archivio/indicizza`). Percorre tutto l'archivio,
+saltando le cartelle col punto (`.backup`, `.miniature`), e a ogni file senza
+scheda dà la scheda e la miniatura **senza copiarlo**: resta dov'è. Gira in
+sottofondo come un'importazione (stessa barra, si può annullare, mai insieme a
+un'importazione); alla fine la timeline si ricarica.
+
+- La data viene dall'EXIF; se manca, dalla cartella `AAAA/MM/GG` in cui sta il
+  file (origine "cartella"), altrimenti dalla data di modifica del file.
+- Se la data dice un altro giorno, il file si sposta nella cartella giusta.
+- I file che hanno già una scheda si saltano senza scaricarli: rifarla dopo
+  ogni caricamento costa poco. Una copia identica di una foto che sta già in
+  un'altra cartella non diventa una seconda scheda (il file resta lì).
+- I file illeggibili finiscono tra gli errori della barra, senza fermare il resto.
+
+#### Da zip su un altro cloud (pCloud)
+
+`deploy/zip-in-archivio.sh` apre uno zip alla volta, mette foto e video in
+`AAAA/MM/GG` (EXIF, poi data del video, poi data del file nello zip) e li copia
+in `lifetime:FotoTimeline`; poi si indicizza. Riparte da dove era arrivato
+(`zip-fatti.txt`). Un file diverso con lo stesso nome non sovrascrive: il
+vecchio va in `FotoTimeline-sovrascritte/`, da importare dall'app alla fine.
+
+```bash
+sudo apt install -y unzip libimage-exiftool-perl
+# su server2, con un remote "pcloud:" in ~/trasferimento/rclone.conf (rclone nel container):
+nohup deploy/zip-in-archivio.sh 'pcloud:Cartella degli zip' > ~/trasferimento/log.txt 2>&1 &
+# oppure sul PC (WSL), da pCloud Drive su P: con il proprio rclone:
+RCLONE=rclone deploy/zip-in-archivio.sh '/mnt/p/Cartella degli zip'
+```
+
+I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
+(cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
+foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
+
 ## Comandi utili su server2
 
 ```bash

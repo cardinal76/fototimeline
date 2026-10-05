@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param attivo se false tutto è aperto, come sul PC
  * @param ruolo  ruolo di realm richiesto; vuoto = basta un utente del realm
- * @param ruoloAdmin ruolo di realm per montare e smontare il cloud
+ * @param ruoloAdmin ruolo di realm per montare e smontare il cloud, fare il backup e indicizzare l'archivio
  */
 @ConfigurationProperties("fototimeline.login")
 public record LoginProperties(boolean attivo, String ruolo, String ruoloAdmin) {

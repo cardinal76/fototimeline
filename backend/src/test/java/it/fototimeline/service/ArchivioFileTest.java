@@ -17,6 +17,14 @@ class ArchivioFileTest {
     }
 
     @Test
+    void giornoDallaCartella() {
+        assertThat(ArchivioFile.giornoDellaCartella("2024/05/03/a.jpg")).isEqualTo(LocalDate.of(2024, 5, 3));
+        assertThat(ArchivioFile.giornoDellaCartella("2024/02/30/a.jpg")).isNull();
+        assertThat(ArchivioFile.giornoDellaCartella("2024/05/03/altro/a.jpg")).isNull();
+        assertThat(ArchivioFile.giornoDellaCartella("Vacanze/a.jpg")).isNull();
+    }
+
+    @Test
     void nomeSicuroTogliePercorsiECaratteriVietati() {
         assertThat(ArchivioFile.nomeSicuro("IMG_0001.JPG", "id", "jpg")).isEqualTo("IMG_0001.jpg");
         assertThat(ArchivioFile.nomeSicuro("../../etc/x.png", "id", "png")).isEqualTo("x.png");

@@ -7,7 +7,10 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -27,6 +30,7 @@ import net.coobird.thumbnailator.Thumbnails;
 public class ArchivioFile {
 
     static final String MINIATURE = ".miniature";
+    private static final Pattern CARTELLA_GIORNO = Pattern.compile("(\\d{4})/(\\d{2})/(\\d{2})/[^/]+");
 
     private final Path radice;
     private final Path miniature;
@@ -75,6 +79,19 @@ public class ArchivioFile {
     /** True se l'originale sta già nella cartella del suo giorno. */
     public static boolean alSuoPosto(String percorso, LocalDate giorno) {
         return percorso != null && percorso.startsWith(cartella(giorno) + "/") && percorso.indexOf('/', 11) < 0;
+    }
+
+    /** "2024/05/03/IMG_0001.jpg" → 3 maggio 2024; null se il file non sta direttamente in una cartella AAAA/MM/GG. */
+    public static LocalDate giornoDellaCartella(String percorso) {
+        Matcher m = CARTELLA_GIORNO.matcher(percorso);
+        if (!m.matches()) {
+            return null;
+        }
+        try {
+            return LocalDate.of(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)));
+        } catch (DateTimeException e) {
+            return null;
+        }
     }
 
     /** Copia l'originale nella cartella del giorno e restituisce il percorso relativo alla radice. */
@@ -155,6 +172,16 @@ public class ArchivioFile {
             throw new IllegalArgumentException("Percorso fuori dall'archivio: " + percorsoRelativo);
         }
         return p;
+    }
+
+    /** Il percorso relativo alla radice di un file che sta già nell'archivio. */
+    public String percorso(Path file) {
+        cloud.verifica();
+        Path p = file.toAbsolutePath().normalize();
+        if (!p.startsWith(radice) || p.equals(radice)) {
+            throw new IllegalArgumentException("File fuori dall'archivio: " + file);
+        }
+        return relativo(p);
     }
 
     public Path miniatura(String id) {

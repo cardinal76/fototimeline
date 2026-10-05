@@ -65,7 +65,8 @@ public class ConfigurazioneSicurezza {
             // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
             a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
                     .permitAll();
-            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup").hasAuthority("ROLE_" + login.ruoloAdmin());
+            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**")
+                    .hasAuthority("ROLE_" + login.ruoloAdmin());
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {
