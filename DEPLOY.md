@@ -194,6 +194,26 @@ un'importazione); alla fine la timeline si ricarica.
   un'altra cartella non diventa una seconda scheda (il file resta lì).
 - I file illeggibili finiscono tra gli errori della barra, senza fermare il resto.
 
+#### Da zip su un altro cloud (pCloud)
+
+`deploy/zip-in-archivio.sh` apre uno zip alla volta, mette foto e video in
+`AAAA/MM/GG` (EXIF, poi data del video, poi data del file nello zip) e li copia
+in `lifetime:FotoTimeline`; poi si indicizza. Riparte da dove era arrivato
+(`zip-fatti.txt`). Un file diverso con lo stesso nome non sovrascrive: il
+vecchio va in `FotoTimeline-sovrascritte/`, da importare dall'app alla fine.
+
+```bash
+sudo apt install -y unzip libimage-exiftool-perl
+# su server2, con un remote "pcloud:" in ~/trasferimento/rclone.conf (rclone nel container):
+nohup deploy/zip-in-archivio.sh 'pcloud:Cartella degli zip' > ~/trasferimento/log.txt 2>&1 &
+# oppure sul PC (WSL), da pCloud Drive su P: con il proprio rclone:
+RCLONE=rclone deploy/zip-in-archivio.sh '/mnt/p/Cartella degli zip'
+```
+
+I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
+(cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
+foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
+
 ## Comandi utili su server2
 
 ```bash
