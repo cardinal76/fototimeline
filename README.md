@@ -61,9 +61,11 @@ Il server: [DEPLOY.md](DEPLOY.md).
 - **Archivio di famiglia**: tutti vedono tutte le foto, ma ogni foto sa chi
   l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
   o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
-- **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
-  informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
-  tag, album, data; si scarica l'originale o si elimina.
+- **Visore** a tutto schermo: si vede solo la foto; ← → o il dito per
+  scorrere, `P` preferita, `I` pannello dei dettagli (si ricorda se lo si
+  lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
+  chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
+  si scarica l'originale o si elimina.
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
 - **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,

@@ -1,5 +1,16 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { FotoApi } from './foto-api';
@@ -24,7 +35,14 @@ const ORIGINI: Record<Foto['origineData'], string> = {
   MANUALE: 'impostata a mano',
 };
 
-/** Foto a schermo intero, con scorrimento, informazioni e modifica. */
+/** Dove si ricorda se il pannello dei dettagli resta aperto. */
+const CHIAVE_DETTAGLI = 'fototimeline.visore.dettagli';
+/** Dopo quanto, in schermo intero, i comandi spariscono se non ci si muove. */
+const RIPOSO_MS = 3000;
+/** Quanto deve scorrere il dito, in orizzontale, per cambiare foto. */
+const SWIPE_PX = 50;
+
+/** Foto a tutto schermo, con scorrimento, schermo intero, dettagli e modifica. */
 @Component({
   selector: 'app-visore',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -34,18 +52,34 @@ const ORIGINI: Record<Foto['origineData'], string> = {
     'aria-modal': 'true',
     '[attr.aria-label]': 'foto().titolo || foto().nomeOriginale',
     '(document:keydown)': 'tasto($event)',
+    '(document:fullscreenchange)': 'cambioSchermoIntero()',
+    '(document:webkitfullscreenchange)': 'cambioSchermoIntero()',
+    '(pointermove)': 'risveglia()',
+    '(pointerdown)': 'risveglia()',
+    '[class.a-riposo]': 'aRiposo()',
   },
   templateUrl: './visore.html',
   styleUrl: './visore.css',
 })
 export class Visore {
   private readonly galleria = inject(Galleria);
+  private readonly elemento = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly foto = input.required<Foto>();
   readonly chiudi = output<void>();
   readonly cambia = output<Foto>();
 
-  protected readonly pannello = signal(true);
+  /** I dettagli si aprono a richiesta: di base si vede solo la foto. */
+  protected readonly pannello = signal(dettagliAperti());
+  protected readonly schermoIntero = signal(false);
+  /** In schermo intero, senza movimento da un po': comandi nascosti. */
+  protected readonly aRiposo = signal(false);
+  /** Lo schermo intero non c'è su tutti i telefoni (iPhone): lì il pulsante non compare. */
+  protected readonly puoSchermoIntero =
+    typeof document !== 'undefined' &&
+    !!(document.fullscreenEnabled || (document as DocumentoWebkit).webkitFullscreenEnabled);
+  private timerRiposo?: ReturnType<typeof setTimeout>;
+  private inizioTocco: { x: number; y: number } | null = null;
   protected readonly salvataggio = signal(false);
   protected readonly modificata = signal(false);
   protected readonly caricata = signal(false);
@@ -100,6 +134,87 @@ export class Visore {
       this.caricata.set(false);
       this.videoIllegibile.set(false);
     });
+    effect(() => {
+      const aperto = this.pannello();
+      try {
+        localStorage.setItem(CHIAVE_DETTAGLI, aperto ? '1' : '0');
+      } catch {
+        // senza localStorage vale solo per questa visita
+      }
+    });
+    effect(() => {
+      if (this.schermoIntero()) {
+        this.risveglia();
+      } else {
+        clearTimeout(this.timerRiposo);
+        this.aRiposo.set(false);
+      }
+    });
+    inject(DestroyRef).onDestroy(() => {
+      clearTimeout(this.timerRiposo);
+      if (document.fullscreenElement === this.elemento.nativeElement) {
+        void document.exitFullscreen?.().catch(() => {});
+      }
+    });
+  }
+
+  protected dettagli(): void {
+    this.pannello.update((p) => !p);
+  }
+
+  /** Schermo intero sul visore; dove non c'è (o il browser rifiuta) non succede nulla. */
+  protected async alternaSchermoIntero(): Promise<void> {
+    const d = document as DocumentoWebkit;
+    try {
+      if (document.fullscreenElement || d.webkitFullscreenElement) {
+        await (document.exitFullscreen?.() ?? d.webkitExitFullscreen?.());
+      } else {
+        const el = this.elemento.nativeElement as ElementoWebkit;
+        await (el.requestFullscreen?.() ?? el.webkitRequestFullscreen?.());
+      }
+    } catch {
+      // schermo intero non disponibile: si resta come prima
+    }
+  }
+
+  protected cambioSchermoIntero(): void {
+    const d = document as DocumentoWebkit;
+    this.schermoIntero.set(!!(document.fullscreenElement || d.webkitFullscreenElement));
+  }
+
+  /** Mouse o dito: i comandi tornano e, in schermo intero, ripartono i secondi. */
+  protected risveglia(): void {
+    this.aRiposo.set(false);
+    clearTimeout(this.timerRiposo);
+    if (this.schermoIntero()) {
+      this.timerRiposo = setTimeout(() => this.aRiposo.set(true), RIPOSO_MS);
+    }
+  }
+
+  /** Un clic sullo sfondo chiude; in schermo intero fa solo ricomparire i comandi. */
+  protected sfondo(): void {
+    if (!this.schermoIntero()) {
+      this.chiudi.emit();
+    }
+  }
+
+  protected toccoInizio(e: TouchEvent): void {
+    const t = e.touches[0];
+    this.inizioTocco =
+      e.touches.length === 1 && !(e.target as HTMLElement).closest('video') ? { x: t.clientX, y: t.clientY } : null;
+  }
+
+  /** Scorrimento orizzontale del dito: foto precedente o successiva. */
+  protected toccoFine(e: TouchEvent): void {
+    const inizio = this.inizioTocco;
+    this.inizioTocco = null;
+    const t = e.changedTouches[0];
+    if (!inizio || !t) return;
+    const dx = t.clientX - inizio.x;
+    const dy = t.clientY - inizio.y;
+    if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      this.vai(dx < 0 ? 1 : -1);
+    }
   }
 
   /** Dal luogo della foto al filtro della timeline. */
@@ -180,6 +295,10 @@ export class Visore {
 
   protected tasto(e: KeyboardEvent): void {
     const bersaglio = e.target as HTMLElement;
+    this.risveglia();
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      return;
+    }
     if (bersaglio.closest('input, textarea, select')) {
       if (e.key === 'Escape') {
         bersaglio.blur();
@@ -197,9 +316,12 @@ export class Visore {
         this.vai(1);
         break;
       case 'i':
-        this.pannello.update((p) => !p);
+        this.dettagli();
         break;
       case 'f':
+        void this.alternaSchermoIntero();
+        break;
+      case 'p':
         void this.preferita();
         break;
       default:
@@ -218,6 +340,24 @@ export class Visore {
 
   protected peso(byte: number): string {
     return byte > 1_048_576 ? `${(byte / 1_048_576).toFixed(1)} MB` : `${Math.round(byte / 1024)} KB`;
+  }
+}
+
+interface DocumentoWebkit extends Document {
+  webkitFullscreenEnabled?: boolean;
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+}
+
+interface ElementoWebkit extends HTMLElement {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+}
+
+function dettagliAperti(): boolean {
+  try {
+    return localStorage.getItem(CHIAVE_DETTAGLI) === '1';
+  } catch {
+    return false;
   }
 }
 
