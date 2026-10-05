@@ -52,8 +52,6 @@ public class SincronizzazioneTelefono {
     static final String ID = "sincronizzazione-telefono";
     private static final int MAX_MESSAGGI = 20;
     private static final int MAX_ORE = 168;
-    /** Copie insieme: con tante foto piccole il tempo va nell'attesa per file, non nella banda. */
-    static final int COPIE_IN_PARALLELO = 6;
 
     private final Rclone rclone;
     private final CloudProperties cloud;
@@ -80,13 +78,14 @@ public class SincronizzazioneTelefono {
     }
 
     /** Impostazioni e stato, per l'API. {@code motivo} dice perché non si può attivare. */
-    public record Stato(boolean attiva, String sorgente, int intervalloOre, int giorniPrimaDiCancellare,
+    public record Stato(boolean attiva, String sorgente, int intervalloOre, int giorniPrimaDiCancellare, int copieInParallelo,
             boolean disponibile, String motivo, String destinazione, boolean inCorso, Giro ultimoGiro,
             Instant prossimoGiroIl, Giro giroInCorso) {
     }
 
     /** Quello che si cambia dalla pagina; un campo null resta com'è. */
-    public record Modifica(Boolean attiva, String sorgente, Integer intervalloOre, Integer giorniPrimaDiCancellare) {
+    public record Modifica(Boolean attiva, String sorgente, Integer intervalloOre, Integer giorniPrimaDiCancellare,
+            Integer copieInParallelo) {
     }
 
     public ImpostazioniTelefono impostazioni() {
@@ -105,7 +104,8 @@ public class SincronizzazioneTelefono {
         Contatori c = corrente;
         Instant inizio = inizioCorrente;
         Giro giroInCorso = c != null && inizio != null ? c.giro(inizio, null, null, "In corso") : null;
-        return new Stato(i.attiva(), i.sorgente(), i.intervalloOre(), i.giorniPrimaDiCancellare(), motivo == null,
+        return new Stato(i.attiva(), i.sorgente(), i.intervalloOre(), i.giorniPrimaDiCancellare(), i.copie(),
+                motivo == null,
                 motivo, motivo == null ? nelCloud(destinazione()) : null, inCorso.get(), i.ultimoGiro(), prossimo,
                 giroInCorso);
     }
@@ -117,9 +117,13 @@ public class SincronizzazioneTelefono {
         String sorgente = m.sorgente() != null ? m.sorgente().trim() : ora.sorgente();
         int ore = m.intervalloOre() != null ? m.intervalloOre() : ora.intervalloOre();
         int giorni = m.giorniPrimaDiCancellare() != null ? m.giorniPrimaDiCancellare() : ora.giorniPrimaDiCancellare();
+        int copie = m.copieInParallelo() != null ? m.copieInParallelo() : ora.copie();
         Sorgente.da(sorgente);
         if (ore < 1 || ore > MAX_ORE) {
             throw new IllegalArgumentException("Ogni quante ore: da 1 a " + MAX_ORE);
+        }
+        if (copie < 1 || copie > ImpostazioniTelefono.MAX_COPIE_IN_PARALLELO) {
+            throw new IllegalArgumentException("Copie in parallelo: da 1 a " + ImpostazioniTelefono.MAX_COPIE_IN_PARALLELO);
         }
         if (giorni < 0) {
             throw new IllegalArgumentException("Giorni prima di togliere da pCloud: 0 (mai) o di più");
@@ -132,9 +136,10 @@ public class SincronizzazioneTelefono {
                 .set("attiva", attiva)
                 .set("sorgente", sorgente)
                 .set("intervalloOre", ore)
-                .set("giorniPrimaDiCancellare", giorni), ImpostazioniTelefono.class);
-        log.info("Sincronizzazione del telefono: attiva={}, sorgente={}, ogni {} ore, cancella dopo {} giorni",
-                attiva, sorgente, ore, giorni);
+                .set("giorniPrimaDiCancellare", giorni)
+                .set("copieInParallelo", copie), ImpostazioniTelefono.class);
+        log.info("Sincronizzazione del telefono: attiva={}, sorgente={}, ogni {} ore, cancella dopo {} giorni, {} copie insieme",
+                attiva, sorgente, ore, giorni, copie);
         return stato();
     }
 
@@ -247,7 +252,7 @@ public class SincronizzazioneTelefono {
         String messaggio;
         try {
             Sorgente sorgente = Sorgente.da(i.sorgente());
-            copia(sorgente, destinazione(), inizio, c);
+            copia(sorgente, destinazione(), inizio, i.copie(), c);
             if (i.giorniPrimaDiCancellare() > 0) {
                 cancella(inizio.minus(Duration.ofDays(i.giorniPrimaDiCancellare())), inizio, c);
             }
@@ -268,14 +273,15 @@ public class SincronizzazioneTelefono {
                 .setOnInsert("attiva", p.attiva())
                 .setOnInsert("sorgente", p.sorgente())
                 .setOnInsert("intervalloOre", p.intervalloOre())
-                .setOnInsert("giorniPrimaDiCancellare", p.giorniPrimaDiCancellare()), ImpostazioniTelefono.class);
+                .setOnInsert("giorniPrimaDiCancellare", p.giorniPrimaDiCancellare())
+                .setOnInsert("copieInParallelo", p.copieInParallelo()), ImpostazioniTelefono.class);
         log.info("Sincronizzazione del telefono {}: {} trovati, {} copiati, {} già copiati, {} tolti dalla sorgente, {} errori",
                 esito, giro.trovati(), giro.copiati(), giro.giaCopiati(), giro.cancellati(), giro.errori());
         return giro;
     }
 
     /** Copia nella cartella automatica i file della sorgente che non sono nel registro. */
-    private void copia(Sorgente sorgente, String cartella, Instant adesso, Contatori c) {
+    private void copia(Sorgente sorgente, String cartella, Instant adesso, int inParallelo, Contatori c) {
         Map<String, Object> risposta = rclone.chiama("operations/list", Map.of(
                 "fs", sorgente.fs(),
                 "remote", sorgente.percorso(),
@@ -290,7 +296,7 @@ public class SincronizzazioneTelefono {
         }
         // I nomi presi in questo giro: due copie in parallelo non devono scegliere lo stesso.
         Set<String> prenotati = ConcurrentHashMap.newKeySet();
-        ExecutorService copie = Executors.newFixedThreadPool(COPIE_IN_PARALLELO, r -> {
+        ExecutorService copie = Executors.newFixedThreadPool(inParallelo, r -> {
             Thread t = new Thread(r, "telefono-copia");
             t.setDaemon(true);
             return t;

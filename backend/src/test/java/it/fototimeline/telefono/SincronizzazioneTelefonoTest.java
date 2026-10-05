@@ -208,7 +208,7 @@ class SincronizzazioneTelefonoTest {
 
     @Test
     void conZeroGiorniNonCancellaMai() {
-        sincronizzazione.salva(new Modifica(null, null, null, 0));
+        sincronizzazione.salva(new Modifica(null, null, null, 0, null));
         rclone.pcloud.put("Automatic Upload/Pixel 8/IMG_0001.jpg", 100L);
         sincronizzazione.sincronizza();
         rclone.lifetime.clear();
@@ -228,7 +228,7 @@ class SincronizzazioneTelefonoTest {
         aspetta();
         assertThat(rclone.chiamate).isEmpty();
 
-        sincronizzazione.salva(new Modifica(true, null, 6, null));
+        sincronizzazione.salva(new Modifica(true, null, 6, null, null));
         assertThat(sincronizzazione.stato().prossimoGiroIl()).isEqualTo(orologio.instant());
         sincronizzazione.seNecessario();
         aspetta();
@@ -253,19 +253,25 @@ class SincronizzazioneTelefonoTest {
             assertThat(s.sorgente()).isEqualTo("pcloud:Automatic Upload");
             assertThat(s.intervalloOre()).isEqualTo(6);
             assertThat(s.giorniPrimaDiCancellare()).isEqualTo(7);
+            assertThat(s.copieInParallelo()).isEqualTo(6);
             assertThat(s.disponibile()).isTrue();
             assertThat(s.destinazione()).isEqualTo("lifetime:telefono");
         });
-        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, 0, null)))
+        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, 0, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, 169, null)))
+        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, 169, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, null, -1)))
+        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, null, -1, null)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, "Automatic Upload", null, null)))
+        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, "Automatic Upload", null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, null, null, 0)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> sincronizzazione.salva(new Modifica(null, null, null, null, 33)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(sincronizzazione.salva(new Modifica(null, null, null, null, 12)).copieInParallelo()).isEqualTo(12);
 
-        var salvato = sincronizzazione.salva(new Modifica(true, "pcloud:/Automatic Upload/Pixel 8/", 168, 30));
+        var salvato = sincronizzazione.salva(new Modifica(true, "pcloud:/Automatic Upload/Pixel 8/", 168, 30, null));
         assertThat(salvato.attiva()).isTrue();
         assertThat(salvato.intervalloOre()).isEqualTo(168);
         assertThat(salvato.giorniPrimaDiCancellare()).isEqualTo(30);
@@ -282,7 +288,7 @@ class SincronizzazioneTelefonoTest {
                 Optional.empty());
         assertThat(pc.stato().disponibile()).isFalse();
         assertThat(pc.motivo()).contains("solo sul server");
-        assertThatThrownBy(() -> pc.salva(new Modifica(true, null, null, null)))
+        assertThatThrownBy(() -> pc.salva(new Modifica(true, null, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("non si può attivare");
         assertThatThrownBy(pc::avvia).isInstanceOf(IllegalStateException.class);
 

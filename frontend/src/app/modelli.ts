@@ -183,6 +183,8 @@ export interface StatoTelefono {
   intervalloOre: number;
   /** 0 = non togliere mai da pCloud. */
   giorniPrimaDiCancellare: number;
+  /** Quanti file si copiano insieme (1–32). */
+  copieInParallelo: number;
   disponibile: boolean;
   /** Perché non si può attivare, se non disponibile. */
   motivo?: string;
@@ -200,4 +202,5 @@ export interface ModificaTelefono {
   sorgente: string;
   intervalloOre: number;
   giorniPrimaDiCancellare: number;
+  copieInParallelo: number;
 }
