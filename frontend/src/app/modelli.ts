@@ -162,7 +162,8 @@ export interface CopiaBackup {
 export interface GiroTelefono {
   iniziatoIl: string;
   finitoIl?: string;
-  esito: 'OK' | 'ERRORE';
+  /** Vuoto mentre il giro è in corso. */
+  esito?: 'OK' | 'ERRORE';
   messaggio?: string;
   /** File di pCloud nei formati dell'archivio. */
   trovati: number;
@@ -190,6 +191,8 @@ export interface StatoTelefono {
   inCorso: boolean;
   ultimoGiro?: GiroTelefono;
   prossimoGiroIl?: string;
+  /** I contatori del giro che sta girando (esito ancora vuoto). */
+  giroInCorso?: GiroTelefono;
 }
 
 export interface ModificaTelefono {

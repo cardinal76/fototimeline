@@ -140,6 +140,26 @@ class SincronizzazioneTelefonoTest {
     }
 
     @Test
+    void moltiFileInParalleloTuttiCopiatiConNomiDiversi() {
+        for (int i = 1; i <= 40; i++) {
+            rclone.pcloud.put("Automatic Upload/Pixel 8/IMG_%04d.jpg".formatted(i), 100L + i);
+        }
+        // Due percorsi diversi che appiattiti danno lo stesso nome: copiati in parallelo non si pestano.
+        rclone.pcloud.put("Automatic Upload/a/b - c.jpg", 7L);
+        rclone.pcloud.put("Automatic Upload/a - b/c.jpg", 8L);
+
+        Giro giro = sincronizzazione.sincronizza();
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.copiati()).isEqualTo(42);
+        assertThat(rclone.lifetime).hasSize(42)
+                .containsKeys("telefono/a - b - c.jpg", "telefono/a - b - c (2).jpg");
+        assertThat(rclone.lifetime.values()).contains(7L, 8L);
+        assertThat(mongo.count(new Query(), CopiaTelefono.class)).isEqualTo(42);
+        assertThat(sincronizzazione.stato().giroInCorso()).isNull();
+    }
+
+    @Test
     void unaCopiaIncompletaEUnErroreENonVaNelRegistro() {
         rclone.pcloud.put("Automatic Upload/Pixel 8/IMG_0001.jpg", 100L);
         rclone.pcloud.put("Automatic Upload/Pixel 8/IMG_0002.jpg", 120L);

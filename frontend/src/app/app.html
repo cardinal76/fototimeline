@@ -377,6 +377,14 @@
           <h3>Ultimo giro</h3>
           @if (t.inCorso) {
             <p><span class="rotella piccola" aria-hidden="true"></span> Sincronizzazione in corso…</p>
+            @if (t.giroInCorso; as g) {
+              <p class="tenue">
+                {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati
+                @if (g.errori) {
+                  · <span class="errore">{{ g.errori }} errori</span>
+                }
+              </p>
+            }
           }
           @if (t.ultimoGiro; as g) {
             <p>
