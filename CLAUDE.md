@@ -95,6 +95,22 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - Un campo nuovo in `Foto` finisce nel backup da solo (si copia il documento
   grezzo): non serve toccare il backup.
 
+## Salute e avvisi
+
+- `Salute` (pacchetto `salute`) fa i controlli della pagina "Salute"
+  (`GET /api/salute`, admin; `/salute` senza `/api` è l'healthcheck di Docker:
+  non toccarlo). Ogni controllo gira su un thread suo con un tempo massimo
+  (`TEMPO_MASSIMO`): se lancia o tarda, la sua voce è rossa e le altre
+  restano. Verso rclone un `Rclone` suo con timeout di pochi secondi, non
+  quello del montaggio. Una voce nuova: un `Controllo` in `controlla()`, con
+  una `chiave` fissa (gli avvisi la ricordano).
+- `AvvisiSalute` ogni `fototimeline.telegram.controllo` confronta gli stati
+  con quelli in `impostazioni/avvisi-salute` e scrive su Telegram solo i
+  cambi; se l'invio fallisce non salva, così riprova. Il token del bot sta
+  nell'indirizzo: ogni messaggio d'errore passa da `Telegram.senzaToken`.
+- L'esito dell'ultimo backup sta anche in `impostazioni/backup-metadati`
+  (`BackupMetadati.esito()`): col cloud smontato i file non si vedono.
+
 ## Comandi
 
 ```bash
@@ -125,7 +141,7 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
   token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup`,
-  `/api/archivio/**` e tutto `/api/telefono` vogliono `fototimeline-admin`
+  `/api/archivio/**`, tutto `/api/telefono` e `/api/salute` vogliono `fototimeline-admin`
   (`fototimeline.login.ruolo-admin`).
 - CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
