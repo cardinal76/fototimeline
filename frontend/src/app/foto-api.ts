@@ -17,6 +17,7 @@ import {
   PaginaGruppi,
   PuntoMappa,
   Ricordo,
+  Salute,
   StatoCloud,
   StatoImpronte,
   StatoTelefono,
@@ -152,6 +153,16 @@ export class FotoApi {
 
   annullaImpronte(): Observable<void> {
     return this.http.post<void>('/api/quasi-uguali/calcola/annulla', {});
+  }
+
+  /** La pagina "Salute" (solo admin). */
+  salute(): Observable<Salute> {
+    return this.http.get<Salute>('/api/salute');
+  }
+
+  /** Un messaggio di prova su Telegram: 409 se non è configurato. */
+  provaTelegram(): Observable<void> {
+    return this.http.post<void>('/api/salute/prova', {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

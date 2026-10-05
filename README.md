@@ -66,6 +66,9 @@ Il server: [DEPLOY.md](DEPLOY.md).
   app" (manifest, icone, service worker); si apre a schermo intero.
 - **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
+- **Salute** (admin): rclone, cloud, backup, telefono, importazioni, spazio e
+  numeri dell'archivio con un pallino verde/giallo/rosso; avvisi su Telegram
+  quando una voce cambia stato (DEPLOY.md).
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
 - **Foto quasi uguali**: raffiche, scatti ripetuti, la stessa foto ridimensionata o
@@ -146,6 +149,10 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
 | `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
+| `FOTOTIMELINE_TELEGRAM_TOKEN`, `FOTOTIMELINE_TELEGRAM_CHAT` | (vuoti) | Avvisi su Telegram della pagina "Salute"; vuoti = spenti |
+| `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
+| `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
+| `FOTOTIMELINE_DOMINIO`  | (vuoto)                                   | Il link all'app nei messaggi di Telegram |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -180,6 +187,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | POST   | `/api/quasi-uguali/ignora`   | `{ ids: [id] }`: "non sono doppioni", il gruppo non ricompare |
 | GET    | `/api/quasi-uguali/calcola`  | "Calcola impronte": stato, avanzamento e foto ancora senza impronta |
 | POST   | `/api/quasi-uguali/calcola`  | Lo avvia in sottofondo: 202, 409 se già in corso (ruolo `fototimeline-admin`); `/calcola/annulla` lo ferma |
+| GET    | `/api/salute`                | `{ stato, voci: [{ chiave, titolo, stato, messaggio, dettagli }], controllatoIl, avvisiTelegram }`, stato `OK`/`ATTENZIONE`/`ERRORE` (admin) |
+| POST   | `/api/salute/prova`          | Messaggio di prova su Telegram: 204, 409 se non configurato, 502 se Telegram rifiuta (admin) |
+| GET    | `/salute`                    | Healthcheck di Docker: `ok`, senza login                   |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |

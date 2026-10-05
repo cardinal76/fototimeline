@@ -194,6 +194,10 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   Le preferite non si propongono mai da togliere. La prima volta, da admin, **Calcola impronte**
   (nel dialogo) per le foto già in archivio: legge solo le miniature, non serve il cloud. Le foto
   nuove la prendono da sole.
+- **Salute**: il pallino dice se va tutto bene (verde), se c'è da guardare (giallo) o se qualcosa
+  non va (rosso); il dialogo spiega cosa, voce per voce. Con il bot di Telegram (DEPLOY.md,
+  "Salute e avvisi su Telegram") arriva un messaggio quando una voce diventa rossa e quando torna
+  a posto: per esempio se il token di pCloud scade, o se il backup non si fa da due giorni.
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.

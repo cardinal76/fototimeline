@@ -3,7 +3,7 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
+import { Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, Salute, StatoCloud, VoceMese } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** Le estensioni che il backend accetta (FotoService.TIPI). */
@@ -43,6 +43,8 @@ export class Galleria {
   /** Ultimo backup dei metadati (solo per gli admin). */
   readonly ultimoBackup = signal<CopiaBackup | null>(null);
   readonly backupInCorso = signal(false);
+  /** L'ultimo controllo della pagina "Salute" (solo per gli admin), per il pallino nella barra. */
+  readonly salute = signal<Salute | null>(null);
   /** Importazione da seguire con la barra; null quando non ce n'è una da mostrare. */
   readonly importazione = signal<LavoroImportazione | null>(null);
   /** Originali raggiungibili: sul PC sempre, sul server solo col cloud montato. */
@@ -92,6 +94,7 @@ export class Galleria {
       this.io.set(io);
       if (io.admin) {
         this.aggiornaBackup();
+        this.seguiSalute();
       }
     });
     this.aggiornaCloud();
@@ -151,6 +154,22 @@ export class Galleria {
       },
       error: () => (this.importazioneTimer = setTimeout(() => this.seguiImportazione(), 60000)),
     });
+  }
+
+  /** Il pallino della salute: subito e poi ogni 5 minuti. */
+  private seguiSalute(): void {
+    this.aggiornaSalute();
+    setInterval(() => this.aggiornaSalute(), 5 * 60_000);
+  }
+
+  aggiornaSalute(): Promise<Salute | null> {
+    return firstValueFrom(this.api.salute()).then(
+      (s) => {
+        this.salute.set(s);
+        return s;
+      },
+      () => null,
+    );
   }
 
   aggiornaBackup(): void {

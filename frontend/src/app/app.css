@@ -554,3 +554,29 @@ main[hidden] {
 .avanzamento.importazione.sopra {
   bottom: 9.5rem;
 }
+
+/* ---------------------------------------------------------- salute */
+.pallino {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: var(--testo-tenue);
+}
+.pallino[data-stato='OK'] { background: #3fb950; }
+.pallino[data-stato='ATTENZIONE'] { background: #d29922; }
+.pallino[data-stato='ERRORE'] { background: var(--pericolo); }
+.voci-salute {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.voci-salute > li {
+  display: flex;
+  gap: 0.4rem;
+}

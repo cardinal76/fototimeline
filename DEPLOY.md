@@ -279,6 +279,51 @@ I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
 (cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
 foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
 
+## Salute e avvisi su Telegram
+
+Il bottone **Salute** in alto a destra (solo admin) mostra con un pallino
+verde, giallo o rosso: rclone, cloud montato, ultimo backup dei metadati,
+sincronizzazione del telefono, importazioni (e file in attesa nella cartella
+automatica), spazio sul disco delle miniature e su `lifetime:` / `pcloud:`,
+numeri dell'archivio. Il pallino sul bottone è lo stato peggiore; si aggiorna
+ogni 5 minuti. `/salute` resta l'healthcheck di Docker e non cambia.
+
+Soglie: backup più vecchio di due intervalli (con `P1D`, due giorni) rosso,
+mai fatto giallo; telefono attivo fermo da più di due intervalli o con
+l'ultimo giro in errore rosso (gli errori del token di pCloud, per esempio
+`2094`, lo dicono); spazio libero sotto il 10% giallo, sotto il 5% rosso;
+cloud smontato giallo, rclone che non risponde rosso.
+
+Ogni 15 minuti l'app ricontrolla e scrive su Telegram **solo quando una voce
+cambia**: diventa rossa, o torna a posto ("risolto"). Il giallo non avvisa,
+salvo `FOTOTIMELINE_TELEGRAM_ATTENZIONE=true`. Gli stati visti stanno in
+Mongo: un riavvio o un rilascio non rimandano niente.
+
+Per accenderli, una volta:
+
+1. su Telegram scrivi a **@BotFather**: `/newbot`, un nome, un nome utente che
+   finisce con `bot`. Ti risponde con il **token** (`123456789:AA...`);
+2. apri la chat con il tuo bot e scrivigli qualcosa (un bot non può scrivere
+   per primo);
+3. prendi il **chat id**: apri
+   `https://api.telegram.org/bot<TOKEN>/getUpdates` e cerca `"chat":{"id":...}`
+   (un numero; per un gruppo è negativo e il bot deve essere nel gruppo);
+4. mettili nel `.env` di server2 (`nano ~/fototimeline/.env`):
+
+   ```bash
+   FOTOTIMELINE_TELEGRAM_TOKEN=123456789:AA...
+   FOTOTIMELINE_TELEGRAM_CHAT=987654321
+   ```
+
+5. rilascia (workflow **Rilascio**, come sopra): le variabili entrano nel
+   container solo così;
+6. **Salute → Messaggio di prova**: deve arrivare su Telegram. Se no, il
+   messaggio d'errore dice cosa risponde Telegram (`chat not found`: chat id
+   sbagliato o non hai scritto al bot; `Unauthorized`: token sbagliato).
+
+Il token non finisce nei log né nelle risposte dell'app. Il link nei messaggi
+è `https://$FOTOTIMELINE_DOMINIO`.
+
 ## Comandi utili su server2
 
 ```bash

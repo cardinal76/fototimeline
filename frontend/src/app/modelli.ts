@@ -247,3 +247,23 @@ export interface StatoImpronte {
   /** Foto (non video) ancora senza impronta: non entrano nel confronto. */
   senzaImpronta: number;
 }
+
+/** Pallino della pagina "Salute": verde, giallo, rosso. */
+export type StatoSalute = 'OK' | 'ATTENZIONE' | 'ERRORE';
+
+export interface VoceSalute {
+  chiave: string;
+  titolo: string;
+  stato: StatoSalute;
+  messaggio: string;
+  dettagli: string[];
+}
+
+/** GET /api/salute (solo admin). */
+export interface Salute {
+  stato: StatoSalute;
+  voci: VoceSalute[];
+  controllatoIl: string;
+  /** Token e chat di Telegram impostati sul server. */
+  avvisiTelegram: boolean;
+}

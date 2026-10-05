@@ -70,6 +70,8 @@ public class ConfigurazioneSicurezza {
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
             // La sincronizzazione del telefono, anche in lettura: dice dove carica il telefono.
             a.requestMatchers("/api/telefono", "/api/telefono/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            // La pagina "Salute" e la prova di Telegram (/salute, l'healthcheck, resta pubblico qui sopra).
+            a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {

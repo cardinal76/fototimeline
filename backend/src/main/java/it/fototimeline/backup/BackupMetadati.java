@@ -24,7 +24,11 @@ import org.bson.json.JsonMode;
 import org.bson.json.JsonWriterSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -66,6 +70,21 @@ public class BackupMetadati {
     public record Copia(String nome, long dimensione, Instant fattoIl) {
     }
 
+    /**
+     * L'ultimo backup riuscito e l'ultimo tentativo, in Mongo: si leggono
+     * anche col cloud smontato (pagina "Salute").
+     */
+    @org.springframework.data.mongodb.core.mapping.Document("impostazioni")
+    public record Esito(@Id String id, Instant ultimoIl, String ultimoNome, Instant tentativoIl, String errore) {
+    }
+
+    static final String ID_ESITO = "backup-metadati";
+
+    /** Com'è andato l'ultimo backup; vuoto se da quando c'è questo registro non ne è partito nessuno. */
+    public Optional<Esito> esito() {
+        return Optional.ofNullable(mongo.findById(ID_ESITO, Esito.class));
+    }
+
     public Path cartella() {
         return properties.cartella() != null ? properties.cartella() : archivio.radice().resolve(".backup");
     }
@@ -90,6 +109,18 @@ public class BackupMetadati {
     /** Fa subito un backup e toglie quelli oltre {@code tenere}. */
     public synchronized Copia esegui() throws IOException {
         archivio.verificaDisponibile();
+        try {
+            Copia copia = scrivi();
+            registra(copia, null);
+            pulisci();
+            return copia;
+        } catch (IOException | RuntimeException e) {
+            registra(null, e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            throw e;
+        }
+    }
+
+    private Copia scrivi() throws IOException {
         Path cartella = cartella();
         Files.createDirectories(cartella);
         String nome = PREFISSO + LocalDateTime.ofInstant(clock.instant(), ZoneId.systemDefault()).format(NOME) + SUFFISSO;
@@ -109,8 +140,20 @@ public class BackupMetadati {
         // Mai un backup a metà con il nome buono.
         Files.move(temporaneo, finale, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         log.info("Backup dei metadati: {} foto in {}", documenti, finale);
-        pulisci();
         return copia(finale);
+    }
+
+    /** Ricorda il tentativo; un errore qui non deve coprire quello del backup. */
+    private void registra(Copia copia, String errore) {
+        try {
+            Update u = new Update().set("tentativoIl", clock.instant()).set("errore", errore);
+            if (copia != null) {
+                u.set("ultimoIl", copia.fattoIl()).set("ultimoNome", copia.nome());
+            }
+            mongo.upsert(Query.query(Criteria.where("_id").is(ID_ESITO)), u, Esito.class);
+        } catch (RuntimeException e) {
+            log.warn("Esito del backup non registrato: {}", e.getMessage());
+        }
     }
 
     /** I backup presenti, dal più recente. */
