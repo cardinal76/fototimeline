@@ -21,6 +21,7 @@ import {
   Ricordo,
   Salute,
   StatoCloud,
+  StatoConversioni,
   StatoImpronte,
   StatoTelefono,
   VoceMese,
@@ -77,6 +78,20 @@ export class FotoApi {
   /** "Indicizza archivio": dà una scheda alle foto già nell'archivio che l'app non conosce (solo admin). */
   indicizza(): Observable<LavoroImportazione> {
     return this.http.post<LavoroImportazione>('/api/archivio/indicizza', {});
+  }
+
+  /** La coda delle versioni compatibili dei video. */
+  conversioni(): Observable<StatoConversioni> {
+    return this.http.get<StatoConversioni>('/api/archivio/video');
+  }
+
+  /** "Converti video": mette in coda i video già in archivio che ne hanno bisogno (solo admin). */
+  convertiVideo(): Observable<StatoConversioni> {
+    return this.http.post<StatoConversioni>('/api/archivio/video/converti', {});
+  }
+
+  annullaConversioni(): Observable<StatoConversioni> {
+    return this.http.post<StatoConversioni>('/api/archivio/video/annulla', {});
   }
 
   /** L'importazione in corso o l'ultima finita; null se non ce ne sono state. */
@@ -208,6 +223,15 @@ export class FotoApi {
 
   static originale(f: Foto, scarica = false): string {
     return `/api/foto/${f.id}/file${scarica ? '?scarica=true' : ''}`;
+  }
+
+  /**
+   * Il video da riprodurre: il server dà la versione compatibile se c'è.
+   * Con la compatibile l'indirizzo cambia (c=1): il browser può avere in
+   * cache l'originale servito prima della conversione.
+   */
+  static video(f: Foto): string {
+    return `/api/foto/${f.id}/file${f.conversione === 'FATTA' ? '?c=1' : ''}`;
   }
 }
 

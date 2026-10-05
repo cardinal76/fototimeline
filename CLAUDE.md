@@ -45,6 +45,12 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   container `TZ=Europe/Rome`). Le date prima del 1990 sono "sconosciuta".
 - Il browser riceve `/vista` (JPEG per gli HEIC, l'originale per il resto) e
   per i video `/file`, che risponde a pezzi con `Range`.
+- Video non H.264/AAC (HEVC, VP9, ProRes, 10 bit): `ConversioneVideo` ne fa
+  una versione compatibile in `<archivio>/.compatibili/<id>.mp4`
+  (`fototimeline.video.*`), un video alla volta, con lo stato sulla scheda
+  (`compatibile`, `conversione`): così riprende dopo un riavvio. `/file` serve
+  quella se `conversione` è `FATTA`, l'originale con `?originale=true` o
+  `?scarica=true`. Col cloud smontato la coda aspetta, non va in errore.
 - Nei test i casi HEIC e video si saltano dove i programmi mancano
   (`assumeTrue`): i file di prova sono in `src/test/resources`.
 

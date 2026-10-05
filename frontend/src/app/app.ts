@@ -322,6 +322,27 @@ export class App {
     }
   }
 
+  protected async convertiVideo(): Promise<void> {
+    if (
+      !confirm(
+        'Prepara una versione compatibile (H.264) dei video che non tutti i browser sanno riprodurre, ' +
+          "come gli HEVC dell'iPhone. Gira in sottofondo, un video alla volta: può richiedere ore.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await this.galleria.convertiVideo();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Conversione dei video non partita');
+    }
+  }
+
+  protected percentualeConversioni(): number {
+    const s = this.galleria.conversioni();
+    return s && s.fatti + s.errori + s.daFare ? Math.round(((s.fatti + s.errori) / (s.fatti + s.errori + s.daFare)) * 100) : 0;
+  }
+
   protected percentualeImportazione(): number {
     const l = this.galleria.importazione();
     return l && l.trovate ? Math.round((l.fatte / l.trovate) * 100) : 0;

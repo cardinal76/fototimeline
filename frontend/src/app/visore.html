@@ -9,8 +9,25 @@
       autoplay
       playsinline
       preload="metadata"
+      (error)="videoIllegibile.set(true)"
       (click)="$event.stopPropagation()"
     ></video>
+    @if (senzaCompatibile() || videoIllegibile()) {
+      <p class="avviso-video" role="status" (click)="$event.stopPropagation()">
+        @if (senzaCompatibile()) {
+          @if (foto().conversione === 'IN_CODA' || foto().conversione === 'IN_CORSO') {
+            In conversione: tra poco si vedrà in tutti i browser. Intanto
+          } @else if (foto().conversione === 'ERRORE') {
+            La versione per tutti i browser non è riuscita:
+          } @else {
+            Questo video ({{ foto().codecVideo }}) non si vede in tutti i browser e non è ancora stato convertito:
+          }
+        } @else {
+          Questo browser non riesce a riprodurre il video:
+        }
+        <a [href]="scarica()">scarica l'originale</a>.
+      </p>
+    }
   } @else {
     <img
       class="immagine"

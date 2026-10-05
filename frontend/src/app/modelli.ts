@@ -26,6 +26,37 @@ export interface Foto {
   video: boolean;
   /** Durata del video, in secondi. */
   durata?: number;
+  /** Codec del video e dell'audio ("hevc", "aac"), per i video. */
+  codecVideo?: string;
+  codecAudio?: string;
+  /** True se ogni browser riproduce l'originale; false se serve la versione compatibile; assente se non si sa ancora. */
+  compatibile?: boolean;
+  /** La versione compatibile (H.264 in MP4) dei video che ne hanno bisogno. */
+  conversione?: StatoConversione;
+  erroreConversione?: string;
+}
+
+export type StatoConversione = 'IN_CODA' | 'IN_CORSO' | 'FATTA' | 'ERRORE';
+
+/** La coda delle versioni compatibili dei video ("Converti video", solo admin). */
+export interface StatoConversioni {
+  /** False se le conversioni sono spente o sul server manca ffmpeg. */
+  attiva: boolean;
+  inCorso: boolean;
+  /** C'è da fare ma il cloud è smontato. */
+  inAttesa: boolean;
+  /** In coda, compreso quello in corso. */
+  daFare: number;
+  /** Finiti dall'ultimo "Converti video". */
+  fatti: number;
+  errori: number;
+  /** Video che hanno la versione compatibile, in tutto. */
+  convertiti: number;
+  correnteId?: string;
+  corrente?: string;
+  /** Del video in corso, 0..100. */
+  percentuale?: number;
+  messaggi: string[];
 }
 
 export interface PaginaFoto {

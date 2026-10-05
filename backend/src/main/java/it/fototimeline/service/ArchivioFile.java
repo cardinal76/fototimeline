@@ -6,15 +6,18 @@ import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import it.fototimeline.cloud.Cloud;
+import it.fototimeline.media.VideoProperties;
 import net.coobird.thumbnailator.Thumbnails;
 
 /**
@@ -24,27 +27,41 @@ import net.coobird.thumbnailator.Thumbnails;
  *   2024/08/15/IMG_0001.jpg
  *   2024/08/15/IMG_0001 (2).jpg   ← stesso nome, foto diversa
  *   .miniature/&lt;id&gt;.jpg     ← o fototimeline.miniature, se impostata
+ *   .compatibili/&lt;id&gt;.mp4   ← versione compatibile dei video (o fototimeline.video.destinazione)
  * </pre>
  */
 @Component
 public class ArchivioFile {
 
     static final String MINIATURE = ".miniature";
+    static final String COMPATIBILI = ".compatibili";
     private static final Pattern CARTELLA_GIORNO = Pattern.compile("(\\d{4})/(\\d{2})/(\\d{2})/[^/]+");
 
     private final Path radice;
     private final Path miniature;
     private final int latoMiniatura;
+    /** Versioni compatibili dei video; se stanno nell'archivio (nel cloud) valgono le stesse regole degli originali. */
+    private final Path compatibili;
+    private final boolean compatibiliNellArchivio;
 
     private final Cloud cloud;
 
     public ArchivioFile(ArchivioProperties properties, Cloud cloud) {
+        this(properties, cloud, null);
+    }
+
+    @Autowired
+    public ArchivioFile(ArchivioProperties properties, Cloud cloud, VideoProperties video) {
         this.cloud = cloud;
         this.radice = properties.archivio().toAbsolutePath().normalize();
         this.miniature = properties.miniature() == null
                 ? radice.resolve(MINIATURE)
                 : properties.miniature().toAbsolutePath().normalize();
         this.latoMiniatura = properties.miniaturaLato();
+        this.compatibili = video == null || video.destinazione() == null
+                ? radice.resolve(COMPATIBILI)
+                : video.destinazione().toAbsolutePath().normalize();
+        this.compatibiliNellArchivio = compatibili.startsWith(radice);
         try {
             // La radice no: se è nel cloud smontato finirebbe sul disco del server.
             Files.createDirectories(miniature);
@@ -173,6 +190,40 @@ public class ArchivioFile {
         Files.copy(jpeg, vista(id), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
+    /**
+     * La versione compatibile di un video (H.264/AAC in MP4). Se sta
+     * nell'archivio, col cloud smontato lancia
+     * {@link it.fototimeline.cloud.ArchivioNonDisponibile} come gli originali.
+     */
+    public Path compatibile(String id) {
+        if (compatibiliNellArchivio) {
+            cloud.verifica();
+        }
+        return compatibili.resolve(id + ".mp4");
+    }
+
+    /** True se le versioni compatibili si possono leggere e scrivere adesso. */
+    public boolean compatibiliDisponibili() {
+        return !compatibiliNellArchivio || cloud.disponibile();
+    }
+
+    /**
+     * Mette al suo posto la versione compatibile appena fatta: prima con un
+     * nome provvisorio, poi lo spostamento, così non c'è mai un video a metà
+     * col nome buono (nel cloud la copia richiede minuti).
+     */
+    public void salvaCompatibile(String id, Path mp4) throws IOException {
+        Path destinazione = compatibile(id);
+        Files.createDirectories(destinazione.getParent());
+        Path parziale = destinazione.resolveSibling(id + ".mp4.parziale");
+        try {
+            Files.copy(mp4, parziale, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(parziale, destinazione, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(parziale);
+        }
+    }
+
     public Path originale(String percorsoRelativo) {
         cloud.verifica();
         Path p = radice.resolve(percorsoRelativo).normalize();
@@ -203,6 +254,9 @@ public class ArchivioFile {
         try {
             Files.deleteIfExists(miniatura(id));
             Files.deleteIfExists(vista(id));
+            if (compatibiliDisponibili()) {
+                Files.deleteIfExists(compatibile(id));
+            }
             Files.deleteIfExists(vistaCondivisa(id));
             if (percorsoRelativo != null) {
                 Path originale = originale(percorsoRelativo);
