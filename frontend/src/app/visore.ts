@@ -49,10 +49,17 @@ export class Visore {
   protected readonly salvataggio = signal(false);
   protected readonly modificata = signal(false);
   protected readonly caricata = signal(false);
+  /** Il browser non è riuscito a riprodurre il video. */
+  protected readonly videoIllegibile = signal(false);
   protected bozza: Bozza = vuota();
 
-  /** Le foto dalla "vista" (gli HEIC diventano JPEG), i video dall'originale. */
-  protected readonly src = computed(() => (this.foto().video ? FotoApi.originale(this.foto()) : FotoApi.vista(this.foto())));
+  /** Le foto dalla "vista" (gli HEIC diventano JPEG), i video dalla versione compatibile se c'è. */
+  protected readonly src = computed(() => (this.foto().video ? FotoApi.video(this.foto()) : FotoApi.vista(this.foto())));
+  /** Un video che non tutti i browser riproducono e la cui versione compatibile non c'è ancora. */
+  protected readonly senzaCompatibile = computed(() => {
+    const f = this.foto();
+    return f.video && f.compatibile === false && f.conversione !== 'FATTA';
+  });
   protected readonly scarica = computed(() => FotoApi.originale(this.foto(), true));
   protected readonly anteprima = computed(() => FotoApi.miniatura(this.foto()));
   protected readonly origine = computed(() => ORIGINI[this.foto().origineData]);
@@ -79,6 +86,7 @@ export class Visore {
       };
       this.modificata.set(false);
       this.caricata.set(false);
+      this.videoIllegibile.set(false);
     });
   }
 

@@ -76,6 +76,15 @@
         >
           Indicizza archivio
         </button>
+        <button
+          type="button"
+          class="link"
+          [disabled]="galleria.conversioni()?.inCorso"
+          title="Versione compatibile dei video che non tutti i browser riproducono (HEVC dell'iPhone e simili)"
+          (click)="convertiVideo()"
+        >
+          Converti video
+        </button>
       }
       <button type="button" class="link" title="Foto nuove dal telefono, da pCloud" (click)="apriTelefono()">Telefono</button>
     }
@@ -275,6 +284,49 @@
     @if (l.messaggi.length && l.stato !== 'IN_CORSO') {
       <ul class="errori">
         @for (m of l.messaggi.slice(0, 8); track $index) {
+          <li>{{ m }}</li>
+        }
+      </ul>
+    }
+  </div>
+}
+
+@if (galleria.conversioni(); as s) {
+  <div class="avanzamento conversione" role="status">
+    <div class="riga">
+      <b>
+        @if (s.inAttesa) {
+          Conversione video in attesa del cloud
+        } @else if (s.inCorso || s.daFare) {
+          Conversione video…
+        } @else {
+          Conversione video finita
+        }
+      </b>
+      @if (s.inCorso || s.daFare) {
+        <button type="button" class="link" (click)="galleria.annullaConversioni()">Annulla</button>
+      } @else {
+        <button type="button" class="link" (click)="galleria.chiudiConversioni()">Chiudi</button>
+      }
+    </div>
+    <progress [value]="percentualeConversioni()" max="100"></progress>
+    <p>
+      {{ s.fatti }} fatti · {{ s.daFare }} da fare
+      @if (s.errori) {
+        · <span class="errore">{{ s.errori }} errori</span>
+      }
+    </p>
+    @if (s.inCorso && s.corrente) {
+      <p class="corrente">
+        In corso: {{ s.corrente }}
+        @if (s.percentuale != null) {
+          ({{ s.percentuale }}%)
+        }
+      </p>
+    }
+    @if (s.messaggi.length && !s.inCorso) {
+      <ul class="errori">
+        @for (m of s.messaggi.slice(0, 8); track $index) {
           <li>{{ m }}</li>
         }
       </ul>

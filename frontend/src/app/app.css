@@ -554,3 +554,14 @@ main[hidden] {
 .avanzamento.importazione.sopra {
   bottom: 9.5rem;
 }
+
+/* La coda dei video sta a sinistra: può girare per ore insieme a tutto il resto. */
+.avanzamento.conversione {
+  right: auto;
+  left: 1.25rem;
+}
+.avanzamento .corrente {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

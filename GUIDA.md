@@ -186,6 +186,10 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Carica foto**: dal browser, direttamente in archivio.
 - **Importa cartella**: una cartella di LifetimeCloud (caricata via WebDAV), con "sposta".
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
+- **Converti video**: una volta, dopo il trasloco o l'indicizzazione, per i video vecchi in HEVC
+  (iPhone) che Firefox e Chrome non sempre riproducono. La coda gira in sottofondo, uno alla volta
+  (in basso a sinistra quanti fatti e quanti da fare); i video nuovi ci entrano da soli. Col cloud
+  smontato aspetta. Su un VPS conta qualche minuto di CPU per ogni minuto di video 4K.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
 

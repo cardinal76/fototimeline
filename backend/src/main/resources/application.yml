@@ -42,6 +42,20 @@ fototimeline:
     heif-convert: ${FOTOTIMELINE_HEIF_CONVERT:heif-convert}
     ffmpeg: ${FOTOTIMELINE_FFMPEG:ffmpeg}
     ffprobe: ${FOTOTIMELINE_FFPROBE:ffprobe}
+  # Versione compatibile (H.264/AAC in MP4) dei video che non tutti i browser
+  # riproducono (HEVC dell'iPhone, VP9, ProRes): una alla volta, in sottofondo,
+  # con ffmpeg a priorità bassa (nice -n 19).
+  video:
+    attiva: ${FOTOTIMELINE_VIDEO_ATTIVA:true}
+    # Lato corto massimo: 1080 = i 4K scendono a 1080p, i più piccoli restano come sono.
+    risoluzione-massima: ${FOTOTIMELINE_VIDEO_RISOLUZIONE:1080}
+    # Thread di ffmpeg: quanta CPU può prendere una conversione.
+    thread: ${FOTOTIMELINE_VIDEO_THREAD:2}
+    # Dove vanno i convertiti; vuoto = <archivio>/.compatibili, accanto agli
+    # originali (nel cloud sul server: pesano come video, non come miniature).
+    destinazione: ${FOTOTIMELINE_VIDEO_DESTINAZIONE:}
+    # Ogni quanto la coda guarda se può ripartire (per esempio cloud rimontato).
+    controllo: PT1M
   # Copia dei metadati (MongoDB) accanto alle foto: <archivio>/.backup.
   backup:
     cartella: ${FOTOTIMELINE_BACKUP_CARTELLA:}

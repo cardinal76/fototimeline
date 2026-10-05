@@ -76,6 +76,8 @@ class SicurezzaTest {
         mvc.perform(post("/api/cloud/smonta").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/backup").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/indicizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/archivio/video/converti").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/archivio/video/annulla").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(get("/api/backup").with(oidcLogin())).andExpect(status().isOk());
         // La sincronizzazione del telefono non si vede nemmeno.
         mvc.perform(get("/api/telefono").with(oidcLogin())).andExpect(status().isForbidden());

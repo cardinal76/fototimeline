@@ -80,9 +80,14 @@ rifiuta solo quei formati.
 
 - Gli **HEIC** restano HEIC nell'archivio; al browser arriva una "vista" JPEG.
 - I **video** prendono data, posizione e durata dal file; l'anteprima è un
-  fotogramma. Si riproducono nel browser così come sono: H.264 ovunque, HEVC
-  (i MOV recenti dell'iPhone) solo dove il browser lo supporta (Safari, Chrome
-  con accelerazione hardware).
+  fotogramma. Quelli H.264 con audio AAC/MP3 si riproducono così come sono.
+  Gli altri (HEVC dei MOV recenti dell'iPhone, VP9, ProRes, H.264 a 10 bit,
+  audio PCM), che non tutti i browser leggono, ricevono in sottofondo una
+  **versione compatibile** H.264/AAC in MP4, al massimo 1080p: un video alla
+  volta, con ffmpeg a priorità bassa. Finché non c'è, il visore avvisa "in
+  conversione" e offre l'originale da scaricare. Per i video già in archivio
+  c'è **Converti video** (admin). L'originale non si tocca: i convertiti
+  stanno in `<archivio>/.compatibili/<id>.mp4`.
 
 ## Sul server
 
@@ -137,6 +142,10 @@ java -jar target/fototimeline-1.0.0.jar
 | `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
+| `FOTOTIMELINE_VIDEO_ATTIVA` | `true`                                | Versione compatibile dei video non H.264 |
+| `FOTOTIMELINE_VIDEO_RISOLUZIONE` | `1080`                           | Lato corto massimo dei convertiti (i 4K scendono) |
+| `FOTOTIMELINE_VIDEO_THREAD` | `2`                                   | Thread di ffmpeg per una conversione     |
+| `FOTOTIMELINE_VIDEO_DESTINAZIONE` | `<archivio>/.compatibili`       | Dove vanno i convertiti                  |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -166,12 +175,15 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | PUT    | `/api/telefono`              | `{ attiva, sorgente, intervalloOre, giorniPrimaDiCancellare }` (400 fuori misura; admin) |
 | POST   | `/api/telefono/sincronizza`  | Un giro subito, in sottofondo: 202, 409 se già in corso (admin) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
+| GET    | `/api/archivio/video`        | Coda dei video da convertire: `fatti`, `daFare`, `corrente`, `percentuale`, `inAttesa` (cloud smontato) |
+| POST   | `/api/archivio/video/converti` | "Converti video": mette in coda i video già in archivio che ne hanno bisogno, 202 (admin) |
+| POST   | `/api/archivio/video/annulla`  | Ferma quello in corso e svuota la coda (admin)          |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
 | POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto                  |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
-| GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo); con `Range` per i video |
+| GET    | `/api/foto/{id}/file`        | Il file, con `Range` per i video: la versione compatibile se c'è, altrimenti l'originale; `?originale=true` o `?scarica=true` (allegato) per l'originale |
 | GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
 | GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline)                |
