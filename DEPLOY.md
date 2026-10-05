@@ -459,6 +459,37 @@ Per accenderli, una volta:
 Il token non finisce nei log né nelle risposte dell'app. Il link nei messaggi
 è `https://$FOTOTIMELINE_DOMINIO`.
 
+### Ricordi su Telegram ("Accadde oggi")
+
+Con token e chat impostati, ogni mattina dalle 8 (ora italiana) lo stesso bot
+manda le foto dello stesso giorno negli anni passati: un album di al massimo 6
+foto (una per anno prima, preferite prima, niente video né quasi doppioni),
+la didascalia col luogo e il link `https://$FOTOTIMELINE_DOMINIO/?ricordi=oggi`
+(dietro login, come il resto: nessun link pubblico). Le immagini sono la vista
+ridotta senza EXIF dei link di condivisione (fatta al momento se il cloud è
+montato) o, col cloud smontato, la miniatura: mai l'originale né il GPS.
+
+Il giorno fatto sta in Mongo (`impostazioni/ricordi-telegram`): mai due invii
+lo stesso giorno, anche con un rilascio in mezzo; se alle 8 l'app era giù,
+manda al primo controllo dopo (ogni 5 minuti), finché è lo stesso giorno. Nei
+giorni senza ricordi niente messaggio. Se Telegram non risponde riprova al
+controllo dopo.
+
+Si regolano dall'app, **Salute → Ricordi su Telegram** (acceso, ora, numero di
+foto, "Nessun ricordo oggi", **Manda ora una prova**); le variabili del `.env`
+sono solo i valori di partenza, finché non si salva dall'app:
+
+```bash
+FOTOTIMELINE_RICORDI_ATTIVO=true
+FOTOTIMELINE_RICORDI_ORA=08:00
+FOTOTIMELINE_RICORDI_FOTO=6
+# Una chat (o un gruppo, col bot dentro) solo per i ricordi; vuota = quella degli avvisi.
+FOTOTIMELINE_RICORDI_CHAT=
+FOTOTIMELINE_RICORDI_NESSUNO=false
+```
+
+Il fuso è `FOTOTIMELINE_RICORDI_FUSO` (`Europe/Rome`).
+
 ## Comandi utili su server2
 
 ```bash

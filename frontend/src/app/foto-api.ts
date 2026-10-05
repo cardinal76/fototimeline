@@ -21,7 +21,9 @@ import {
   PaginaFoto,
   PaginaGruppi,
   PuntoMappa,
+  ImpostazioniRicordiTelegram,
   Ricordo,
+  RicordiTelegram,
   Salute,
   StatoCloud,
   StatoConversioni,
@@ -212,6 +214,20 @@ export class FotoApi {
   /** Un messaggio di prova su Telegram: 409 se non è configurato. */
   provaTelegram(): Observable<void> {
     return this.http.post<void>('/api/salute/prova', {});
+  }
+
+  /** "Ricordi su Telegram" (solo admin). */
+  ricordiTelegram(): Observable<RicordiTelegram> {
+    return this.http.get<RicordiTelegram>('/api/ricordi-telegram');
+  }
+
+  salvaRicordiTelegram(impostazioni: ImpostazioniRicordiTelegram): Observable<RicordiTelegram> {
+    return this.http.put<RicordiTelegram>('/api/ricordi-telegram', impostazioni);
+  }
+
+  /** I ricordi di oggi subito, anche se già mandati: 409 se Telegram non è configurato. */
+  provaRicordiTelegram(): Observable<{ messaggio: string }> {
+    return this.http.post<{ messaggio: string }>('/api/ricordi-telegram/prova', {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {
