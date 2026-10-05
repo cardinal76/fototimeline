@@ -223,7 +223,7 @@ scarica() {
     mkdir -p "$SPECCHIO"
     echo "Scarico da $PCLOUD in $SPECCHIO (si può interrompere e rilanciare)…"
     rc copy "$PCLOUD" "$SPECCHIO" --filter-from "$filtri" --ignore-case \
-        --transfers 8 --checkers 16 --stats-one-line --stats 30s
+        --transfers 8 --checkers 16 --stats-one-line --stats 30s --stats-log-level NOTICE
     date +%s > "$LAVORO/fase-scarica.ok"
     echo "Scaricato: $(du -sh "$SPECCHIO" | cut -f1). Prossimo passo: $0 raccogli"
 }
@@ -372,7 +372,7 @@ carica() {
     [ -d "$ORDINATE" ] || errore "prima: $0 raccogli"
     echo "Copio $ORDINATE in $DESTINAZIONE…"
     rc copy "$ORDINATE" "$DESTINAZIONE" --backup-dir "${DESTINAZIONE}-sovrascritte" \
-        --transfers 4 --stats-one-line --stats 30s
+        --transfers 4 --stats-one-line --stats 30s --stats-log-level NOTICE
     echo "Controllo che ci sia tutto…"
     if rc check "$ORDINATE" "$DESTINAZIONE" --one-way --size-only; then
         date +%s > "$LAVORO/fase-carica.ok"
@@ -484,7 +484,7 @@ pulisci_con_rclone() {
     local lista="$LAVORO/da-cancellare.txt" f c
     for f in "$@"; do printf '%s\n' "${f#"$RADICE"/}"; done > "$lista"
     echo "Cancello $(wc -l < "$lista") file da $PCLOUD…"
-    rc delete "$PCLOUD" --files-from-raw "$lista" --stats-one-line --stats 30s
+    rc delete "$PCLOUD" --files-from-raw "$lista" --stats-one-line --stats 30s --stats-log-level NOTICE
     # Le cartelle svuotate, dal fondo: rmdir fallisce (e si salta) se non sono vuote.
     # Mai la radice né, con tutto pCloud come radice, le cartelle in cima.
     local -A cartelle
