@@ -316,6 +316,103 @@ tutte le altre (senza album nuovi) e risultano "caricate da Anna". Se un giorno 
 
 ---
 
+## Da Amazon Foto (una volta, dal PC)
+
+Amazon Foto non ha più un'API per sviluppatori: nessun programma (nemmeno rclone) ci si collega.
+Si scarica la libreria sul PC con l'app di Amazon Foto per Windows e lo script
+`deploy/foto-da-cartella.sh` la passa dallo stesso giro del trasloco da pCloud: data di ogni foto,
+`AAAA/MM/GG`, niente doppioni, carica su LifetimeCloud e controllo. Lavora in `~/foto-da-amazon/`,
+tutto suo: non tocca `~/foto-da-pcloud/` (lo legge soltanto) e non cancella niente, né sul PC né
+su Amazon.
+
+- **Prima finisci `raccogli` di pCloud** (sezione 2; meglio anche `carica`). Lo script legge
+  `~/foto-da-pcloud/impronte.tsv`: le foto che pCloud ha già non le riprende, e i loro nomi non li
+  riusa, così su LifetimeCloud una foto non ne copre un'altra.
+- **Spazio**: la libreria scaricata su `C:` e, durante il giro, un'altra copia in
+  `~/foto-da-amazon/ordinate` (anche questa su `C:`, nel disco di WSL). Servono circa due volte la
+  dimensione della libreria che l'app di Amazon dice prima di scaricare.
+- **Le date**: dall'EXIF della foto o del video; se manca, dal nome (`IMG_20190101_…`,
+  `IMG-20190101-WA0001`, `Screenshot 2019-01-01 …`); se manca anche quello, dalla data del file,
+  che dopo un download può essere il giorno del download: `raccogli` elenca quei giorni.
+- **I doppioni del download** (`IMG_0001 (1).jpg`, la stessa foto in un anno e in un album)
+  entrano una volta sola, col nome senza ` (1)`.
+
+**A.1 Scaricare la libreria (su Windows).** Le voci dell'app possono cambiare un po' da una versione
+all'altra:
+
+1. Installa **Amazon Photos per Windows** (da amazon.it → Amazon Foto → App, "Scarica per
+   desktop") ed entra col tuo account Amazon.
+2. Nel menu a sinistra **Scarica** (Download) → **Scarica cartelle** → scegli **tutto** (tutte le
+   foto e i video) → come destinazione una cartella nuova, per esempio
+   `C:\Users\<tuo utente>\Pictures\Amazon Photos Downloads` → **Scarica**.
+3. Lascia il PC acceso (niente sospensione) finché l'app non ha finito; se si ferma, rilancia lo
+   stesso download.
+
+In alternativa, dal sito (amazon.it/photos): si selezionano le foto e si scaricano in zip, ma al
+massimo 1000 file o 5 GB per volta. Per decine di migliaia di foto va bene solo per i pezzi
+mancanti: gli zip si mettono nella stessa cartella, lo script li apre da solo. La richiesta dei
+dati personali di Amazon non contiene le foto.
+
+**A.2 Il repository aggiornato e la cartella vista da WSL.** Il `git pull` non disturba una fase di
+`foto-da-pcloud.sh` che sta girando, e quello script fa esattamente quello che faceva prima.
+
+```bash
+cd ~/projects/fototimeline && git pull
+ls /mnt/c/Users                               # il nome del tuo utente di Windows
+ls "/mnt/c/Users/NOME/Pictures/Amazon Photos Downloads" | head
+du -sh "/mnt/c/Users/NOME/Pictures/Amazon Photos Downloads"
+df -h ~                                       # spazio libero per la copia in ~/foto-da-amazon
+```
+
+**A.3 Anteprima**: quante foto, video e zip per cartella (le cartelle da saltare con `ESCLUDI`,
+separate da `:`). La cartella si ricorda in `~/foto-da-amazon/impostazioni`:
+
+```bash
+SORGENTE='/mnt/c/Users/NOME/Pictures/Amazon Photos Downloads' ./deploy/foto-da-cartella.sh anteprima
+```
+
+**A.4 Raccogli** (si interrompe e si rilancia, riprende da dove era):
+
+```bash
+nohup ./deploy/foto-da-cartella.sh raccogli > ~/foto-da-amazon/raccogli.log 2>&1 &
+tail -f ~/foto-da-amazon/raccogli.log        # Ctrl+C chiude solo il tail
+./deploy/foto-da-cartella.sh stato
+```
+
+**A.5 Controllare** prima di caricare:
+
+- in fondo a `raccogli.log`: quante foto diverse, quanti doppioni di pCloud saltati e i **giorni
+  recenti** (ultimi 60 giorni) con dentro qualcosa: se non sono foto di quei giorni, hanno la data
+  del download. Guardale e spostale a mano nella cartella giusta di `~/foto-da-amazon/ordinate`
+  (o lasciale: nell'app la data si corregge anche dopo);
+- `cat ~/foto-da-amazon/da-controllare.txt` (se c'è): file non letti, zip rovinati o con dentro
+  altro. Restano dove sono;
+- le cartelle in Esplora risorse: `explorer.exe "$(wslpath -w ~/foto-da-amazon/ordinate)"`.
+
+**A.6 Carica** su LifetimeCloud, poi nell'app **Monta** e **Indicizza archivio**:
+
+```bash
+./deploy/foto-da-cartella.sh carica
+```
+
+**A.7 Facoltativo, archivia**: uno zip per mese in una cartella a scelta (meglio una nuova, non
+quella di pCloud):
+
+```bash
+ARCHIVIO='/mnt/p/Archivio foto Amazon' ./deploy/foto-da-cartella.sh archivia
+```
+
+**A.8 Alla fine**, guardata la timeline: `rm -rf ~/foto-da-amazon/ordinate`. La cartella scaricata
+su `C:` e le foto su Amazon restano come sono: si tolgono a mano, quando vuoi.
+
+Lo stesso script va bene per qualsiasi cartella con foto sciolte e zip (un disco esterno, un vecchio
+backup): un'altra cartella di lavoro per ogni giro, per esempio
+`LAVORO=~/foto-da-disco SORGENTE=/mnt/e/Foto ./deploy/foto-da-cartella.sh anteprima` (e poi
+`LAVORO=~/foto-da-disco` davanti a ogni comando). I test di tutti e due gli script:
+`./deploy/test-foto.sh`.
+
+---
+
 ## Se qualcosa non va
 
 | Messaggio | Causa | Rimedio |

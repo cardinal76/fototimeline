@@ -318,6 +318,19 @@ deploy/foto-da-pcloud.sh archivia
 deploy/foto-da-pcloud.sh pulisci      # dopo 7 giorni
 ```
 
+#### Da Amazon Foto o da una cartella del PC
+
+Amazon Foto non ha API pubbliche: la libreria si scarica con l'app per Windows
+e `deploy/foto-da-cartella.sh` (fasi `anteprima`, `raccogli`, `carica`,
+`archivia` facoltativa, `stato`) la porta in `lifetime:FotoTimeline` da
+`SORGENTE`, lavorando in `~/foto-da-amazon` (`LAVORO`). Senza EXIF la data
+viene dal nome del file prima che dalla data del file, ` (1)` nel nome è un
+doppione del download, e le impronte di `~/foto-da-pcloud` (`ALTRI_LAVORI`)
+evitano doppioni e nomi già presi. Non cancella niente. Passo per passo:
+GUIDA.md, "Da Amazon Foto". Le parti comuni dei due script sono in
+`deploy/lib-foto.sh`; `deploy/test-foto.sh` li prova su file finti e
+confronta `foto-da-pcloud.sh` con la versione di prima di `lib-foto.sh`.
+
 I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
 (cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
 foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
