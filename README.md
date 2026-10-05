@@ -2,6 +2,9 @@
 
 Gestore di foto con timeline, da usare in locale sul proprio PC.
 
+**Le foto da pCloud, passo per passo** (trasloco, telefono, problemi noti): [GUIDA.md](GUIDA.md).
+Il server: [DEPLOY.md](DEPLOY.md).
+
 - **Backend**: Spring Boot 3.5, Java 21, Maven, MongoDB (solo metadati).
 - **Frontend**: Angular 20 standalone, zoneless, signals; nessuna libreria UI.
 - **File**: gli originali stanno su disco in `~/FotoTimeline`, in una
