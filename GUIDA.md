@@ -188,6 +188,11 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Condividere con chi non ha un account**: *Seleziona* le foto (o apri un album), *Condividi…*
+  (o *Condividi album*), scegli titolo e scadenza, *Crea link*, *Copia* e mandalo su WhatsApp. Chi lo
+  apre vede solo quelle foto, senza login. Spunta "Permetti di scaricare" solo se servono gli
+  originali (hanno dentro i dati della fotocamera e la posizione). I link creati, con le visite, sono in
+  *Condivisioni*, da dove si revocano. Col cloud smontato chi ha il link vede solo le miniature.
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.

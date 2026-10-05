@@ -14,7 +14,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, ModificaTelefono, StatoTelefono } from './modelli';
+import { Cartella, Condivisione, Foto, ModificaTelefono, StatoTelefono } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
@@ -67,6 +67,13 @@ export class App {
     copieInParallelo: 6,
   };
   private telefonoTimer?: ReturnType<typeof setTimeout>;
+  /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
+  protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
+  protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
+  protected readonly creandoLink = signal(false);
+  protected readonly linkCreato = signal<string | null>(null);
+  protected readonly dialogoCondivisioni = signal(false);
+  protected readonly condivisioni = signal<Condivisione[] | null>(null);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -176,7 +183,11 @@ export class App {
     if (this.aperta()) {
       return;
     }
-    if (this.dialogoImporta()) {
+    if (this.dialogoCondividi()) {
+      this.dialogoCondividi.set(null);
+    } else if (this.dialogoCondivisioni()) {
+      this.dialogoCondivisioni.set(false);
+    } else if (this.dialogoImporta()) {
       this.chiudiImporta();
     } else if (this.dialogoTelefono()) {
       this.chiudiTelefono();
@@ -382,6 +393,85 @@ export class App {
   protected chiudiTelefono(): void {
     clearTimeout(this.telefonoTimer);
     this.dialogoTelefono.set(false);
+  }
+
+  // ------------------------------------------------------------ condivisione
+
+  protected apriCondividiSelezione(): void {
+    const ids = [...this.galleria.selezionate()];
+    this.apriCondividi({ ids, descrizione: `${ids.length} foto selezionate` }, '');
+  }
+
+  protected apriCondividiAlbum(): void {
+    const album = this.galleria.filtro().album;
+    if (album) {
+      this.apriCondividi({ album, descrizione: `tutte le foto dell'album "${album}"` }, album);
+    }
+  }
+
+  private apriCondividi(scelta: { ids?: string[]; album?: string; descrizione: string }, titolo: string): void {
+    this.moduloCondividi = { titolo, giorni: 7, download: false, posizione: false };
+    this.linkCreato.set(null);
+    this.dialogoCondividi.set(scelta);
+  }
+
+  protected async creaLink(): Promise<void> {
+    const scelta = this.dialogoCondividi();
+    if (!scelta) return;
+    this.creandoLink.set(true);
+    try {
+      const c = await firstValueFrom(
+        this.api.creaCondivisione({ ...this.moduloCondividi, ids: scelta.ids, album: scelta.album }),
+      );
+      this.linkCreato.set(FotoApi.linkCondivisione(c));
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Link non creato');
+    } finally {
+      this.creandoLink.set(false);
+    }
+  }
+
+  protected async copia(link: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(link);
+      this.galleria.avvisa('Link copiato');
+    } catch {
+      // Senza HTTPS o senza permesso: lo si copia a mano dal campo.
+      this.galleria.avvisa('Copia non riuscita: seleziona il link e copialo a mano');
+    }
+  }
+
+  protected chiudiCondividi(): void {
+    if (this.linkCreato() && this.selezione()) {
+      this.esciSelezione();
+    }
+    this.dialogoCondividi.set(null);
+  }
+
+  protected apriCondivisioni(): void {
+    this.dialogoCondivisioni.set(true);
+    this.condivisioni.set(null);
+    this.api.condivisioni().subscribe({
+      next: (c) => this.condivisioni.set(c),
+      error: () => {
+        this.galleria.avvisa('Condivisioni non leggibili');
+        this.dialogoCondivisioni.set(false);
+      },
+    });
+  }
+
+  protected link(c: Condivisione): string {
+    return FotoApi.linkCondivisione(c);
+  }
+
+  protected async revoca(c: Condivisione): Promise<void> {
+    if (!confirm(`Revocare "${c.titolo}"? Chi ha il link non vedrà più le foto.`)) return;
+    try {
+      await firstValueFrom(this.api.revocaCondivisione(c.id));
+      this.condivisioni.update((l) => l?.map((x) => (x.id === c.id ? { ...x, revocata: true } : x)) ?? null);
+    } catch {
+      this.galleria.avvisa('Revoca non riuscita');
+    }
   }
 
   protected logout(): void {

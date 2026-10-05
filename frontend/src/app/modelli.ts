@@ -204,3 +204,59 @@ export interface ModificaTelefono {
   giorniPrimaDiCancellare: number;
   copieInParallelo: number;
 }
+
+/** Una foto come la vede chi ha un link di condivisione: niente nome del file, percorso, tag. */
+export interface FotoCondivisa {
+  id: string;
+  video: boolean;
+  larghezza?: number;
+  altezza?: number;
+  scattataIl: string;
+  durata?: number;
+  titolo?: string;
+  /** Solo se chi ha creato il link ha scelto "includi posizione". */
+  latitudine?: number;
+  longitudine?: number;
+}
+
+/** La galleria pubblica di un link (/c/<token>). */
+export interface GalleriaCondivisa {
+  titolo: string;
+  scadeIl?: string;
+  download: boolean;
+  /** False col cloud smontato: si vedono solo le miniature. */
+  archivioDisponibile: boolean;
+  foto: FotoCondivisa[];
+}
+
+/** Per creare un link: le foto da una selezione, da un album o da un intervallo di giorni. */
+export interface NuovaCondivisione {
+  titolo?: string;
+  ids?: string[];
+  album?: string;
+  dal?: string;
+  al?: string;
+  /** 1, 7, 30; null = non scade. */
+  giorni: number | null;
+  download: boolean;
+  posizione: boolean;
+}
+
+/** Un link nell'elenco "Le mie condivisioni". */
+export interface Condivisione {
+  id: string;
+  token: string;
+  titolo: string;
+  foto: number;
+  origine: 'SELEZIONE' | 'ALBUM' | 'DATE';
+  descrizioneOrigine?: string;
+  creataDa: string;
+  creataIl: string;
+  scadeIl?: string;
+  download: boolean;
+  posizione: boolean;
+  visite: number;
+  ultimoAccesso?: string;
+  revocata: boolean;
+  scaduta: boolean;
+}

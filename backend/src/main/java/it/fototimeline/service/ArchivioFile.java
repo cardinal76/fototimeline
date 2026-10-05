@@ -160,6 +160,14 @@ public class ArchivioFile {
         return miniature.resolve("viste").resolve(id + ".jpg");
     }
 
+    /**
+     * La foto come la vede chi ha un link di condivisione: un JPEG ridotto e
+     * senza metadati (niente GPS dell'EXIF), sul disco locale come le viste.
+     */
+    public Path vistaCondivisa(String id) {
+        return miniature.resolve("condivise").resolve(id + ".jpg");
+    }
+
     public void salvaVista(String id, Path jpeg) throws IOException {
         Files.createDirectories(vista(id).getParent());
         Files.copy(jpeg, vista(id), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -195,6 +203,7 @@ public class ArchivioFile {
         try {
             Files.deleteIfExists(miniatura(id));
             Files.deleteIfExists(vista(id));
+            Files.deleteIfExists(vistaCondivisa(id));
             if (percorsoRelativo != null) {
                 Path originale = originale(percorsoRelativo);
                 Files.deleteIfExists(originale);
