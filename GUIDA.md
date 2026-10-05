@@ -74,7 +74,8 @@ riprende da dove era arrivata. Sempre da `~/projects/fototimeline`, con `p-up` f
 | Fase | Cosa fa | Tocca pCloud? |
 |---|---|---|
 | `anteprima` | conta foto, video e zip per cartella | no |
-| `raccogli` | copia sul PC foto e video (anche dentro gli zip), in `AAAA/MM/GG`, senza doppioni | no |
+| `scarica` | copia sul PC, con rclone e in parallelo, foto, video e zip (esclusi a parte) | no |
+| `raccogli` | dalla copia: apre gli zip, legge la data di ogni foto e la mette in `AAAA/MM/GG`, senza doppioni | no |
 | `carica` | li manda su LifetimeCloud `FotoTimeline/` e controlla | no |
 | `archivia` | su pCloud un zip per mese in `Archivio foto/AAAA/AAAA-MM.zip`, controllato | aggiunge |
 | `pulisci` | dopo 7 giorni e con `CANCELLA`: toglie gli originali copiati | **sì** |
@@ -91,7 +92,16 @@ ESCLUDI='chitarra:pCloud_lost_and_found:qnap:avvocato:banche:diplomi:documenti:s
 `ARCHIVIO` è una cartella **nuova** (non `/mnt/p`). `Crypto Folder` e le cartelle di sistema si
 saltano sempre. Le scelte restano in `~/foto-da-pcloud/impostazioni`.
 
-**2.2 Raccogli** (ore: meglio la sera, PC sveglio e `P:` montato):
+**2.2 Scarica** (rclone dal remote `pcloud:`, in parallelo: molto più veloce che leggere da `P:`;
+si interrompe e si rilancia):
+
+```bash
+nohup ./deploy/foto-da-pcloud.sh scarica > ~/foto-da-pcloud/scarica.log 2>&1 &
+tail -f ~/foto-da-pcloud/scarica.log
+```
+
+**Raccogli**: dalla copia scaricata, mette in ordine per data (un `raccogli` lento già
+avviato da `P:` si può fermare con `pkill -f "foto-da-pcloud.sh raccogli"`: quello che ha fatto resta):
 
 ```bash
 nohup ./deploy/foto-da-pcloud.sh raccogli > ~/foto-da-pcloud/raccogli.log 2>&1 &
@@ -118,7 +128,7 @@ Gli zip con dentro altri file e i file non letti restano su pCloud: sono in
 
 ```bash
 ./deploy/foto-da-pcloud.sh pulisci           # mostra cosa toglie e chiede CANCELLA
-rm -rf ~/foto-da-pcloud/ordinate             # la copia di lavoro sul PC non serve più
+rm -rf ~/foto-da-pcloud/ordinate ~/foto-da-pcloud/specchio   # le copie sul PC non servono più
 ```
 
 ---
