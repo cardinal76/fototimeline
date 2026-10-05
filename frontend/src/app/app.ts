@@ -33,6 +33,7 @@ const ALTEZZA_RIGA = 210;
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
     '(document:drop)': 'rilascia($event)',
+    '(document:keydown.escape)': 'esc()',
   },
   templateUrl: './app.html',
   styleUrl: './app.css',
@@ -155,6 +156,21 @@ export class App {
   }
 
   // ------------------------------------------------------------ selezione
+
+  /**
+   * Esc chiude quello che è aperto sopra la timeline: il dialogo di
+   * importazione, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   */
+  protected esc(): void {
+    if (this.aperta()) {
+      return;
+    }
+    if (this.dialogoImporta()) {
+      this.chiudiImporta();
+    } else if (this.selezione()) {
+      this.esciSelezione();
+    }
+  }
 
   protected esciSelezione(): void {
     this.selezione.set(false);
