@@ -143,7 +143,8 @@ public class FotoService {
             hash = sha256(file);
             dimensione = Files.size(file);
         } catch (IOException e) {
-            return new Caricamento(nome, Esito.ERRORE, null, "File illeggibile");
+            log.warn("{} illeggibile: {}", nome, e.toString());
+            return new Caricamento(nome, Esito.ERRORE, null, "File illeggibile (" + e.getMessage() + ")");
         }
         Optional<Foto> esistente = repository.findByHash(hash);
         if (esistente.isPresent()) {
@@ -210,9 +211,10 @@ public class FotoService {
             }
         } catch (Exception e) {
             eliminaSilenzioso(anteprima);
-            log.debug("{} illeggibile: {}", nome, e.getMessage());
+            log.warn("{} illeggibile: {}", nome, e.toString());
             return new Caricamento(nome, Esito.ERRORE, null,
-                    genere == Genere.VIDEO ? "Video illeggibile" : "Immagine illeggibile");
+                    (genere == Genere.VIDEO ? "Video illeggibile" : "Immagine illeggibile")
+                            + (e.getMessage() != null ? " (" + e.getMessage() + ")" : ""));
         }
 
         try {
