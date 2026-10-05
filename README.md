@@ -3,6 +3,8 @@
 Gestore di foto con timeline, da usare in locale sul proprio PC.
 
 **Le foto da pCloud, passo per passo** (trasloco, telefono, problemi noti): [GUIDA.md](GUIDA.md).
+**Da Amazon Foto** (o da qualsiasi cartella del PC): libreria scaricata con l'app per Windows,
+poi `deploy/foto-da-cartella.sh`; [GUIDA.md](GUIDA.md), "Da Amazon Foto".
 Il server: [DEPLOY.md](DEPLOY.md).
 
 - **Backend**: Spring Boot 3.5, Java 21, Maven, MongoDB (solo metadati).
