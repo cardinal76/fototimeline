@@ -383,6 +383,27 @@ progress {
   align-items: center;
   gap: 0.5rem;
 }
+.dialogo h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+.dialogo .campi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.9rem;
+}
+.dialogo .giro {
+  display: grid;
+  gap: 0.3rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--bordo);
+}
+.rotella.piccola {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  vertical-align: -0.1em;
+}
 .piede {
   display: flex;
   justify-content: flex-end;

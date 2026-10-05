@@ -67,6 +67,8 @@ public class ConfigurazioneSicurezza {
                     .permitAll();
             a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**")
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
+            // La sincronizzazione del telefono, anche in lettura: dice dove carica il telefono.
+            a.requestMatchers("/api/telefono", "/api/telefono/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {

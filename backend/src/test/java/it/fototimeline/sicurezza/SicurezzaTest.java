@@ -6,6 +6,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -75,6 +77,39 @@ class SicurezzaTest {
         mvc.perform(post("/api/backup").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/archivio/indicizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(get("/api/backup").with(oidcLogin())).andExpect(status().isOk());
+        // La sincronizzazione del telefono non si vede nemmeno.
+        mvc.perform(get("/api/telefono").with(oidcLogin())).andExpect(status().isForbidden());
+        mvc.perform(put("/api/telefono").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"attiva\":false}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/telefono/sincronizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void lAmministratoreVedeLaSincronizzazioneDelTelefono() throws Exception {
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        // Qui non c'è rclone: si vede, ma non si attiva e non parte.
+        mvc.perform(get("/api/telefono").with(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.disponibile").value(false))
+                .andExpect(jsonPath("$.motivo").isNotEmpty())
+                .andExpect(jsonPath("$.inCorso").value(false))
+                .andExpect(jsonPath("$.intervalloOre").value(6));
+        mvc.perform(put("/api/telefono").with(admin)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":12}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/api/telefono").with(admin).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("ore")));
+        mvc.perform(put("/api/telefono").with(admin).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"attiva\":true}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(put("/api/telefono").with(admin).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"intervalloOre\":12,\"giorniPrimaDiCancellare\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intervalloOre").value(12))
+                .andExpect(jsonPath("$.giorniPrimaDiCancellare").value(0));
+        mvc.perform(post("/api/telefono/sincronizza").with(admin).with(csrf())).andExpect(status().isConflict());
     }
 
     @Test

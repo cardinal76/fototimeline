@@ -77,6 +77,7 @@
           Indicizza archivio
         </button>
       }
+      <button type="button" class="link" title="Foto nuove dal telefono, da pCloud" (click)="apriTelefono()">Telefono</button>
     }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
       {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
@@ -335,6 +336,87 @@
         >
           {{ sposta ? 'Importa e sposta' : 'Importa' }}
         </button>
+      </div>
+    </form>
+  </div>
+}
+
+@if (dialogoTelefono()) {
+  <div class="velo" (click)="chiudiTelefono()">
+    <form class="dialogo" role="dialog" aria-labelledby="titolo-telefono" (click)="$event.stopPropagation()" (ngSubmit)="salvaTelefono()">
+      <h2 id="titolo-telefono">Foto dal telefono</h2>
+      @if (telefono(); as t) {
+        <p class="tenue">
+          Copia le foto nuove da pCloud nella cartella automatica <code>{{ t.destinazione ?? '' }}</code>: da lì entrano
+          nell'archivio. Dopo i giorni scelti le toglie da pCloud, ma solo quelle già importate.
+        </p>
+        @if (!t.disponibile) {
+          <p class="errore">Non si può attivare: {{ t.motivo }}</p>
+        }
+
+        <label class="spunta-riga">
+          <input type="checkbox" name="attiva" [(ngModel)]="moduloTelefono.attiva" [disabled]="!t.disponibile && !moduloTelefono.attiva" />
+          Attiva
+        </label>
+        <label>
+          Cartella su pCloud
+          <input name="sorgente" [(ngModel)]="moduloTelefono.sorgente" placeholder="pcloud:Automatic Upload" required />
+        </label>
+        <div class="campi">
+          <label>
+            Ogni quante ore
+            <input type="number" name="intervalloOre" min="1" max="168" [(ngModel)]="moduloTelefono.intervalloOre" required />
+          </label>
+          <label>
+            Togli da pCloud dopo giorni (0 = mai)
+            <input type="number" name="giorniPrimaDiCancellare" min="0" [(ngModel)]="moduloTelefono.giorniPrimaDiCancellare" required />
+          </label>
+        </div>
+
+        <section class="giro" aria-live="polite">
+          <h3>Ultimo giro</h3>
+          @if (t.inCorso) {
+            <p><span class="rotella piccola" aria-hidden="true"></span> Sincronizzazione in corso…</p>
+          }
+          @if (t.ultimoGiro; as g) {
+            <p>
+              {{ g.iniziatoIl | date: 'd MMM y, HH:mm' }} ·
+              <b [class.errore]="g.esito === 'ERRORE'">{{ g.esito === 'OK' ? 'riuscito' : 'con errori' }}</b>
+              @if (g.messaggio && g.esito === 'ERRORE') {
+                · {{ g.messaggio }}
+              }
+            </p>
+            <p class="tenue">
+              {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati ·
+              {{ g.cancellati }} tolti da pCloud
+              @if (g.errori) {
+                · <span class="errore">{{ g.errori }} errori</span>
+              }
+            </p>
+            @if (g.messaggiErrori.length) {
+              <ul class="errori">
+                @for (m of g.messaggiErrori; track $index) {
+                  <li>{{ m }}</li>
+                }
+              </ul>
+            }
+          } @else if (!t.inCorso) {
+            <p class="tenue">Nessun giro finora.</p>
+          }
+          @if (prossimoGiro(t); as p) {
+            <p class="tenue">Prossimo giro: {{ p }}</p>
+          }
+        </section>
+      } @else {
+        <span class="rotella" aria-label="Caricamento"></span>
+      }
+
+      <div class="piede">
+        <button type="button" (click)="chiudiTelefono()">Chiudi</button>
+        <button type="button" [disabled]="!telefono()?.disponibile || telefono()?.inCorso" (click)="sincronizzaOra()">
+          {{ telefono()?.inCorso ? 'In corso…' : 'Sincronizza ora' }}
+        </button>
+        <button type="submit" class="primario" [disabled]="!telefono() || salvandoTelefono()">Salva</button>
       </div>
     </form>
   </div>

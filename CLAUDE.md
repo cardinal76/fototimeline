@@ -124,8 +124,9 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   non può mandare header. Le API senza sessione rispondono 401 (Angular manda
   a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
-  token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup` e
-  `/api/archivio/**` vogliono `fototimeline-admin` (`fototimeline.login.ruolo-admin`).
+  token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup`,
+  `/api/archivio/**` e tutto `/api/telefono` vogliono `fototimeline-admin`
+  (`fototimeline.login.ruolo-admin`).
 - CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
@@ -169,6 +170,23 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   (`FotoService.leggi`): un cambio ai formati vale per entrambi.
 - Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
   entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
+
+## Telefono (pCloud)
+
+- `SincronizzazioneTelefono` (pacchetto `telefono`) copia i file nuovi da
+  pCloud (`sorgente`, per esempio `pcloud:Automatic Upload`) nella cartella
+  automatica, tutto con l'API rc (`Rclone.chiama`), non col montaggio:
+  `operations/list` (ricorsivo, solo file), `operations/copyfile`,
+  `operations/stat` (`{"item": null}` se manca), `operations/deletefile`.
+  La destinazione è la cartella automatica relativa al punto di montaggio
+  (`/cloud/telefono` → `lifetime:telefono`), senza sottocartelle (`/` → ` - `).
+- Registro `copie_telefono` (sorgente, percorso, dimensione): un file nel
+  registro non si ricopia mai. Dopo `giorniPrimaDiCancellare` si toglie da
+  pCloud solo se non è più nella cartella automatica (l'ha importato).
+- Impostazioni e ultimo giro nel documento `impostazioni/sincronizzazione-telefono`,
+  scritti con update separati. Un giro alla volta (thread `telefono`);
+  `@Scheduled` ogni `fototimeline.telefono.controllo` (PT5M) controlla se sono
+  passate `intervalloOre`. `/api/telefono/**` è da admin anche in GET.
 
 ## Git e CI
 

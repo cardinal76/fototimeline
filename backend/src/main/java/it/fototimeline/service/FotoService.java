@@ -665,6 +665,11 @@ public class FotoService {
         return s == null || s.isBlank() ? null : s.trim();
     }
 
+    /** True se il nome è di un formato che l'archivio accetta (foto, HEIC, video). */
+    public static boolean eMedia(String nome) {
+        return TIPI.containsKey(estensione(nome));
+    }
+
     static String estensione(String nome) {
         int punto = nome == null ? -1 : nome.lastIndexOf('.');
         return punto < 0 ? "" : nome.substring(punto + 1).toLowerCase(Locale.ROOT);

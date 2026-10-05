@@ -52,6 +52,10 @@ fototimeline:
   importazione-automatica:
     cartella: ${FOTOTIMELINE_CARTELLA_AUTOMATICA:}
     intervallo: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:PT15M}
+  # Foto nuove da pCloud nella cartella automatica (impostazioni nell'app, da
+  # admin): ogni quanto controllare se è ora di un giro.
+  telefono:
+    controllo: PT5M
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

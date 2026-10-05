@@ -43,14 +43,7 @@ public class Cloud {
     public Cloud(CloudProperties properties, RestClient.Builder builder, Optional<Clock> clock) {
         this.properties = properties;
         this.clock = clock.orElse(Clock.systemUTC());
-        if (properties.gestito()) {
-            // Timeout: spring.http.client.* in application.yml.
-            this.rclone = builder.baseUrl(properties.rcUrl())
-                    .defaultHeaders(h -> h.setBasicAuth(properties.rcUtente(), properties.rcPassword()))
-                    .build();
-        } else {
-            this.rclone = null;
-        }
+        this.rclone = properties.gestito() ? Rclone.client(properties, builder) : null;
     }
 
     public record Stato(boolean gestito, boolean montato, String remoto, String errore) {
