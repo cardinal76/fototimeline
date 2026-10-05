@@ -44,6 +44,8 @@ import it.fototimeline.backup.BackupProperties;
 import it.fototimeline.cloud.CloudProperties;
 import it.fototimeline.cloud.Rclone;
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.google.ImportazioneTakeout;
+import it.fototimeline.google.ZipTakeout;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
@@ -80,6 +82,7 @@ public class Salute {
     private final SincronizzazioneTelefono telefono;
     private final LavoriImportazione lavori;
     private final ImportazioneAutomaticaProperties automatica;
+    private final ImportazioneTakeout takeout;
     private final MongoTemplate mongo;
     private final Clock clock;
     private final ExecutorService esecutore;
@@ -87,16 +90,18 @@ public class Salute {
     @Autowired
     public Salute(CloudProperties cloud, RestClient.Builder builder, ArchivioFile archivio, BackupMetadati backup,
             BackupProperties backupProperties, SincronizzazioneTelefono telefono, LavoriImportazione lavori,
-            ImportazioneAutomaticaProperties automatica, MongoTemplate mongo, Optional<Clock> clock) {
+            ImportazioneAutomaticaProperties automatica, ImportazioneTakeout takeout, MongoTemplate mongo,
+            Optional<Clock> clock) {
         this(cloud, new Rclone(cloud, builder.requestFactory(richiesteBrevi())), archivio, backup, backupProperties,
-                telefono, lavori, automatica, mongo, clock.orElse(Clock.systemUTC()),
+                telefono, lavori, automatica, takeout, mongo, clock.orElse(Clock.systemUTC()),
                 Executors.newVirtualThreadPerTaskExecutor());
     }
 
     /** Per i test: un rclone finto e un esecutore qualunque (anche sullo stesso thread). */
     Salute(CloudProperties cloud, Rclone rclone, ArchivioFile archivio, BackupMetadati backup,
             BackupProperties backupProperties, SincronizzazioneTelefono telefono, LavoriImportazione lavori,
-            ImportazioneAutomaticaProperties automatica, MongoTemplate mongo, Clock clock, ExecutorService esecutore) {
+            ImportazioneAutomaticaProperties automatica, ImportazioneTakeout takeout, MongoTemplate mongo, Clock clock,
+            ExecutorService esecutore) {
         this.cloud = cloud;
         this.rclone = rclone;
         this.archivio = archivio;
@@ -105,6 +110,7 @@ public class Salute {
         this.telefono = telefono;
         this.lavori = lavori;
         this.automatica = automatica;
+        this.takeout = takeout;
         this.mongo = mongo;
         this.clock = clock;
         this.esecutore = esecutore;
@@ -135,6 +141,7 @@ public class Salute {
         controlli.add(new Controllo("backup", "Backup dei metadati", () -> List.of(backup())));
         controlli.add(new Controllo("telefono", TITOLO_TELEFONI, this::telefono));
         controlli.add(new Controllo("importazione", "Importazioni", () -> List.of(importazione())));
+        controlli.add(new Controllo("google-takeout", TITOLO_TAKEOUT, this::takeout));
         controlli.add(new Controllo("disco", "Disco delle miniature", () -> List.of(disco())));
         if (cloud.gestito()) {
             controlli.add(new Controllo("spazio-cloud", "Spazio nel cloud", this::spazioRemote));
@@ -374,6 +381,52 @@ public class Salute {
                         : VoceSalute.ok(chiave, titolo, fine + ": " + l.importate() + " nuove", dettagli);
             }
         };
+    }
+
+    // ------------------------------------------------------------ Google Takeout
+
+    static final String TITOLO_TAKEOUT = "Google Takeout";
+
+    /**
+     * Gli zip di Google Takeout: rosso se uno non si è potuto importare (o il
+     * giro è fallito), giallo se in uno qualche file non è entrato. Niente
+     * voce finché non se n'è mai importato uno.
+     */
+    private List<VoceSalute> takeout() {
+        String chiave = "google-takeout";
+        ImportazioneTakeout.Riepilogo r = takeout.riepilogo();
+        ImportazioneTakeout.Avanzamento l = r.lavoro();
+        if (r.zip() == 0 && l == null) {
+            return List.of();
+        }
+        List<String> dettagli = new ArrayList<>();
+        dettagli.add(r.zip() + " zip visti · " + r.fatti() + " fatti · " + r.conErrori() + " con errori · "
+                + r.falliti() + " non importati");
+        for (ZipTakeout z : r.problemi()) {
+            String perche = z.errore() != null ? z.errore() : z.errori() + " file non entrati";
+            dettagli.add(z.nome() + ": " + perche);
+            z.messaggi().stream().limit(3).forEach(m -> dettagli.add("  " + m));
+        }
+        if (l != null && l.inCorso()) {
+            String dove = l.fase() == ImportazioneTakeout.Fase.ATTESA_CLOUD ? "aspetta il cloud"
+                    : l.zipTotali() > 0 ? "zip " + l.zipIndice() + " di " + l.zipTotali() + ", file " + l.fileFatti()
+                            + " di " + l.fileTotali() : "cerco gli zip";
+            return List.of(VoceSalute.ok(chiave, TITOLO_TAKEOUT, "In corso: " + dove, dettagli));
+        }
+        if (l != null && l.fase() == ImportazioneTakeout.Fase.FALLITO) {
+            return List.of(VoceSalute.errore(chiave, TITOLO_TAKEOUT, "Ultimo giro non riuscito: " + l.errore(), dettagli));
+        }
+        if (r.falliti() > 0) {
+            ZipTakeout primo = r.problemi().stream().filter(z -> z.stato() == ZipTakeout.StatoZip.FALLITO).findFirst()
+                    .orElse(null);
+            return List.of(VoceSalute.errore(chiave, TITOLO_TAKEOUT, r.falliti() + " zip non importati"
+                    + (primo != null && primo.errore() != null ? ": " + primo.errore() : ""), dettagli));
+        }
+        if (r.conErrori() > 0) {
+            return List.of(VoceSalute.attenzione(chiave, TITOLO_TAKEOUT,
+                    r.conErrori() + " zip con file non entrati (\"Riprova\" nel pannello Google Foto)", dettagli));
+        }
+        return List.of(VoceSalute.ok(chiave, TITOLO_TAKEOUT, r.fatti() + " zip importati", dettagli));
     }
 
     /**

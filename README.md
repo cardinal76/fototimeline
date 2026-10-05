@@ -60,6 +60,15 @@ Il server: [DEPLOY.md](DEPLOY.md).
   cartella automatica e, dopo qualche giorno, le toglie da pCloud se sono
   state importate. L'admin li aggiunge e li cambia; ognuno vede lo stato del
   proprio e può lanciarne un giro (DEPLOY.md).
+- **Google Foto**, in due modi (pulsante *Google Foto*; dettagli sotto,
+  "Google Foto"):
+  - **Importa da Google Takeout** (admin, sul server): tutta la libreria dagli
+    zip che Google Takeout mette su Google Drive, uno zip alla volta, con data,
+    luogo, descrizione, preferita e album presi dai JSON di Google dove l'EXIF
+    non c'è. Registro degli zip fatti, riparte dopo un riavvio, si annulla.
+  - **Scegli da Google Foto** (chiunque sia entrato): collega il proprio
+    account Google, sceglie le foto nella pagina di Google (Picker API) e
+    l'app le scarica e le importa come *Carica foto*.
 - **Archivio di famiglia**: tutti vedono tutte le foto, ma ogni foto sa chi
   l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
   o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
@@ -210,6 +219,13 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_RICORDI_CHAT` | (vuoto)                               | Chat dei ricordi; vuota = quella degli avvisi |
 | `FOTOTIMELINE_RICORDI_FUSO` | `Europe/Rome`                         | Fuso dell'ora e del "giorno di oggi"     |
 | `FOTOTIMELINE_RICORDI_NESSUNO` | `false`                            | "Nessun ricordo oggi" nei giorni senza foto (valore iniziale) |
+| `FOTOTIMELINE_TAKEOUT_SORGENTE` | `gdrive:Takeout`                  | Dove sono gli zip di Google Takeout (remote di rclone e cartella); valore iniziale, poi dall'app |
+| `FOTOTIMELINE_TAKEOUT_CARTELLA` | `<tmp>/fototimeline-takeout` (container: `/takeout`) | Dove si scarica uno zip alla volta, sul disco del server |
+| `FOTOTIMELINE_TAKEOUT_CARTELLA_RCLONE` | (uguale alla precedente)   | La stessa cartella vista dal container di rclone |
+| `FOTOTIMELINE_TAKEOUT_RISERVA` | `2GB`                              | Spazio da lasciare libero oltre allo zip; se manca, si ferma e lo dice |
+| `FOTOTIMELINE_GOOGLE_CLIENT_ID`, `FOTOTIMELINE_GOOGLE_CLIENT_SECRET` | (vuoti) | Client OAuth di Google per "Scegli da Google Foto"; vuoti = funzione nascosta |
+| `FOTOTIMELINE_GOOGLE_CHIAVE` | (vuota)                              | Chiave per cifrare i refresh token in MongoDB; vuota = derivata dal client secret |
+| `FOTOTIMELINE_GOOGLE_REDIRECT` | (vuoto)                            | Redirect URI fisso; vuoto = `<indirizzo dell'app>/api/google/callback` |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -270,6 +286,24 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, regioni: [{ nome, conteggio, luoghi: [{ nome, conteggio }] }] }] }`, i più fotografati prima |
 | POST   | `/api/archivio/luoghi`       | "Calcola luoghi" in sottofondo, stato come `/api/importa`; `?tutte=true` rifà anche quelle che ce l'hanno (ruolo `fototimeline-admin`; 409 senza dataset) |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
+
+Google Foto (dietro login; il Takeout solo `fototimeline-admin`; mai client
+secret né token nelle risposte):
+
+| Metodo | Percorso                     | Cosa fa                                                    |
+|--------|------------------------------|------------------------------------------------------------|
+| GET    | `/api/google`                | `{ configurato, collegato, collegatoIl, scelta }` per l'utente |
+| GET    | `/api/google/collega`        | Navigazione: 302 al consenso di Google (solo lo scope `photospicker.mediaitems.readonly`), `state` in sessione; 404 se non configurato |
+| GET    | `/api/google/callback`       | Ritorno da Google: controlla `state` (sessione, utente, 15 minuti), scambia il codice, salva il refresh token cifrato; 302 a `/?google=collegato` (o `negato`, `errore`) |
+| POST   | `/api/google/scelta`         | Nuova sessione del Picker: 201 con `pickerUri` (già con `/autoclose`); 409 se non collegato o già una in corso, 503 col cloud smontato |
+| GET    | `/api/google/scelta`         | La scelta in corso o l'ultima: `fase` (`ATTESA_SCELTA`, `SCARICO`, `FINITA`, `ANNULLATA`, `SCADUTA`, `FALLITA`), `totali`, `fatte`, `nuove`, `giaPresenti`, `errori`, `messaggi` (204 se nessuna) |
+| POST   | `/api/google/scelta/annulla`, `/chiudi` | Ferma quella in corso; toglie dalla vista quella finita |
+| POST   | `/api/google/scollega`       | Revoca il token su Google e lo cancella (204)              |
+| GET    | `/api/google/takeout`        | `{ disponibile, motivo, sorgente, proprietario, giorniPrimaDiCancellare, cartella, lavoro, registro }` (admin) |
+| PUT    | `/api/google/takeout`        | `{ sorgente, proprietario, giorniPrimaDiCancellare }` (400 se non validi; admin) |
+| POST   | `/api/google/takeout/avvia`  | Parte in sottofondo: 202, 409 se già in corso o senza rclone (admin) |
+| POST   | `/api/google/takeout/annulla` | Si ferma dopo il file in corso; lo zip riparte da lì al prossimo *Avvia* (admin) |
+| POST   | `/api/google/takeout/zip/{id}/riprova` | Toglie uno zip dal registro: al prossimo *Avvia* si rifà (admin) |
 
 Link di condivisione (dietro login come il resto):
 
@@ -346,6 +380,78 @@ Link di condivisione (dietro login come il resto):
   CSRF non ha eccezioni e i file non si leggono: si carica solo da
   `/api/foto`. `RiceviCondivisiController` risponde allo stesso modo se una
   POST col token arrivasse fin lì. Test in `SicurezzaTest`.
+
+### Google Foto
+
+Da marzo 2025 la Google Photos Library API vede solo le foto caricate
+dall'app stessa: la libreria intera si porta via con **Google Takeout**, le
+scelte puntuali con la **Picker API**. Pacchetto `google`.
+
+**Importa da Google Takeout** (`ImportazioneTakeout`, thread `takeout`, uno
+zip alla volta):
+
+- elenca gli `.zip` della sorgente (`gdrive:Takeout`) con `operations/list`;
+  quelli nel registro `takeout_zip` (chiave nome + dimensione + data) come
+  `FATTO` o `CON_ERRORI` si saltano, `IN_CORSO` riparte dal file a cui era
+  arrivato (`fatti`), `FALLITO` si rifà;
+- prima di scaricare controlla lo spazio (`zip + FOTOTIMELINE_TAKEOUT_RISERVA`)
+  e, se manca, si ferma col messaggio; lo scarica con `operations/copyfile`
+  asincrono (`_async`, `job/status`, `job/stop` annullando, `core/stats` per
+  la barra) in `/takeout`, una cartella del disco di server2 montata sia in
+  rclone sia nell'app;
+- lo apre con `java.util.zip.ZipFile` (accesso diretto, ZIP64 compreso, niente
+  estrazione completa): un file alla volta va in un temporaneo accanto allo
+  zip e passa da `FotoService.importa` (doppioni per SHA-256, miniature,
+  luoghi, impronte), poi lo zip si cancella;
+- **JSON di Takeout** (`SidecarTakeout`): `nome.jpg.json`,
+  `nome.jpg.supplemental-metadata.json` anche tagliato
+  (`.supplemental-metad.json`), nomi tagliati a 46–51 caratteri,
+  `nome.json` dei Takeout vecchi, `nome(1).jpg` ↔ `nome.jpg(1).json`,
+  `-edited`/`-modificato` col JSON dell'originale, Live Photo e foto in
+  movimento (`.MOV`, `.MP4`, `.MP` accanto alla foto) col JSON della foto. I
+  `.MP` dei Pixel entrano come `.mp4`;
+- dal JSON (`MetadatiTakeout`): `photoTakenTime` (UTC, portato nel fuso
+  dell'app; `creationTime` se manca) vale come data **solo se l'EXIF non ce
+  l'ha** (`origineData = GOOGLE`); `geoData`, poi `geoDataExif` (0,0 = niente)
+  solo se l'EXIF non ha il GPS; `description`; `favorited` → preferita. I file
+  non si riscrivono (nell'immagine non c'è exiftool): i metadati di Google
+  stanno solo nella scheda in MongoDB (e quindi nel backup dei metadati);
+- album: il `title` del `metadata.json` della cartella, altrimenti il nome
+  della cartella; le cartelle per anno ("Photos from 2019", "Foto dal 2019"),
+  Cestino e Archivio non sono album. Un album che l'app ha già, scritto con
+  altre maiuscole, si riusa;
+- contatori per zip: nuove, già presenti, senza JSON, saltati (formati che
+  l'archivio non accetta, per esempio `.avi`), errori;
+- col cloud smontato aspetta; dopo un riavvio riparte da solo se era in corso
+  (`impostazioni/google-takeout`, `richiesto`); "Caricate da" è il proprietario
+  scelto o chi ha premuto *Avvia*; con `giorniPrimaDiCancellare > 0` toglie da
+  Drive gli zip `FATTO` (senza errori) dopo quei giorni, se su Drive c'è
+  ancora lo stesso file;
+- la pagina "Salute" ha la voce `google-takeout`: rossa se uno zip non è
+  entrato, gialla se ha file non entrati (*Riprova* nel pannello).
+
+**Scegli da Google Foto** (`SceltaGoogleFoto`, `ClientGoogle`, senza SDK):
+
+- OAuth 2.0 *authorization code* con `access_type=offline`, `prompt=consent`
+  e il solo scope `photospicker.mediaitems.readonly`; `state` casuale in
+  sessione, legato all'utente, valido 15 minuti, confrontato a tempo costante.
+  Il callback è `/api/google/callback`, dietro login come il resto;
+- il refresh token sta in `google_token` (uno per utente) cifrato con
+  AES-256-GCM: chiave = SHA-256 di `FOTOTIMELINE_GOOGLE_CHIAVE` o, se manca,
+  del client secret; IV casuale, username come dato associato. Cambiando chiave
+  o secret ognuno ricollega Google. L'access token resta in memoria. Un
+  `invalid_grant` (revocato, scaduto) cancella il token e chiede di ricollegare;
+- `POST sessions` → l'app apre `pickerUri/autoclose` in una scheda nuova → un
+  thread chiede `GET sessions/{id}` ogni `pollInterval`, fino a `timeoutIn`,
+  finché `mediaItemsSet` → `GET mediaItems` (pagine da 100) → ogni file da
+  `baseUrl=d` (foto) o `=dv` (video) con `Authorization: Bearer`, su disco →
+  `FotoService.importa` con `caricataDa` = l'utente e `createTime` come data
+  di riserva → `DELETE sessions/{id}`. Un file che non riesce conta come
+  errore e si passa al successivo.
+
+Test: `SidecarTakeoutTest` (nomi e JSON), `ImportazioneTakeoutTest` (zip veri
+generati nel test, rclone finto), `SceltaGoogleFotoTest` (Google simulato con
+`MockRestServiceServer`), `SicurezzaTest`.
 
 ## Test
 

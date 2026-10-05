@@ -32,6 +32,7 @@ const ORIGINI: Record<Foto['origineData'], string> = {
   FILE: 'dalla data del file',
   CARTELLA: "dalla cartella dell'archivio",
   CARICAMENTO: 'dal momento del caricamento',
+  GOOGLE: 'da Google Foto',
   MANUALE: 'impostata a mano',
 };
 

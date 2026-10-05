@@ -3,6 +3,10 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
+  CollegamentoGoogle,
+  ModificaTakeout,
+  SceltaGoogle,
+  StatoTakeout,
   CaricateDa,
   Caricamento,
   Cartella,
@@ -228,6 +232,56 @@ export class FotoApi {
   /** I ricordi di oggi subito, anche se già mandati: 409 se Telegram non è configurato. */
   provaRicordiTelegram(): Observable<{ messaggio: string }> {
     return this.http.post<{ messaggio: string }>('/api/ricordi-telegram/prova', {});
+  }
+
+  // ------------------------------------------------------------ Google Foto
+
+  /** La funzione c'è? Sono collegato? La mia scelta in corso. */
+  google(): Observable<CollegamentoGoogle> {
+    return this.http.get<CollegamentoGoogle>('/api/google');
+  }
+
+  /** Una nuova scelta col Picker: la pagina di Google da aprire è in pickerUri. */
+  nuovaSceltaGoogle(): Observable<SceltaGoogle> {
+    return this.http.post<SceltaGoogle>('/api/google/scelta', {});
+  }
+
+  /** La scelta in corso o l'ultima; null se non ce n'è. */
+  sceltaGoogle(): Observable<SceltaGoogle | null> {
+    return this.http.get<SceltaGoogle | null>('/api/google/scelta');
+  }
+
+  annullaSceltaGoogle(): Observable<void> {
+    return this.http.post<void>('/api/google/scelta/annulla', {});
+  }
+
+  chiudiSceltaGoogle(): Observable<void> {
+    return this.http.post<void>('/api/google/scelta/chiudi', {});
+  }
+
+  scollegaGoogle(): Observable<void> {
+    return this.http.post<void>('/api/google/scollega', {});
+  }
+
+  /** "Importa da Google Takeout" (solo admin). */
+  takeout(): Observable<StatoTakeout> {
+    return this.http.get<StatoTakeout>('/api/google/takeout');
+  }
+
+  salvaTakeout(modifica: ModificaTakeout): Observable<StatoTakeout> {
+    return this.http.put<StatoTakeout>('/api/google/takeout', modifica);
+  }
+
+  avviaTakeout(): Observable<unknown> {
+    return this.http.post('/api/google/takeout/avvia', {});
+  }
+
+  annullaTakeout(): Observable<void> {
+    return this.http.post<void>('/api/google/takeout/annulla', {});
+  }
+
+  riprovaZip(id: string): Observable<void> {
+    return this.http.post<void>(`/api/google/takeout/zip/${encodeURIComponent(id)}/riprova`, {});
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

@@ -10,6 +10,8 @@ public enum OrigineData {
     CARTELLA,
     /** Momento del caricamento: la foto non diceva niente di meglio. */
     CARICAMENTO,
+    /** Da Google Foto: photoTakenTime del JSON di Takeout, o createTime del Picker (senza EXIF). */
+    GOOGLE,
     /** Scelta a mano. */
     MANUALE
 }

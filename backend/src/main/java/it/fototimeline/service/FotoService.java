@@ -145,6 +145,35 @@ public class FotoService {
      *                   duplicato tiene quello che aveva.
      */
     public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa) {
+        return importa(nome, file, ultimaModifica, album, caricataDa, null);
+    }
+
+    /**
+     * Quello che sa di una foto chi la porta da fuori (il JSON di Google
+     * Takeout, la data di Google Foto): vale solo dove il file non dice
+     * niente. Data: EXIF → questa ({@link OrigineData#GOOGLE}) → data del
+     * file → caricamento. GPS solo se l'EXIF non ce l'ha (0,0 non conta);
+     * descrizione solo se c'è; preferita se lo è.
+     */
+    public record MetadatiEsterni(LocalDateTime scattataIl, Double latitudine, Double longitudine,
+            String descrizione, boolean preferita) {
+
+        public static final MetadatiEsterni NESSUNO = new MetadatiEsterni(null, null, null, null, false);
+
+        /** True se ci sono coordinate buone: entrambe, nei limiti, non 0,0 (Google lo usa per "nessuna"). */
+        public boolean conPosizione() {
+            return latitudine != null && longitudine != null && Math.abs(latitudine) <= 90 && Math.abs(longitudine) <= 180
+                    && !(latitudine == 0 && longitudine == 0);
+        }
+    }
+
+    /**
+     * Come {@link #importa(String, Path, Instant, String, String)}, coi
+     * metadati di chi la porta ({@code esterni}, anche null). Il file non si
+     * tocca: quello che viene da fuori sta solo nella scheda.
+     */
+    public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
+            MetadatiEsterni esterni) {
         archivio.verificaDisponibile();
         Letto letto;
         try {
@@ -155,7 +184,14 @@ public class FotoService {
         Foto foto = letto.foto();
         foto.setAlbum(pulisciAlbum(album));
         foto.setCaricataDa(vuotoANull(caricataDa));
-        if (ultimaModifica != null) {
+        if (esterni != null) {
+            applica(foto, esterni);
+        }
+        LocalDateTime dataEsterna = esterni != null ? esterni.scattataIl() : null;
+        if (letto.data() == null && dataEsterna != null) {
+            foto.setScattataIl(dataEsterna);
+            foto.setOrigineData(OrigineData.GOOGLE);
+        } else if (ultimaModifica != null) {
             data(foto, letto.data(), LocalDateTime.ofInstant(ultimaModifica, clock.getZone()), OrigineData.FILE);
         } else {
             data(foto, letto.data(), LocalDateTime.now(clock), OrigineData.CARICAMENTO);
@@ -383,6 +419,22 @@ public class FotoService {
     private void segnalaConversione(Foto foto) {
         if (foto.getConversione() == StatoConversione.IN_CODA) {
             conversione.segnala();
+        }
+    }
+
+    /** I metadati da fuori dove il file non dice niente (la data la sceglie chi chiama). */
+    private void applica(Foto foto, MetadatiEsterni esterni) {
+        if (foto.getLatitudine() == null && esterni.conPosizione()) {
+            foto.setLatitudine(esterni.latitudine());
+            foto.setLongitudine(esterni.longitudine());
+            luoghi.applica(foto);
+        }
+        String descrizione = vuotoANull(esterni.descrizione());
+        if (descrizione != null && foto.getDescrizione() == null) {
+            foto.setDescrizione(descrizione);
+        }
+        if (esterni.preferita()) {
+            foto.setPreferita(true);
         }
     }
 

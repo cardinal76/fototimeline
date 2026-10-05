@@ -198,6 +198,8 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   (in basso a sinistra quanti fatti e quanti da fare); i video nuovi ci entrano da soli. Col cloud
   smontato aspetta. Su un VPS conta qualche minuto di CPU per ogni minuto di video 4K.
 - **Telefoni**: la sincronizzazione da pCloud, un telefono per familiare (sezione 5).
+- **Google Foto**: scegliere qualche foto dal proprio Google Foto, e (admin) importare tutta la
+  libreria con Google Takeout (sezione 6).
 - **Caricate da**: il filtro per vedere le foto portate da una persona; nel visore, "Caricata da".
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
 - **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
@@ -314,6 +316,125 @@ telefoni vede solo il suo.
 tutte le altre (senza album nuovi) e risultano "caricate da Anna". Se un giorno lo togli
 (**Elimina**), le copie restano registrate: rimesso con la stessa cartella non ricopia niente.
 
+## 6. Google Foto
+
+Da marzo 2025 Google non lascia più alle app leggere tutta la libreria di Google Foto. Quindi:
+
+- **tutta la libreria** (una volta, e poi ogni due mesi per un anno) passa da **Google Takeout**:
+  Google prepara degli zip su Google Drive e l'app li importa da sola (6.1–6.3, da admin);
+- **qualche foto ogni tanto** si sceglie con **Scegli da Google Foto**: ognuno col suo account
+  Google, dall'app (6.4 una volta da admin, 6.5 per tutti).
+
+Le foto già presenti si saltano sempre (stesso contenuto = stessa foto), quindi non c'è rischio di
+doppioni se una foto arriva sia dal telefono sia da Google.
+
+**6.1 Programmare Takeout su Drive (una volta, dal PC).**
+
+1. Controlla quanto spazio libero c'è su **Google Drive** (gli zip occupano spazio lì) e su
+   **server2** (ci si scarica uno zip alla volta):
+
+   ```bash
+   df -h ~      # su server2: "Avail" deve superare la dimensione di uno zip + 2 GB
+   ```
+
+2. Apri https://takeout.google.com con l'account di Google Foto.
+3. **Deseleziona tutto**, poi spunta solo **Google Foto** (lascia "Tutti gli album di foto
+   inclusi") → **Passaggio successivo**.
+4. **Metodo di invio**: **Aggiungi a Drive**.
+5. **Frequenza**: **Esporta ogni 2 mesi per 1 anno**.
+6. **Tipo di file**: **.zip** (non .tgz). **Dimensione**: **50 GB**; se su server2 lo spazio
+   libero è meno di 52 GB scegli 10 GB o 20 GB (più zip, ma più piccoli).
+7. **Crea esportazione**. Google manda un'email quando è pronta (anche giorni): gli zip sono in
+   Drive nella cartella **Takeout**.
+
+**6.2 Collegare Google Drive a rclone (una volta).** Come per pCloud (3.1): il login si fa sul
+**PC**, dove c'è il browser; su server2 si copia solo la sezione del `rclone.conf`.
+
+Sul **PC**: `rclone config` → `n` → nome **`gdrive`** → tipo **`drive`** (Google Drive) →
+client_id e client_secret **vuoti** → scope **`1`** (accesso completo: serve per togliere gli zip
+vecchi; se non li vuoi mai togliere dall'app basta `2`, sola lettura) → service_account_file
+vuoto → advanced `n` → browser **`y`** (login con l'account di Google Foto, **Consenti**) → shared
+drive **`n`** → `y` → `q`. Prova:
+
+```bash
+rclone lsf gdrive:Takeout           # gli zip di Takeout (vuoto finché Google non ha finito)
+rclone config show gdrive           # la sezione da copiare
+```
+
+Copia la sezione `[gdrive]` (contiene il token: **non va incollata in chat** né altrove) e su
+**server2** in fondo a `~/fototimeline/rclone/rclone.conf` (`nano`, riga vuota, incolla,
+`Ctrl+O`, `Ctrl+X`). Poi:
+
+```bash
+mkdir -p ~/fototimeline/takeout      # qui si scarica uno zip alla volta (il rilascio la crea da solo)
+docker restart fototimeline-rclone-1
+sleep 3
+docker exec fototimeline-rclone-1 rclone lsf gdrive:Takeout --config /config/rclone/rclone.conf
+```
+
+**6.3 Nell'app**, da admin (https://foto.marcocardinali.it): **Monta** (il riavvio di rclone lo
+smonta) → **Google Foto** → riquadro **Importa da Google Takeout**:
+
+- **Dove sono gli zip**: `gdrive:Takeout`;
+- **Le foto sono "caricate da"**: chi le ha fatte (per esempio `marco`), o vuoto = chi preme Avvia;
+- **Togli gli zip da Drive dopo quanti giorni**: `0` = mai (consigliato la prima volta); per
+  esempio `14` per liberare Drive due settimane dopo un'importazione senza errori;
+- **Salva** → **Avvia**.
+
+L'app cerca gli zip, ne scarica uno, lo apre e importa foto e video uno alla volta, poi lo cancella
+da server2 e passa al successivo. Si può chiudere la pagina: va avanti sul server; il riquadro
+mostra zip X di N, i file, e i contatori (nuove, già presenti, senza JSON, saltati, errori). Data,
+luogo, descrizione, preferite e album vengono dai file JSON di Google quando la foto non li ha
+già. **Annulla** si ferma dopo il file in corso; **Avvia** riparte da lì. Dopo un riavvio del
+server riparte da solo; col cloud smontato aspetta. Ogni due mesi, quando arriva l'email di Google,
+basta **Avvia**: gli zip già fatti si saltano. Se uno zip ha errori la pagina **Salute** lo dice;
+nel riquadro **Riprova** lo rifà.
+
+**6.4 Credenziali Google per "Scegli da Google Foto" (una volta, da admin, dal PC).**
+
+1. Apri https://console.cloud.google.com con il tuo account Google → in alto **Seleziona un
+   progetto** → **Nuovo progetto** → nome `FotoTimeline` → **Crea** (e selezionalo).
+2. **API e servizi** → **Libreria** → cerca **Google Photos Picker API** → **Abilita**.
+3. **API e servizi** → **Schermata consenso OAuth** (o **Google Auth Platform**) → **Inizia**:
+   nome app `FotoTimeline`, email di assistenza la tua → pubblico **Esterno** → la tua email →
+   **Crea**.
+4. **Pubblico** (Audience): lascia lo stato **Test** e in **Utenti di prova** aggiungi l'indirizzo
+   Google di ogni familiare che userà la funzione (fino a 100).
+5. **Accesso ai dati** (Data access) → **Aggiungi o rimuovi ambiti** → cerca `photospicker` →
+   spunta `.../auth/photospicker.mediaitems.readonly` → **Aggiorna** → **Salva**.
+6. **Client** → **Crea client** → tipo **Applicazione web** → nome `FotoTimeline` → **URI di
+   reindirizzamento autorizzati** → **Aggiungi URI** → `https://foto.marcocardinali.it/api/google/callback`
+   → **Crea**.
+7. Compaiono **ID client** e **Client secret**: copiali **direttamente** nel `.env` di server2,
+   mai in chat:
+
+   ```bash
+   nano ~/fototimeline/.env
+   # FOTOTIMELINE_GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   # FOTOTIMELINE_GOOGLE_CLIENT_SECRET=GOCSPX-...
+   # FOTOTIMELINE_GOOGLE_CHIAVE=   ← incolla il risultato di: openssl rand -base64 32
+   ```
+
+8. Rifai partire l'app col nuovo `.env` (va bene anche il prossimo rilascio):
+
+   ```bash
+   cd ~/actions-runner-fototimeline/_work/fototimeline/fototimeline
+   docker compose -p fototimeline -f deploy/docker-compose.yml --env-file ~/fototimeline/.env up -d
+   ```
+
+Con l'app in stato **Test** Google fa scadere il collegamento dopo 7 giorni: l'app lo dice
+("ricollega Google") e basta ripremere **Collega Google**. Per non doverlo rifare si può pubblicare
+l'app (**Pubblico** → **Pubblica app**): Google mostra un avviso "app non verificata", che per la
+famiglia va bene.
+
+**6.5 Scegliere le foto (chiunque, dall'app).** **Google Foto** → **Collega Google** → scegli
+l'account → (se compare "Google non ha verificato questa app": **Continua**) → **Continua** sul
+permesso "vedere le foto che selezioni" → si torna all'app ("Google collegato"). Poi **Scegli
+foto**: si apre una scheda di Google Foto, scegli le foto (fino a 2000 per volta) e premi
+**Fine**; la scheda si chiude e l'app le scarica e le importa, a tuo nome ("Caricate da"). La
+barra dice quante ne mancano; quelle già presenti si saltano. **Scollega Google** toglie il
+permesso (anche su Google) e cancella il collegamento dall'app.
+
 ---
 
 ## Da Amazon Foto (una volta, dal PC)
@@ -429,3 +550,11 @@ backup): un'altra cartella di lavoro per ogni giro, per esempio
 | pCloud `Invalid 'access_token' (2094)` | account europeo senza `hostname = eapi.pcloud.com` | rifare 3.1 dal PC |
 | "ARCHIVIO non può essere la radice" | `ARCHIVIO=/mnt/p` | una cartella nuova, es. `/mnt/p/Archivio foto` |
 | raccogli fermo | PC in sospensione o `P:` staccato | `p-up` e rilanciare: riprende |
+| Takeout: "Spazio insufficiente in /takeout ..." | su server2 non c'è posto per lo zip | liberare spazio (`df -h ~`) o rifare Takeout con zip più piccoli (6.1), poi **Avvia** |
+| Takeout: `didn't find section in config file` per `gdrive:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 6.2 |
+| Takeout: "Qui non si può: ... senza rclone" | app sul PC, non sul server | il Takeout si importa solo da server2 |
+| Takeout: tante foto "senza JSON" | normale per qualche file (Google non lo mette sempre) | niente: la data viene dall'EXIF o dal file |
+| Google: "ricollega Google" o `invalid_grant` | app Google in stato Test (7 giorni) o permesso tolto | **Collega Google** di nuovo (6.5) |
+| Google: `Errore 400: redirect_uri_mismatch` | l'URI nelle credenziali non è identico | rifare 6.4 punto 6: `https://foto.marcocardinali.it/api/google/callback` |
+| Google: "Accesso bloccato: l'app non ha completato la verifica" | l'email non è tra gli utenti di prova | aggiungerla (6.4 punto 4) |
+| Nessun pulsante **Google Foto** per i familiari | `FOTOTIMELINE_GOOGLE_CLIENT_ID`/`SECRET` vuoti nel `.env` | 6.4, punti 7 e 8 |

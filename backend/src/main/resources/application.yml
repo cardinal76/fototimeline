@@ -117,6 +117,26 @@ fototimeline:
     nessun-ricordo: ${FOTOTIMELINE_RICORDI_NESSUNO:false}
     # Ogni quanto guardare se è ora (e recuperare se all'ora giusta l'app era giù).
     controllo: PT5M
+  # "Importa da Google Takeout" (solo sul server, con rclone): gli zip che Takeout
+  # mette su Google Drive. La sorgente è il valore iniziale, poi si cambia dall'app.
+  takeout:
+    sorgente: ${FOTOTIMELINE_TAKEOUT_SORGENTE:gdrive:Takeout}
+    # Dove si scarica uno zip alla volta, sul disco del server (vista dall'app e da rclone).
+    cartella: ${FOTOTIMELINE_TAKEOUT_CARTELLA:${java.io.tmpdir}/fototimeline-takeout}
+    cartella-rclone: ${FOTOTIMELINE_TAKEOUT_CARTELLA_RCLONE:}
+    # Spazio da lasciare libero oltre allo zip: se non c'è, l'importazione si ferma e lo dice.
+    riserva: ${FOTOTIMELINE_TAKEOUT_RISERVA:2GB}
+    attesa-cloud: PT1M
+    controllo: PT6H
+  # "Scegli da Google Foto" (Google Photos Picker API): client OAuth di un progetto
+  # Google Cloud (GUIDA.md). Vuoti = la funzione non si vede. Mai nei log.
+  google:
+    client-id: ${FOTOTIMELINE_GOOGLE_CLIENT_ID:}
+    client-secret: ${FOTOTIMELINE_GOOGLE_CLIENT_SECRET:}
+    # Per cifrare i refresh token in MongoDB (AES-GCM); vuota = derivata dal client secret.
+    chiave: ${FOTOTIMELINE_GOOGLE_CHIAVE:}
+    # Vuoto = <indirizzo dell'app>/api/google/callback (dietro Caddy: https://<dominio>/...).
+    redirect-uri: ${FOTOTIMELINE_GOOGLE_REDIRECT:}
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

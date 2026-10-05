@@ -25,6 +25,8 @@ jobs:
           set -a; . "$ENV_FILE"; set +a
           test -f "$FOTOTIMELINE_DATI/rclone/rclone.conf" || { echo "::error::Manca $FOTOTIMELINE_DATI/rclone/rclone.conf"; exit 1; }
           mkdir -p "$FOTOTIMELINE_DATI/cloud"
+          # Google Takeout: uno zip alla volta, scritto da rclone e letto (e cancellato) dall'app (uid 1000).
+          mkdir -p "$FOTOTIMELINE_DATI/takeout"
           # Un montaggio rimasto appeso da un rclone fermato male bloccherebbe il bind.
           if ! ls "$FOTOTIMELINE_DATI/cloud" >/dev/null 2>&1; then
             fusermount3 -uz "$FOTOTIMELINE_DATI/cloud" 2>/dev/null || fusermount -uz "$FOTOTIMELINE_DATI/cloud" 2>/dev/null || true
