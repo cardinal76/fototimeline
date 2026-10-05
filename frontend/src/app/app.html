@@ -371,6 +371,10 @@
             Togli da pCloud dopo giorni (0 = mai)
             <input type="number" name="giorniPrimaDiCancellare" min="0" [(ngModel)]="moduloTelefono.giorniPrimaDiCancellare" required />
           </label>
+          <label>
+            File copiati insieme (1–32)
+            <input type="number" name="copieInParallelo" min="1" max="32" [(ngModel)]="moduloTelefono.copieInParallelo" required />
+          </label>
         </div>
 
         <section class="giro" aria-live="polite">

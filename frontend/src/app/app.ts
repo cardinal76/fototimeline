@@ -59,7 +59,13 @@ export class App {
   protected readonly dialogoTelefono = signal(false);
   protected readonly telefono = signal<StatoTelefono | null>(null);
   protected readonly salvandoTelefono = signal(false);
-  protected moduloTelefono: ModificaTelefono = { attiva: false, sorgente: '', intervalloOre: 6, giorniPrimaDiCancellare: 7 };
+  protected moduloTelefono: ModificaTelefono = {
+    attiva: false,
+    sorgente: '',
+    intervalloOre: 6,
+    giorniPrimaDiCancellare: 7,
+    copieInParallelo: 6,
+  };
   private telefonoTimer?: ReturnType<typeof setTimeout>;
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
@@ -317,6 +323,7 @@ export class App {
           sorgente: t.sorgente,
           intervalloOre: t.intervalloOre,
           giorniPrimaDiCancellare: t.giorniPrimaDiCancellare,
+          copieInParallelo: t.copieInParallelo,
         };
         this.mostraTelefono(t);
       },
