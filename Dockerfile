@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # Stesso uid di marco su server2: scrive nel cloud montato da rclone con --uid 1000.
 RUN userdel -r ubuntu 2>/dev/null || true; useradd --uid 1000 --create-home fototimeline
+# Il volume delle miniature, appena creato, prende proprietario e permessi da qui.
+RUN mkdir -p /miniature && chown fototimeline:fototimeline /miniature
 USER fototimeline
 WORKDIR /app
 COPY --from=backend /src/backend/target/fototimeline-*.jar app.jar
