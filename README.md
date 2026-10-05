@@ -61,9 +61,11 @@ Il server: [DEPLOY.md](DEPLOY.md).
 - **Archivio di famiglia**: tutti vedono tutte le foto, ma ogni foto sa chi
   l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
   o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
-- **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
-  informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
-  tag, album, data; si scarica l'originale o si elimina.
+- **Visore** a tutto schermo: si vede solo la foto; ← → o il dito per
+  scorrere, `P` preferita, `I` pannello dei dettagli (si ricorda se lo si
+  lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
+  chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
+  si scarica l'originale o si elimina.
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
 - **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,
@@ -76,7 +78,12 @@ Il server: [DEPLOY.md](DEPLOY.md).
   in sottofondo con la barra. Oltre 30 km dal centro abitato più vicino (mare
   aperto) il luogo resta sconosciuto.
 - **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
-  anni passati ("3 anni fa"); si chiude fino al giorno dopo.
+  anni passati ("3 anni fa"); si chiude fino al giorno dopo. Ogni mattina
+  (alle 8, si cambia) anche su Telegram, nella chat degli avvisi o in una a
+  parte: fino a 6 foto, una per anno prima e le preferite prima, niente video
+  né quasi doppioni, con il luogo e il link "Tutte le foto di oggi"
+  (`/?ricordi=oggi`). Mai due volte lo stesso giorno; se all'ora giusta l'app
+  era giù, appena riparte. Impostazioni nel dialogo **Salute** (admin).
 - **App sul telefono**: dal browser "Aggiungi a schermata Home" / "Installa
   app" (manifest, icone, service worker); si apre a schermo intero.
 - **Condividi → FotoTimeline** (Android, Chrome/Edge; non iPhone): dalla
@@ -195,6 +202,12 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
 | `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
 | `FOTOTIMELINE_DOMINIO`  | (vuoto)                                   | Il link all'app nei messaggi di Telegram |
+| `FOTOTIMELINE_RICORDI_ATTIVO` | `true`                              | "Accadde oggi" su Telegram ogni mattina (serve anche il token); valore iniziale, poi dall'app |
+| `FOTOTIMELINE_RICORDI_ORA` | `08:00`                                | Da che ora mandarli (valore iniziale)    |
+| `FOTOTIMELINE_RICORDI_FOTO` | `6`                                   | Foto al massimo, 1–10 (valore iniziale)  |
+| `FOTOTIMELINE_RICORDI_CHAT` | (vuoto)                               | Chat dei ricordi; vuota = quella degli avvisi |
+| `FOTOTIMELINE_RICORDI_FUSO` | `Europe/Rome`                         | Fuso dell'ora e del "giorno di oggi"     |
+| `FOTOTIMELINE_RICORDI_NESSUNO` | `false`                            | "Nessun ricordo oggi" nei giorni senza foto (valore iniziale) |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -238,6 +251,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | POST   | `/api/quasi-uguali/calcola`  | Lo avvia in sottofondo: 202, 409 se già in corso (ruolo `fototimeline-admin`); `/calcola/annulla` lo ferma |
 | GET    | `/api/salute`                | `{ stato, voci: [{ chiave, titolo, stato, messaggio, dettagli }], controllatoIl, avvisiTelegram }`, stato `OK`/`ATTENZIONE`/`ERRORE` (admin) |
 | POST   | `/api/salute/prova`          | Messaggio di prova su Telegram: 204, 409 se non configurato, 502 se Telegram rifiuta (admin) |
+| GET    | `/api/ricordi-telegram`      | `{ attivo, ora, foto, nessunRicordo, telegramConfigurato, chatSeparata, fuso, ultimoGiorno, ultimoInvioIl, ultimoEsito }` (admin; mai token né chat) |
+| PUT    | `/api/ricordi-telegram`      | `{ attivo, ora: "HH:mm", foto: 1–10, nessunRicordo }`: salvati in Mongo, 400 se non validi (admin) |
+| POST   | `/api/ricordi-telegram/prova` | I ricordi di oggi subito, anche se già mandati (senza ricordi "Nessun ricordo oggi"): `{ messaggio }`, 409 se Telegram non è configurato, 502 se rifiuta (admin) |
 | GET    | `/salute`                    | Healthcheck di Docker: `ok`, senza login                   |
 | POST   | `/ricevi-condivisi`          | Action dello `share_target`: la prende il service worker; se arriva al server, 303 verso `/?condivisi=senza-app` senza leggere i file |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |

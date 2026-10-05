@@ -692,7 +692,7 @@
 
 @if (dialogoSalute()) {
   <div class="velo" (click)="chiudiSalute()">
-    <div class="dialogo" role="dialog" aria-labelledby="titolo-salute" (click)="$event.stopPropagation()">
+    <div class="dialogo salute" role="dialog" aria-labelledby="titolo-salute" (click)="$event.stopPropagation()">
       <h2 id="titolo-salute">Salute</h2>
       @if (galleria.salute(); as s) {
         <p class="tenue">
@@ -724,6 +724,44 @@
           </p>
         } @else {
           <p class="tenue">Su Telegram arriva un messaggio quando una voce diventa rossa e quando torna a posto.</p>
+        }
+        @if (ricordiTelegram(); as r) {
+          <form class="giro" (ngSubmit)="salvaRicordi()">
+            <h3>Ricordi su Telegram</h3>
+            <p class="tenue">
+              Ogni mattina le foto di oggi negli anni passati, con il link ad "Accadde oggi"
+              {{ r.chatSeparata ? 'nella chat dei ricordi' : 'nella chat degli avvisi' }}. Niente video e niente link pubblici.
+            </p>
+            <label class="spunta-riga">
+              <input type="checkbox" name="ricordiAttivo" [(ngModel)]="moduloRicordi.attivo" />
+              Manda i ricordi ogni mattina
+            </label>
+            <div class="campi">
+              <label>
+                Dalle ore <small>({{ r.fuso }})</small>
+                <input type="time" name="ricordiOra" [(ngModel)]="moduloRicordi.ora" required />
+              </label>
+              <label>
+                Foto al massimo
+                <input type="number" name="ricordiFoto" min="1" max="10" [(ngModel)]="moduloRicordi.foto" required />
+              </label>
+            </div>
+            <label class="spunta-riga">
+              <input type="checkbox" name="ricordiNessuno" [(ngModel)]="moduloRicordi.nessunRicordo" />
+              Nei giorni senza foto scrivi "Nessun ricordo oggi"
+            </label>
+            @if (r.ultimoEsito) {
+              <p class="tenue">Ultima volta ({{ r.ultimoInvioIl | date: 'd MMM HH:mm' }}): {{ r.ultimoEsito }}</p>
+            }
+            <div class="piede">
+              @if (r.telegramConfigurato) {
+                <button type="button" [disabled]="provaRicordiInCorso()" (click)="provaRicordi()">
+                  {{ provaRicordiInCorso() ? 'Invio…' : 'Manda ora una prova' }}
+                </button>
+              }
+              <button type="submit" [disabled]="salvandoRicordi()">{{ salvandoRicordi() ? 'Salvo…' : 'Salva' }}</button>
+            </div>
+          </form>
         }
       } @else {
         <span class="rotella" aria-label="Caricamento"></span>

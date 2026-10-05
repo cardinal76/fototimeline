@@ -219,6 +219,11 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   non va (rosso); il dialogo spiega cosa, voce per voce. Con il bot di Telegram (DEPLOY.md,
   "Salute e avvisi su Telegram") arriva un messaggio quando una voce diventa rossa e quando torna
   a posto: per esempio se il token di pCloud scade, o se il backup non si fa da due giorni.
+- **Ricordi su Telegram**: ogni mattina alle 8 il bot manda le foto di oggi negli anni passati
+  ("📅 5 ottobre · 3 anni fa a Sperlonga"), con il link **Tutte le foto di oggi** che apre l'app su
+  "Accadde oggi". Nei giorni senza foto non arriva niente. Si cambiano in **Salute → Ricordi su
+  Telegram** (admin): acceso o spento, l'ora, quante foto, "Nessun ricordo oggi"; **Manda ora una
+  prova** li manda subito. Le foto partono ridotte e senza dati GPS; nessun link pubblico.
 
 ### Dal telefono: Condividi → FotoTimeline
 

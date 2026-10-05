@@ -104,6 +104,19 @@ fototimeline:
     controllo: ${FOTOTIMELINE_TELEGRAM_CONTROLLO:PT15M}
     # Il link all'app nei messaggi; vuoto = senza link.
     indirizzo-app: ${FOTOTIMELINE_DOMINIO:}
+  # "Accadde oggi" su Telegram: ogni mattina le foto di oggi negli anni passati,
+  # nella chat degli avvisi o in una a parte. Attivo, ora, foto e "Nessun ricordo
+  # oggi" sono i valori iniziali: si cambiano dall'app (Salute → Ricordi su Telegram).
+  ricordi-telegram:
+    attivo: ${FOTOTIMELINE_RICORDI_ATTIVO:true}
+    ora: ${FOTOTIMELINE_RICORDI_ORA:08:00}
+    foto: ${FOTOTIMELINE_RICORDI_FOTO:6}
+    # Vuota = la chat degli avvisi (FOTOTIMELINE_TELEGRAM_CHAT).
+    chat: ${FOTOTIMELINE_RICORDI_CHAT:}
+    fuso: ${FOTOTIMELINE_RICORDI_FUSO:Europe/Rome}
+    nessun-ricordo: ${FOTOTIMELINE_RICORDI_NESSUNO:false}
+    # Ogni quanto guardare se è ora (e recuperare se all'ora giusta l'app era giù).
+    controllo: PT5M
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

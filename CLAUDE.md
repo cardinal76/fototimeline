@@ -148,6 +148,12 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   con quelli in `impostazioni/avvisi-salute` e scrive su Telegram solo i
   cambi; se l'invio fallisce non salva, così riprova. Il token del bot sta
   nell'indirizzo: ogni messaggio d'errore passa da `Telegram.senzaToken`.
+- "Accadde oggi" su Telegram (`ricordi/RicordiTelegram`): ogni 5 minuti guarda
+  se è passata l'ora; il giorno fatto (`ultimoGiorno` in
+  `impostazioni/ricordi-telegram`) si prenota con un update condizionato
+  *prima* di mandare e si libera se l'invio fallisce: mai due invii al giorno.
+  Le immagini: `vistaCondivisa` (senza EXIF) o la miniatura, mai l'originale.
+  Il link è `/?ricordi=oggi` (`ricordi.ts`), mai un link pubblico.
 - L'esito dell'ultimo backup sta anche in `impostazioni/backup-metadati`
   (`BackupMetadati.esito()`): col cloud smontato i file non si vedono.
 

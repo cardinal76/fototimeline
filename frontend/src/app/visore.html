@@ -1,4 +1,4 @@
-<div class="scena" (click)="chiudi.emit()">
+<div class="scena" (click)="sfondo()" (touchstart)="toccoInizio($event)" (touchend)="toccoFine($event)">
   <img class="sfondo" [src]="anteprima()" alt="" aria-hidden="true" />
   @if (foto().video) {
     <video
@@ -50,17 +50,29 @@
   }
 
   <div class="comandi" (click)="$event.stopPropagation()">
-    <button type="button" (click)="preferita()" [attr.aria-pressed]="foto().preferita" title="Preferita (F)">
+    <button type="button" (click)="preferita()" [attr.aria-pressed]="foto().preferita" title="Preferita (P)" aria-label="Preferita">
       {{ foto().preferita ? '★' : '☆' }}
     </button>
-    <a [href]="scarica()" title="Scarica l'originale">⤓</a>
-    <button type="button" (click)="pannello.set(!pannello())" [attr.aria-pressed]="pannello()" title="Informazioni (I)">ⓘ</button>
-    <button type="button" (click)="chiudi.emit()" title="Chiudi (Esc)">✕</button>
+    <a [href]="scarica()" title="Scarica l'originale" aria-label="Scarica l'originale">⤓</a>
+    <button type="button" (click)="dettagli()" [attr.aria-pressed]="pannello()" title="Dettagli (I)" aria-label="Dettagli">ⓘ</button>
+    @if (puoSchermoIntero) {
+      <button
+        type="button"
+        (click)="alternaSchermoIntero()"
+        [attr.aria-pressed]="schermoIntero()"
+        [title]="schermoIntero() ? 'Esci dallo schermo intero (F)' : 'Schermo intero (F)'"
+        [attr.aria-label]="schermoIntero() ? 'Esci dallo schermo intero' : 'Schermo intero'"
+      >
+        {{ schermoIntero() ? '⤡' : '⛶' }}
+      </button>
+    }
+    <button type="button" (click)="chiudi.emit()" title="Chiudi (Esc)" aria-label="Chiudi">✕</button>
   </div>
 </div>
 
 @if (pannello()) {
-  <aside class="pannello">
+  <aside class="pannello" aria-label="Dettagli della foto">
+    <button type="button" class="chiudi-pannello" title="Nascondi i dettagli (I)" aria-label="Nascondi i dettagli" (click)="dettagli()">✕</button>
     <header>
       <p class="quando">{{ foto().scattataIl | date: 'EEEE d MMMM y' }}</p>
       <p class="ora" [class.con-luogo]="!!luogo()">
@@ -152,6 +164,6 @@
       <dt>Caricata da</dt>
       <dd>{{ caricataDa() ?? '—' }}</dd>
     </dl>
-    <p class="scorciatoie">← → scorri · F preferita · I informazioni · Esc chiudi</p>
+    <p class="scorciatoie">← → scorri · P preferita · I dettagli · F schermo intero · Esc chiudi</p>
   </aside>
 }
