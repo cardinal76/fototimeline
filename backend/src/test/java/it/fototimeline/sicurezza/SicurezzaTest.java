@@ -53,6 +53,8 @@ import it.fototimeline.telefono.SorgenteTelefono;
         // Token finto: non deve uscire da /api/salute. Nessun test qui manda davvero.
         "fototimeline.telegram.token=123456:token-segreto-di-prova",
         "fototimeline.telegram.chat=42",
+        // Niente ricordi mandati dallo scheduler con quel token.
+        "fototimeline.ricordi-telegram.attivo=false",
 })
 @AutoConfigureMockMvc
 class SicurezzaTest {
@@ -103,6 +105,13 @@ class SicurezzaTest {
         // Nemmeno la pagina "Salute" e la prova di Telegram.
         mvc.perform(get("/api/salute").with(oidcLogin())).andExpect(status().isForbidden());
         mvc.perform(post("/api/salute/prova").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        // Né i ricordi su Telegram; "Accadde oggi" nell'app invece sì.
+        mvc.perform(get("/api/ricordi-telegram").with(oidcLogin())).andExpect(status().isForbidden());
+        mvc.perform(put("/api/ricordi-telegram").with(oidcLogin()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"attivo\":false,\"ora\":\"08:00\",\"foto\":6,\"nessunRicordo\":false}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/ricordi-telegram/prova").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/ricordi").with(oidcLogin())).andExpect(status().isOk());
     }
 
     @Test
@@ -118,6 +127,29 @@ class SicurezzaTest {
         assertThat(corpo).doesNotContain("token-segreto").doesNotContain("123456");
         // Senza token CSRF la prova non parte (e qui non deve partire davvero).
         mvc.perform(post("/api/salute/prova").with(admin)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void lAmministratoreImpostaIRicordiSuTelegramMaNonVedeIlToken() throws Exception {
+        mvc.perform(get("/api/ricordi-telegram")).andExpect(status().isUnauthorized());
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        String corpo = mvc.perform(get("/api/ricordi-telegram").with(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.telegramConfigurato").value(true))
+                .andExpect(jsonPath("$.ora").value("08:00"))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(corpo).doesNotContain("token-segreto").doesNotContain("123456");
+        corpo = mvc.perform(put("/api/ricordi-telegram").with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attivo\":false,\"ora\":\"7:30\",\"foto\":4,\"nessunRicordo\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ora").value("07:30"))
+                .andExpect(jsonPath("$.foto").value(4))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(corpo).doesNotContain("token-segreto");
+        mvc.perform(put("/api/ricordi-telegram").with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"attivo\":true,\"ora\":\"alle otto\",\"foto\":4,\"nessunRicordo\":false}"))
+                .andExpect(status().isBadRequest());
+        // Senza token CSRF la prova non parte (e qui non deve partire davvero).
+        mvc.perform(post("/api/ricordi-telegram/prova").with(admin)).andExpect(status().isForbidden());
     }
 
     @Test

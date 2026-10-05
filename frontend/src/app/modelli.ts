@@ -436,3 +436,26 @@ export interface Salute {
   /** Token e chat di Telegram impostati sul server. */
   avvisiTelegram: boolean;
 }
+
+/** Quello che si cambia di "Ricordi su Telegram". */
+export interface ImpostazioniRicordiTelegram {
+  attivo: boolean;
+  /** "HH:mm", nel fuso del server. */
+  ora: string;
+  /** Foto al massimo, 1–10. */
+  foto: number;
+  /** Nei giorni senza foto manda "Nessun ricordo oggi". */
+  nessunRicordo: boolean;
+}
+
+/** GET /api/ricordi-telegram (solo admin): "Accadde oggi" ogni mattina su Telegram. */
+export interface RicordiTelegram extends ImpostazioniRicordiTelegram {
+  telegramConfigurato: boolean;
+  /** Una chat solo per i ricordi (FOTOTIMELINE_RICORDI_CHAT), non quella degli avvisi. */
+  chatSeparata: boolean;
+  fuso: string;
+  /** L'ultimo giorno fatto, "yyyy-MM-dd". */
+  ultimoGiorno?: string;
+  ultimoInvioIl?: string;
+  ultimoEsito?: string;
+}

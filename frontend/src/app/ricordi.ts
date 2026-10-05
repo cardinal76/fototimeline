@@ -5,7 +5,10 @@ import { Foto, Ricordo } from './modelli';
 
 const CHIAVE = 'fototimeline.ricordi-chiusi';
 
-/** "Accadde oggi": in cima alla timeline, le foto di oggi negli anni passati. Si chiude per la giornata. */
+/**
+ * "Accadde oggi": in cima alla timeline, le foto di oggi negli anni passati. Si chiude per la giornata.
+ * Con `?ricordi=oggi` (il link del messaggio su Telegram) si vede anche se chiuso.
+ */
 @Component({
   selector: 'app-ricordi',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -33,6 +36,14 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
             </div>
           }
         </div>
+      </section>
+    } @else if (richiesti() && caricati() && !ricordi().length) {
+      <section class="ricordi" aria-label="Accadde oggi">
+        <header>
+          <h2>Accadde oggi</h2>
+          <button type="button" class="chiudi" aria-label="Chiudi" (click)="richiesti.set(false)">✕</button>
+        </header>
+        <p class="vuoto">Oggi nessuna foto degli anni passati.</p>
       </section>
     }
   `,
@@ -88,6 +99,10 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
       overflow: hidden;
       background: var(--superficie-2);
     }
+    .vuoto {
+      margin: 0.4rem 0 0;
+      color: var(--testo-tenue);
+    }
     .striscia img {
       display: block;
       width: 96px;
@@ -102,10 +117,19 @@ export class Ricordi {
   readonly apri = output<Foto>();
 
   protected readonly ricordi = signal<Ricordo[]>([]);
-  protected readonly chiusi = signal(chiusiOggi());
+  protected readonly caricati = signal(false);
+  /** Aperti dal link di Telegram: si vedono anche se chiusi per oggi. */
+  protected readonly richiesti = signal(dalLink());
+  protected readonly chiusi = signal(!this.richiesti() && chiusiOggi());
 
   constructor() {
-    this.api.ricordi().subscribe({ next: (r) => this.ricordi.set(r), error: () => {} });
+    this.api.ricordi().subscribe({
+      next: (r) => {
+        this.ricordi.set(r);
+        this.caricati.set(true);
+      },
+      error: () => {},
+    });
   }
 
   protected chiudi(): void {
@@ -116,6 +140,17 @@ export class Ricordi {
       // senza localStorage si richiude solo per questa visita
     }
   }
+}
+
+/** True se l'indirizzo ha `?ricordi`; lo toglie, così un ricaricamento non lo riapre. */
+function dalLink(): boolean {
+  const url = new URL(location.href);
+  if (!url.searchParams.has('ricordi')) {
+    return false;
+  }
+  url.searchParams.delete('ricordi');
+  history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+  return true;
 }
 
 function oggi(): string {

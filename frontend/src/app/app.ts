@@ -15,7 +15,18 @@ import { firstValueFrom } from 'rxjs';
 import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Condivisione, ElencoTelefoni, Foto, ModificaTelefono, StatoSalute, StatoTelefono, Utente } from './modelli';
+import {
+  Cartella,
+  Condivisione,
+  ElencoTelefoni,
+  Foto,
+  ImpostazioniRicordiTelegram,
+  ModificaTelefono,
+  RicordiTelegram,
+  StatoSalute,
+  StatoTelefono,
+  Utente,
+} from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
@@ -78,6 +89,11 @@ export class App {
   protected readonly dialogoSalute = signal(false);
   protected readonly controlloSalute = signal(false);
   protected readonly provaInCorso = signal(false);
+  /** "Ricordi su Telegram", nel dialogo della salute. */
+  protected readonly ricordiTelegram = signal<RicordiTelegram | null>(null);
+  protected moduloRicordi: ImpostazioniRicordiTelegram = { attivo: true, ora: '08:00', foto: 6, nessunRicordo: false };
+  protected readonly salvandoRicordi = signal(false);
+  protected readonly provaRicordiInCorso = signal(false);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -577,6 +593,37 @@ export class App {
   protected apriSalute(): void {
     this.dialogoSalute.set(true);
     void this.aggiornaSalute();
+    this.api.ricordiTelegram().subscribe({ next: (r) => this.mostraRicordi(r), error: () => this.ricordiTelegram.set(null) });
+  }
+
+  private mostraRicordi(r: RicordiTelegram): void {
+    this.ricordiTelegram.set(r);
+    this.moduloRicordi = { attivo: r.attivo, ora: r.ora, foto: r.foto, nessunRicordo: r.nessunRicordo };
+  }
+
+  protected async salvaRicordi(): Promise<void> {
+    this.salvandoRicordi.set(true);
+    try {
+      this.mostraRicordi(await firstValueFrom(this.api.salvaRicordiTelegram(this.moduloRicordi)));
+      this.galleria.avvisa('Ricordi su Telegram salvati');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Impostazioni dei ricordi non salvate');
+    } finally {
+      this.salvandoRicordi.set(false);
+    }
+  }
+
+  protected async provaRicordi(): Promise<void> {
+    this.provaRicordiInCorso.set(true);
+    try {
+      const esito = await firstValueFrom(this.api.provaRicordiTelegram());
+      this.galleria.avvisa(esito.messaggio);
+      this.api.ricordiTelegram().subscribe({ next: (r) => this.ricordiTelegram.set(r), error: () => {} });
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Ricordi non mandati');
+    } finally {
+      this.provaRicordiInCorso.set(false);
+    }
   }
 
   protected async aggiornaSalute(): Promise<void> {

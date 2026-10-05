@@ -409,7 +409,8 @@ progress {
   justify-content: flex-end;
   gap: 0.5rem;
 }
-.dialogo.telefoni {
+.dialogo.telefoni,
+.dialogo.salute {
   max-height: 90vh;
   overflow-y: auto;
 }
