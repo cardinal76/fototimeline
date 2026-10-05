@@ -201,10 +201,17 @@ in fasi separate, ognuna da rilanciare finché non finisce bene:
 
 | Fase | Cosa fa |
 |---|---|
+| `anteprima` | non copia niente: quante foto, video e zip ci sono in ogni cartella di `RADICE`, per scegliere cosa escludere (`ESCLUDI`). |
 | `raccogli` | cerca foto e video sotto `RADICE`, in tutte le sottocartelle e dentro gli zip, e li mette in `~/foto-da-pcloud/ordinate/AAAA/MM/GG` (EXIF, poi data del video, poi data del file). Le copie identiche entrano una volta. |
 | `carica` | copia `ordinate/` in `lifetime:FotoTimeline` e controlla che ci sia tutto. Poi nell'app: **Indicizza archivio**. |
 | `archivia` | su pCloud, in `ARCHIVIO/AAAA/AAAA-MM.zip`: uno zip per mese, controllato dopo la copia. |
 | `pulisci` | solo dopo `GIORNI` (7) giorni da carica e archivia, e dopo aver scritto `CANCELLA`: toglie da pCloud gli originali copiati e le cartelle rimaste vuote. |
+
+Per lo script una scansione in JPG è una foto: le cartelle di documenti vanno
+escluse con `ESCLUDI` (relative a `RADICE`, separate da `:`). Si saltano sempre
+l'archivio, `Crypto Folder` e le cartelle di sistema. Pulisci toglie solo le
+cartelle svuotate da lui, mai le radici né, con tutto P: come radice, le
+cartelle in cima (Automatic Upload, My Pictures, ...).
 
 Gli zip con dentro anche altro (documenti, ...) e i file non letti restano su
 pCloud, elencati in `~/foto-da-pcloud/da-controllare.txt`. `stato` dice a che
@@ -213,7 +220,9 @@ punto è. Sul PC serve spazio quanto tutte le foto, finché non si pulisce.
 ```bash
 sudo apt install -y unzip zip libimage-exiftool-perl rclone   # rclone con il remote lifetime:
 sudo mount -t drvfs P: /mnt/p
-RADICE='/mnt/p/Foto' ARCHIVIO='/mnt/p/Archivio foto' deploy/foto-da-pcloud.sh raccogli
+RADICE='/mnt/p' ARCHIVIO='/mnt/p/Archivio foto' deploy/foto-da-pcloud.sh anteprima
+ESCLUDI='TASSE:banche:avvocato' deploy/foto-da-pcloud.sh anteprima   # finché torna
+deploy/foto-da-pcloud.sh raccogli
 deploy/foto-da-pcloud.sh carica
 deploy/foto-da-pcloud.sh archivia
 deploy/foto-da-pcloud.sh pulisci      # dopo 7 giorni

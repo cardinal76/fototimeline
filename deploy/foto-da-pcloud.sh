@@ -3,6 +3,8 @@
 # Gira sul PC (WSL), con pCloud Drive su P: (sudo mount -t drvfs P: /mnt/p) e rclone
 # con il remote "lifetime:" (WebDAV di LifetimeCloud).
 #
+#   foto-da-pcloud.sh anteprima  senza copiare niente: quante foto, video e zip ci sono
+#                                in ogni cartella di RADICE, per scegliere cosa ESCLUDERE
 #   foto-da-pcloud.sh raccogli   cerca foto e video sotto RADICE, anche dentro gli zip,
 #                                e li mette in ordine in LAVORO/ordinate/AAAA/MM/GG
 #   foto-da-pcloud.sh carica     ordinate/ -> lifetime:FotoTimeline, poi controlla
@@ -12,7 +14,14 @@
 #   foto-da-pcloud.sh stato      a che punto è
 #
 # La prima volta (poi si ricordano in LAVORO/impostazioni):
-#   RADICE='/mnt/p/Foto' ARCHIVIO='/mnt/p/Archivio foto' foto-da-pcloud.sh raccogli
+#   RADICE='/mnt/p' ARCHIVIO='/mnt/p/Archivio foto' foto-da-pcloud.sh anteprima
+#   ESCLUDI='TASSE:banche:avvocato' foto-da-pcloud.sh anteprima     # finché torna
+#   foto-da-pcloud.sh raccogli
+# ESCLUDI: cartelle da saltare, relative a RADICE e separate da ":" (le scansioni
+# in JPG sono foto per lo script: le cartelle di documenti vanno escluse). Si
+# saltano sempre ARCHIVIO, "Crypto Folder" e le cartelle di sistema di Windows.
+# Più radici: un raccogli per radice, prima di carica; i doppioni tra una e
+# l'altra entrano una volta sola.
 #
 # Ogni fase si può rilanciare: riprende da dove era arrivata. Pulisci cancella solo
 # gli originali elencati in LAVORO/fonti.tsv come copiati per intero; gli zip con
@@ -26,14 +35,19 @@ FASE="${1:-stato}"
 LAVORO="${LAVORO:-$HOME/foto-da-pcloud}"
 IMPOSTAZIONI="$LAVORO/impostazioni"
 mkdir -p "$LAVORO"
+# Quello dato sulla riga di comando vale più di quello ricordato.
+DATI_RADICE="${RADICE:-}" DATI_ARCHIVIO="${ARCHIVIO:-}" DATI_DESTINAZIONE="${DESTINAZIONE:-}" DATI_GIORNI="${GIORNI:-}"
+DATI_ESCLUDI="${ESCLUDI-__nessuno__}"
 if [ -f "$IMPOSTAZIONI" ]; then
     # shellcheck disable=SC1090
     . "$IMPOSTAZIONI"
 fi
-RADICE="${RADICE:-}"
-ARCHIVIO="${ARCHIVIO:-}"
-DESTINAZIONE="${DESTINAZIONE:-lifetime:FotoTimeline}"
-GIORNI="${GIORNI:-7}"
+RADICE="${DATI_RADICE:-${RADICE:-}}"
+ARCHIVIO="${DATI_ARCHIVIO:-${ARCHIVIO:-}}"
+DESTINAZIONE="${DATI_DESTINAZIONE:-${DESTINAZIONE:-lifetime:FotoTimeline}}"
+GIORNI="${DATI_GIORNI:-${GIORNI:-7}}"
+[ "$DATI_ESCLUDI" != __nessuno__ ] && ESCLUDI="$DATI_ESCLUDI"
+ESCLUDI="${ESCLUDI:-}"
 RCLONE="${RCLONE:-rclone}"
 export TZ="${TZ:-Europe/Rome}"
 
@@ -43,6 +57,7 @@ MANIFEST="$LAVORO/manifest.tsv"          # fonte \t file nello zip (o vuoto) \t 
 FONTI="$LAVORO/fonti.tsv"                # file|zip \t fonte \t si|no (si = si può cancellare)
 DA_CONTROLLARE="$LAVORO/da-controllare.txt"
 ARCHIVIATI="$LAVORO/archiviati.tsv"      # AAAA/MM \t zip su pCloud
+RADICI="$LAVORO/radici.txt"              # le cartelle raccolte, una per riga
 TMP="$LAVORO/tmp"
 ESTENSIONI=(jpg jpeg png gif bmp webp heic heif mp4 m4v mov)
 
@@ -54,6 +69,20 @@ richiede() {
 }
 rc() { "$RCLONE" "$@"; }
 data_di() { date -d "@$(cat "$1")" '+%d/%m/%Y %H:%M'; }
+
+# Il find delle radici: salta l'archivio, le cartelle escluse e quelle di sistema.
+trova() {
+    local radice="$1"; shift
+    local -a salta=(-path "$ARCHIVIO" -o -name 'Crypto Folder' -o -name 'System Volume Information'
+        -o -name '$RECYCLE.BIN' -o -name '.Trash*' -o -name '.pcloud*')
+    local x
+    local IFS=:
+    for x in $ESCLUDI; do
+        [ -n "$x" ] && salta+=(-o -path "$radice/${x%/}")
+    done
+    unset IFS
+    find "$radice" \( "${salta[@]}" \) -prune -o "$@" 2>/dev/null
+}
 
 estensioni_find=()
 for e in "${ESTENSIONI[@]}"; do estensioni_find+=(-o -iname "*.$e"); done
@@ -104,14 +133,63 @@ metti_in_ordinate() {
     done < <(find "$giro" -type f -print0 | sort -z)
 }
 
+salva_impostazioni() {
+    printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nDESTINAZIONE=%q\nGIORNI=%q\n' \
+        "$RADICE" "$ARCHIVIO" "$ESCLUDI" "$DESTINAZIONE" "$GIORNI" > "$IMPOSTAZIONI"
+}
+
+anteprima() {
+    [ -n "$RADICE" ] || errore "manca RADICE: RADICE='/mnt/p' ARCHIVIO='/mnt/p/Archivio foto' $0 anteprima"
+    [ -n "$ARCHIVIO" ] || errore "manca ARCHIVIO, la cartella di pCloud per gli zip ordinati"
+    [ "$RADICE" != / ] && RADICE="${RADICE%/}"
+    ARCHIVIO="${ARCHIVIO%/}"
+    [ -d "$RADICE" ] || errore "$RADICE non c'è (pCloud montato? sudo mount -t drvfs P: /mnt/p)"
+    salva_impostazioni
+    echo "Cerco in $RADICE (può volerci qualche minuto)…"
+    echo "Salto: ${ARCHIVIO#"$RADICE"/}, Crypto Folder, cartelle di sistema${ESCLUDI:+, $ESCLUDI}"
+    local f rel prima
+    local -A foto video zip
+    while IFS= read -r -d '' f; do
+        rel="${f#"$RADICE"/}"
+        if [[ "$rel" == */* ]]; then prima="${rel%%/*}"; else prima="(file in $RADICE)"; fi
+        case "${f,,}" in
+            *.zip) zip[$prima]=$(( ${zip[$prima]:-0} + 1 )) ;;
+            *.mp4|*.m4v|*.mov) video[$prima]=$(( ${video[$prima]:-0} + 1 )) ;;
+            *) foto[$prima]=$(( ${foto[$prima]:-0} + 1 )) ;;
+        esac
+    done < <(trova "$RADICE" -type f \( -iname '*.zip' "${estensioni_find[@]}" \) -print0)
+    local -A tutte
+    for prima in "${!foto[@]}" "${!video[@]}" "${!zip[@]}"; do tutte[$prima]=1; done
+    printf '%8s %8s %6s  %s\n' foto video zip cartella
+    local tf=0 tv=0 tz=0
+    while IFS= read -r prima; do
+        [ -z "$prima" ] && continue
+        printf '%8s %8s %6s  %s\n' "${foto[$prima]:-0}" "${video[$prima]:-0}" "${zip[$prima]:-0}" "$prima"
+        tf=$((tf + ${foto[$prima]:-0})); tv=$((tv + ${video[$prima]:-0})); tz=$((tz + ${zip[$prima]:-0}))
+    done < <(printf '%s\n' "${!tutte[@]}" | sort)
+    printf '%8s %8s %6s  %s\n' "$tf" "$tv" "$tz" "TOTALE"
+    date +%s > "$LAVORO/anteprima.ok"
+    echo
+    echo "Le cartelle di documenti (scansioni, ricevute in JPG) vanno escluse, per esempio:"
+    echo "  ESCLUDI='TASSE:banche:avvocato' $0 anteprima"
+    echo "Per vedere cosa c'è in una cartella:  find '$RADICE/NOME' -iname '*.jpg' | head"
+    echo "Quando torna:  $0 raccogli"
+}
+
 raccogli() {
     richiede exiftool unzip sha256sum
-    [ -n "$RADICE" ] || errore "manca RADICE: RADICE='/mnt/p/Foto' ARCHIVIO='/mnt/p/Archivio foto' $0 raccogli"
+    [ -n "$RADICE" ] || errore "manca RADICE: prima $0 anteprima"
     [ -n "$ARCHIVIO" ] || errore "manca ARCHIVIO, la cartella di pCloud per gli zip ordinati"
-    RADICE="${RADICE%/}"; ARCHIVIO="${ARCHIVIO%/}"
+    [ "$RADICE" != / ] && RADICE="${RADICE%/}"
+    ARCHIVIO="${ARCHIVIO%/}"
     [ -d "$RADICE" ] || errore "$RADICE non c'è (pCloud montato? sudo mount -t drvfs P: /mnt/p)"
+    if [ ! -f "$LAVORO/anteprima.ok" ]; then
+        errore "prima: $0 anteprima (per vedere cosa prenderebbe ed escludere le cartelle di documenti)"
+    fi
     [ -f "$LAVORO/fase-archivia.ok" ] && errore "questo giro è già archiviato: per uno nuovo usa un altro LAVORO=..."
-    printf 'RADICE=%q\nARCHIVIO=%q\nDESTINAZIONE=%q\nGIORNI=%q\n' "$RADICE" "$ARCHIVIO" "$DESTINAZIONE" "$GIORNI" > "$IMPOSTAZIONI"
+    salva_impostazioni
+    touch "$RADICI"
+    grep -Fxq -- "$RADICE" "$RADICI" || echo "$RADICE" >> "$RADICI"
     rm -f "$LAVORO/fase-carica.ok"
     mkdir -p "$ORDINATE"
     touch "$MANIFEST" "$FONTI" "$IMPRONTE" "$DA_CONTROLLARE"
@@ -127,8 +205,7 @@ raccogli() {
             *.zip) zip+=("$f") ;;
             *) sciolti+=("$f") ;;
         esac
-    done < <(find "$RADICE" -path "$ARCHIVIO" -prune -o -type f \
-        \( -iname '*.zip' "${estensioni_find[@]}" \) -print0 | sort -z)
+    done < <(trova "$RADICE" -type f \( -iname '*.zip' "${estensioni_find[@]}" \) -print0 | sort -z)
     echo "${#sciolti[@]} foto e video sciolti e ${#zip[@]} zip da fare"
 
     # File sciolti, a gruppi per cartella.
@@ -304,13 +381,23 @@ pulisci() {
     [ "$risposta" = CANCELLA ] || { echo "Non ho cancellato niente."; exit 0; }
     local f
     for f in "${via[@]}"; do rm -f -- "$f"; done
-    # Le cartelle rimaste vuote, dal fondo: a ogni giro se ne libera un livello.
-    local vuote
-    for _ in $(seq 1 50); do
-        vuote=$(find "$RADICE" -mindepth 1 -path "$ARCHIVIO" -prune -o -type d -empty -print 2>/dev/null | wc -l)
-        [ "$vuote" -eq 0 ] && break
-        find "$RADICE" -mindepth 1 -path "$ARCHIVIO" -prune -o -type d -empty -print0 2>/dev/null \
-            | xargs -0 -r rmdir 2>/dev/null || true
+    # Solo le cartelle svuotate da qui, risalendo; mai una radice, e se la radice è
+    # tutto pCloud nemmeno le cartelle in cima (Automatic Upload, My Pictures, ...).
+    local c radice in_cima
+    for f in "${via[@]}"; do
+        c="$(dirname "$f")"
+        while :; do
+            in_cima=""
+            while IFS= read -r radice; do
+                if [ "$c" = "$radice" ] || [ "$c" = "/" ] || [ "$c" = "." ] \
+                    || { mountpoint -q "$radice" 2>/dev/null && [ "$(dirname "$c")" = "$radice" ]; }; then
+                    in_cima=1
+                fi
+            done < "$RADICI"
+            [ -n "$in_cima" ] && break
+            rmdir "$c" 2>/dev/null || break
+            c="$(dirname "$c")"
+        done
     done
     date +%s > "$LAVORO/fase-pulisci.ok"
     echo "Fatto. La copia di lavoro sul PC non serve più: rm -rf '$ORDINATE'"
@@ -318,7 +405,11 @@ pulisci() {
 
 stato() {
     echo "Lavoro:      $LAVORO"
-    echo "Radice:      ${RADICE:-(non ancora impostata)}"
+    if [ -s "$RADICI" ]; then
+        sed '1s/^/Radici:      /; 2,$s/^/             /' "$RADICI"
+    else
+        echo "Radici:      (non ancora impostate)"
+    fi
     echo "Archivio:    ${ARCHIVIO:-(non ancora impostato)}"
     echo "Destinaz.:   $DESTINAZIONE"
     if [ -f "$FONTI" ]; then
@@ -333,10 +424,11 @@ stato() {
 }
 
 case "$FASE" in
+    anteprima) anteprima ;;
     raccogli) raccogli ;;
     carica) carica ;;
     archivia) archivia ;;
     pulisci) pulisci ;;
     stato) stato ;;
-    *) errore "fase sconosciuta: $FASE (raccogli, carica, archivia, pulisci, stato)" ;;
+    *) errore "fase sconosciuta: $FASE (anteprima, raccogli, carica, archivia, pulisci, stato)" ;;
 esac
