@@ -51,3 +51,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  visione:
+    name: Visione (pytest)
+    runs-on: [self-hosted, fototimeline-build]
+    defaults:
+      run:
+        working-directory: visione
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Senza torch né modello: i test usano un modello finto.
+      - run: python -m venv .venv && .venv/bin/pip install -q -r requirements-test.txt
+      - run: .venv/bin/python -m pytest -q

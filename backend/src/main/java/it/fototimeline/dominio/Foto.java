@@ -55,6 +55,13 @@ public class Foto {
     /** Durata del video, in secondi. */
     private Double durata;
 
+    /**
+     * Quando la miniatura è entrata nell'indice della ricerca per contenuto
+     * (servizio visione); null = non ancora, la prende "Indicizza contenuto".
+     */
+    @Indexed
+    private Instant contenutoIndicizzato;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -123,4 +130,7 @@ public class Foto {
 
     public Double getDurata() { return durata; }
     public void setDurata(Double durata) { this.durata = durata; }
+
+    public Instant getContenutoIndicizzato() { return contenutoIndicizzato; }
+    public void setContenutoIndicizzato(Instant contenutoIndicizzato) { this.contenutoIndicizzato = contenutoIndicizzato; }
 }

@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -14,7 +14,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, ModificaTelefono, StatoTelefono } from './modelli';
+import { Cartella, Foto, ModificaTelefono, StatoContenuto, StatoTelefono } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
@@ -28,7 +28,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Mappa, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FormsModule, Mappa, NgTemplateOutlet, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -157,8 +157,19 @@ export class App {
 
   protected azzera(): void {
     this.ricerca = '';
-    this.galleria.filtro.set({});
+    // L'interruttore "per contenuto" è un modo di cercare, non un filtro: resta com'è.
+    this.galleria.filtro.set({ contenuto: this.galleria.filtro().contenuto });
     this.galleria.ricarica();
+  }
+
+  protected segnaposto(): string {
+    return this.galleria.filtro().contenuto ? 'Cosa c’è nella foto: spiaggia, cane, neve…' : 'Cerca titolo, tag, album, file…';
+  }
+
+  /** Da testi a contenuto e ritorno, con quello che c'è già scritto nel campo. */
+  protected commutaContenuto(): void {
+    clearTimeout(this.ricercaTimer);
+    this.galleria.imposta({ contenuto: !this.galleria.filtro().contenuto || undefined, q: this.ricerca.trim() || undefined });
   }
 
   protected filtriAttivi(): boolean {
@@ -300,6 +311,45 @@ export class App {
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Indicizzazione non riuscita');
     }
+  }
+
+  // ------------------------------------------------------------ ricerca per contenuto
+
+  protected async indicizzaContenuto(c: StatoContenuto): Promise<void> {
+    const daCapo = c.mancanti === 0;
+    const domanda = daCapo
+      ? `Tutte le ${c.foto} foto sono già nell'indice. Rifarlo da capo? Serve solo se l'indice di visione è andato perso.`
+      : `Manda ${c.mancanti} foto alla ricerca per contenuto. Con tante foto ci vogliono ore; ` +
+        'va avanti in sottofondo e, se il server riparte, riprende da dove era arrivato.';
+    if (!confirm(domanda)) {
+      return;
+    }
+    try {
+      await this.galleria.avviaIndiceContenuto(daCapo);
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Indicizzazione del contenuto non partita');
+    }
+  }
+
+  protected percentualeContenuto(): number {
+    const l = this.galleria.contenuto()?.lavoro;
+    return l && l.daFare ? Math.round(((l.fatte + l.errori) / l.daFare) * 100) : 0;
+  }
+
+  protected titoloContenuto(c: StatoContenuto): string {
+    const righe = [`Ricerca per contenuto: ${c.indicizzate} foto su ${c.foto} nell'indice`];
+    if (c.nellIndice === undefined || c.nellIndice === null) {
+      righe.push('Il servizio visione non risponde');
+    }
+    const l = c.lavoro;
+    if (l?.stato === 'IN_CORSO') {
+      righe.push(`In corso: ${l.fatte} su ${l.daFare}` + (l.errori ? `, ${l.errori} errori` : ''));
+    } else if (l?.stato === 'FALLITO') {
+      righe.push(`Ultimo giro non riuscito: ${l.errore ?? ''}`);
+    } else if (l?.errori) {
+      righe.push(`Ultimo giro: ${l.errori} foto non indicizzate (${l.messaggi[0] ?? ''})`);
+    }
+    return righe.join('\n');
   }
 
   protected percentualeImportazione(): number {

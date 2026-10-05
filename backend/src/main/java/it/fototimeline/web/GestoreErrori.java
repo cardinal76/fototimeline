@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import it.fototimeline.cloud.ArchivioNonDisponibile;
 import it.fototimeline.cloud.RcloneNonRiesce;
+import it.fototimeline.contenuto.VisioneNonRisponde;
 
 @RestControllerAdvice
 public class GestoreErrori {
@@ -18,6 +19,11 @@ public class GestoreErrori {
 
     @ExceptionHandler(RcloneNonRiesce.class)
     public ProblemDetail rclone(RcloneNonRiesce e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, e.getMessage());
+    }
+
+    @ExceptionHandler(VisioneNonRisponde.class)
+    public ProblemDetail visione(VisioneNonRisponde e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
 

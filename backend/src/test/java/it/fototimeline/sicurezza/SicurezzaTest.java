@@ -83,6 +83,25 @@ class SicurezzaTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"attiva\":false}"))
                 .andExpect(status().isForbidden());
         mvc.perform(post("/api/telefono/sincronizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        // Ricerca per contenuto: lo stato lo vede, "Indicizza contenuto" no.
+        mvc.perform(get("/api/contenuto").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.attiva").value(false));
+        mvc.perform(post("/api/contenuto/indicizza").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/contenuto/annulla").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void senzaVisioneLaRicercaPerContenutoNonCe() throws Exception {
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        mvc.perform(get("/api/contenuto")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/foto/cerca-contenuto").param("q", "cane")).andExpect(status().isUnauthorized());
+        // Qui non c'è fototimeline.visione.url: la funzione è spenta, l'app va come prima.
+        mvc.perform(get("/api/foto/cerca-contenuto").param("q", "cane").with(oidcLogin()))
+                .andExpect(status().isConflict());
+        mvc.perform(post("/api/contenuto/indicizza").with(admin)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/contenuto/indicizza").with(admin).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(post("/api/contenuto/annulla").with(admin).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/foto").param("q", "cane").with(oidcLogin())).andExpect(status().isOk());
     }
 
     @Test

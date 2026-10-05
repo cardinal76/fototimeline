@@ -12,11 +12,22 @@
     <input
       type="search"
       class="cerca"
-      placeholder="Cerca titolo, tag, album, file…"
+      [placeholder]="segnaposto()"
       aria-label="Cerca"
       [(ngModel)]="ricerca"
       (ngModelChange)="cerca()"
     />
+    @if (galleria.contenuto()?.attiva) {
+      <button
+        type="button"
+        class="interruttore"
+        [attr.aria-pressed]="!!galleria.filtro().contenuto"
+        title="Cerca in quello che si vede nelle foto (spiaggia, cane, neve…), non nei titoli e nei tag"
+        (click)="commutaContenuto()"
+      >
+        Per contenuto
+      </button>
+    }
     <select aria-label="Tag" [ngModel]="galleria.filtro().tag ?? ''" (ngModelChange)="scegliTag($event)">
       <option value="">Tutti i tag</option>
       @for (t of galleria.tag(); track t) {
@@ -77,6 +88,27 @@
           Indicizza archivio
         </button>
       }
+      @if (galleria.contenuto(); as c) {
+        @if (c.attiva) {
+          @if (c.lavoro?.stato === 'IN_CORSO') {
+            <span class="lavoro-contenuto" role="status" [title]="titoloContenuto(c)">
+              Contenuto {{ percentualeContenuto() }}%
+              <progress [value]="percentualeContenuto()" max="100"></progress>
+              <button type="button" class="link" (click)="galleria.annullaIndiceContenuto()">Annulla</button>
+            </span>
+          } @else {
+            <button
+              type="button"
+              class="link"
+              [class.errore]="c.lavoro?.stato === 'FALLITO'"
+              [title]="titoloContenuto(c)"
+              (click)="indicizzaContenuto(c)"
+            >
+              Indicizza contenuto{{ c.mancanti ? ' (' + c.mancanti + ')' : '' }}
+            </button>
+          }
+        }
+      }
       <button type="button" class="link" title="Foto nuove dal telefono, da pCloud" (click)="apriTelefono()">Telefono</button>
     }
     <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
@@ -128,59 +160,88 @@
       </p>
     }
 
-    @for (g of galleria.giorni(); track g.giorno) {
-      @if (g.nuovoMese) {
-        <h2 class="mese">{{ g.giorno | date: 'MMMM y' }}</h2>
-      }
-      <section class="giorno" [attr.data-giorno]="g.giorno">
+    <!-- Un tassello della griglia: lo usano i giorni della timeline e i risultati per contenuto. -->
+    <ng-template #tassello let-f>
+      <button
+        type="button"
+        class="tassello"
+        [class.scelto]="galleria.selezionate().has(f.id)"
+        [style.flex-grow]="rapporto(f)"
+        [style.flex-basis.px]="base(f)"
+        [attr.aria-pressed]="selezione() ? galleria.selezionate().has(f.id) : null"
+        [attr.aria-label]="f.titolo || f.nomeOriginale"
+        (click)="clic(f, $event)"
+      >
+        <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" loading="lazy" decoding="async" alt="" />
+        @if (f.preferita) {
+          <span class="stella" aria-label="Preferita">★</span>
+        }
+        @if (f.video) {
+          <span class="video" aria-label="Video">▶ {{ durata(f.durata) }}</span>
+        }
+        @if (selezione()) {
+          <span class="spunta" aria-hidden="true">✓</span>
+        }
+        @if (f.titolo) {
+          <span class="didascalia">{{ f.titolo }}</span>
+        }
+      </button>
+    </ng-template>
+
+    @if (galleria.perContenuto()) {
+      <section class="giorno">
         <h3>
-          <span>{{ g.giorno | date: 'EEEE d MMMM' }}</span>
-          <small>{{ g.foto.length }} foto</small>
-          @if (selezione()) {
-            <button type="button" class="link" (click)="galleria.selezionaGiorno(g)">seleziona giorno</button>
-          }
+          <span>Foto con «{{ galleria.filtro().q }}»</span>
+          <small>{{ galleria.totale() }} trovate, dalla più somigliante</small>
         </h3>
-        <div class="griglia">
-          @for (f of g.foto; track f.id) {
-            <button
-              type="button"
-              class="tassello"
-              [class.scelto]="galleria.selezionate().has(f.id)"
-              [style.flex-grow]="rapporto(f)"
-              [style.flex-basis.px]="base(f)"
-              [attr.aria-pressed]="selezione() ? galleria.selezionate().has(f.id) : null"
-              [attr.aria-label]="f.titolo || f.nomeOriginale"
-              (click)="clic(f, $event)"
-            >
-              <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" loading="lazy" decoding="async" alt="" />
-              @if (f.preferita) {
-                <span class="stella" aria-label="Preferita">★</span>
-              }
-              @if (f.video) {
-                <span class="video" aria-label="Video">▶ {{ durata(f.durata) }}</span>
-              }
-              @if (selezione()) {
-                <span class="spunta" aria-hidden="true">✓</span>
-              }
-              @if (f.titolo) {
-                <span class="didascalia">{{ f.titolo }}</span>
-              }
-            </button>
-          }
-        </div>
+        @if (galleria.foto().length) {
+          <div class="griglia">
+            @for (f of galleria.foto(); track f.id) {
+              <ng-container *ngTemplateOutlet="tassello; context: { $implicit: f }" />
+            }
+          </div>
+        } @else if (!galleria.inCaricamento()) {
+          <div class="vuoto">
+            <p>Nessuna foto somiglia a «{{ galleria.filtro().q }}».</p>
+            <p class="tenue">Prova con altre parole, per esempio «bambini al mare» invece di «vacanze».</p>
+          </div>
+        }
+        @if (galleria.contenuto()?.mancanti; as mancanti) {
+          <p class="tenue">{{ mancanti }} foto non sono ancora nell'indice della ricerca per contenuto.</p>
+        }
       </section>
-    } @empty {
-      @if (!galleria.inCaricamento()) {
-        <div class="vuoto">
-          @if (filtriAttivi()) {
-            <p>Nessuna foto con questi filtri.</p>
-            <button type="button" (click)="azzera()">Azzera filtri</button>
-          } @else {
-            <p class="grande">L'archivio è vuoto</p>
-            <p>Trascina qui foto e video, usa <b>Carica foto</b> o importa una cartella.</p>
-            <p class="tenue">La data di scatto viene dai dati EXIF: le foto si mettono in ordine da sole.</p>
-          }
-        </div>
+    } @else {
+      @for (g of galleria.giorni(); track g.giorno) {
+        @if (g.nuovoMese) {
+          <h2 class="mese">{{ g.giorno | date: 'MMMM y' }}</h2>
+        }
+        <section class="giorno" [attr.data-giorno]="g.giorno">
+          <h3>
+            <span>{{ g.giorno | date: 'EEEE d MMMM' }}</span>
+            <small>{{ g.foto.length }} foto</small>
+            @if (selezione()) {
+              <button type="button" class="link" (click)="galleria.selezionaGiorno(g)">seleziona giorno</button>
+            }
+          </h3>
+          <div class="griglia">
+            @for (f of g.foto; track f.id) {
+              <ng-container *ngTemplateOutlet="tassello; context: { $implicit: f }" />
+            }
+          </div>
+        </section>
+      } @empty {
+        @if (!galleria.inCaricamento()) {
+          <div class="vuoto">
+            @if (filtriAttivi()) {
+              <p>Nessuna foto con questi filtri.</p>
+              <button type="button" (click)="azzera()">Azzera filtri</button>
+            } @else {
+              <p class="grande">L'archivio è vuoto</p>
+              <p>Trascina qui foto e video, usa <b>Carica foto</b> o importa una cartella.</p>
+              <p class="tenue">La data di scatto viene dai dati EXIF: le foto si mettono in ordine da sole.</p>
+            }
+          </div>
+        }
       }
     }
 
@@ -188,12 +249,12 @@
       @if (galleria.inCaricamento()) {
         <span class="rotella" aria-label="Caricamento"></span>
       } @else if (galleria.foto().length && !galleria.altre()) {
-        <span class="tenue">{{ galleria.totale() }} foto · fine della timeline</span>
+        <span class="tenue">{{ galleria.totale() }} foto · {{ galleria.perContenuto() ? 'fine dei risultati' : 'fine della timeline' }}</span>
       }
     </div>
   </main>
 
-  @if (vista() === 'timeline') {
+  @if (vista() === 'timeline' && !galleria.perContenuto()) {
     <app-timeline-nav class="laterale" [attivo]="meseAttivo()" />
   }
 </div>

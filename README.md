@@ -68,6 +68,12 @@ Il server: [DEPLOY.md](DEPLOY.md).
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
+- **Ricerca per contenuto** (sul server, col servizio `visione`): con
+  l'interruttore *Per contenuto* accanto al campo di ricerca si scrive cosa
+  c'è nella foto, in italiano ("spiaggia", "cane", "torta di compleanno",
+  "neve") e le foto arrivano dalla più somigliante, senza tag. CLIP
+  multilingue su CPU, tutto in casa (DEPLOY.md). Sul PC, senza `VISIONE_URL`,
+  l'interruttore non c'è.
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
@@ -137,6 +143,10 @@ java -jar target/fototimeline-1.0.0.jar
 | `RCLONE_RC_URL`         | (vuoto)                                   | API di rclone per montare il cloud; vuoto = disco locale |
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
+| `VISIONE_URL`           | (vuoto)                                   | Servizio visione (ricerca per contenuto); vuoto = spenta |
+| `VISIONE_SEGRETO`       | (vuoto)                                   | Segreto condiviso con visione (header `X-Visione-Segreto`) |
+| `FOTOTIMELINE_VISIONE_SOGLIA` | `0.24`                              | Somiglianza minima di un risultato per contenuto |
+| `FOTOTIMELINE_VISIONE_MARGINE` | `0.06`                             | Distacco massimo dalla foto più somigliante |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -166,6 +176,10 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | PUT    | `/api/telefono`              | `{ attiva, sorgente, intervalloOre, giorniPrimaDiCancellare }` (400 fuori misura; admin) |
 | POST   | `/api/telefono/sincronizza`  | Un giro subito, in sottofondo: 202, 409 se già in corso (admin) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
+| GET    | `/api/foto/cerca-contenuto`  | Ricerca per contenuto: `q` (cosa c'è nella foto), `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione`; foto dalla più somigliante (409 se la funzione è spenta, 502 se visione non risponde) |
+| GET    | `/api/contenuto`             | Ricerca per contenuto: `attiva`, foto, `indicizzate`, `mancanti`, `nellIndice`, ultimo lavoro |
+| POST   | `/api/contenuto/indicizza`   | "Indicizza contenuto" in sottofondo (`daCapo=true` per rifare tutto); 202, 409 se già in corso (admin) |
+| POST   | `/api/contenuto/annulla`     | Ferma "Indicizza contenuto" (admin)                        |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
@@ -184,7 +198,32 @@ cd backend && mvn test
 ```
 
 I test girano su un MongoDB embedded (flapdoodle): la prima volta scaricano
-il binario di MongoDB.
+il binario di MongoDB. Il servizio visione al posto suo è un mock.
+
+Il servizio visione (Python) ha i suoi test, con un modello finto (niente
+torch né pesi da scaricare):
+
+```bash
+cd visione
+python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt
+.venv/bin/python -m pytest -q
+```
+
+### API del servizio visione
+
+Solo sulla rete interna di Docker, tutte (tranne `/salute`) con l'header
+`X-Visione-Segreto`:
+
+| Metodo | Percorso | Cosa fa |
+|--------|----------|---------|
+| GET    | `/salute` | Per l'healthcheck: `{"stato":"ok","vettori":N}` |
+| POST   | `/clip/immagine` | JPEG (corpo grezzo o multipart `file`) → `{"vettore":[512 float normalizzati]}` |
+| POST   | `/clip/testo` | `{"testo":"cane"}` → vettore nello stesso spazio |
+| GET    | `/clip/indice` | Modello, dimensione e numero di vettori |
+| PUT    | `/clip/indice/{id}` | Aggiunge o sostituisce: dal JPEG (`image/jpeg`) o da `{"vettore":[...]}` |
+| POST   | `/clip/indice` | Più foto insieme: multipart, un `file` per foto con l'id come nome del file |
+| DELETE | `/clip/indice/{id}` | Toglie (404 se non c'era) |
+| GET    | `/clip/cerca` | `q`, `k` (≤ 2000), `soglia` → `{"risultati":[{"id","punteggio"}]}` dal più simile |
 
 ## CI su server2
 
@@ -213,6 +252,7 @@ serve uno suo, in una cartella sua. Una volta sola, su server2:
    sudo ./svc.sh install && sudo ./svc.sh start
    ```
 
-Java 21 e Node 22 li scaricano le azioni `setup-java` e `setup-node` nella
-cache del runner; non serve Docker. Finché il runner non è registrato e
+Java 21, Node 22 e Python 3.12 (test del servizio visione) li scaricano le
+azioni `setup-java`, `setup-node` e `setup-python` nella cache del runner; non
+serve Docker. Finché il runner non è registrato e
 acceso, i job restano in coda.

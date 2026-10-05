@@ -65,7 +65,7 @@ public class ConfigurazioneSicurezza {
             // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
             a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
                     .permitAll();
-            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**")
+            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**", "/api/contenuto/**")
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
             // La sincronizzazione del telefono, anche in lettura: dice dove carica il telefono.
             a.requestMatchers("/api/telefono", "/api/telefono/**").hasAuthority("ROLE_" + login.ruoloAdmin());

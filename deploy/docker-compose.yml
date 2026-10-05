@@ -2,7 +2,8 @@
 #   docker compose -p fototimeline -f deploy/docker-compose.yml --env-file ~/fototimeline/.env up -d --build
 #
 #   internet ─▶ caddy (HTTPS) ─▶ app ─┬─▶ mongo
-#                                     └─▶ rclone (API rc) ─▶ LifetimeCloud via WebDAV
+#                                     ├─▶ rclone (API rc) ─▶ LifetimeCloud via WebDAV
+#                                     └─▶ visione (CLIP: ricerca per contenuto, indice dei vettori)
 #
 # Le foto stanno nel cloud: il container rclone lo monta in $FOTOTIMELINE_DATI/cloud
 # quando un amministratore preme "Monta" nell'app, e lo smonta con "Smonta".
@@ -54,6 +55,7 @@ services:
     build:
       context: ..
     restart: unless-stopped
+    # visione no: senza, l'app parte lo stesso e la ricerca per contenuto risponde 502.
     depends_on: [mongo, rclone]
     environment:
       SPRING_PROFILES_ACTIVE: server
@@ -76,6 +78,8 @@ services:
       RCLONE_REMOTO: ${RCLONE_REMOTO:-lifetime:}
       RCLONE_PUNTO_MONTAGGIO: /cloud
       RCLONE_MONTA_ALL_AVVIO: ${RCLONE_MONTA_ALL_AVVIO:-false}
+      VISIONE_URL: http://visione:8000
+      VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
     volumes:
       # Miniature sul disco di server2: dal cloud la timeline sarebbe lenta.
       - miniature:/miniature
@@ -90,6 +94,31 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+
+  # Ricerca per contenuto: CLIP multilingue su CPU (visione/), solo sulla rete interna.
+  # I pesi del modello sono nell'immagine; l'indice dei vettori nel volume visione-dati.
+  visione:
+    build:
+      context: ../visione
+    restart: unless-stopped
+    environment:
+      VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
+      # Thread di torch: pochi, server2 fa anche le build della CI.
+      VISIONE_THREAD: ${VISIONE_THREAD:-2}
+    volumes:
+      - visione-dati:/dati
+    # Modello (~0,5 GB) + indice (~150 MB con 150.000 foto) + i picchi del calcolo.
+    mem_limit: 1536m
+    cpus: 2.0
+    # Peso CPU basso: con le build in corso il calcolo dei vettori aspetta (e nel container gira con nice).
+    cpu_shares: 256
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/salute', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
   caddy:
     image: caddy:2
@@ -110,5 +139,6 @@ volumes:
   mongo:
   miniature:
   rclone-cache:
+  visione-dati:
   caddy-dati:
   caddy-config:

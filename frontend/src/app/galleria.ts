@@ -3,7 +3,20 @@ import { HttpEventType } from '@angular/common/http';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
-import { Caricamento, CopiaBackup, Filtro, Foto, Giorno, Io, LavoroImportazione, Modifica, Operazione, StatoCloud, VoceMese } from './modelli';
+import {
+  Caricamento,
+  CopiaBackup,
+  Filtro,
+  Foto,
+  Giorno,
+  Io,
+  LavoroImportazione,
+  Modifica,
+  Operazione,
+  StatoCloud,
+  StatoContenuto,
+  VoceMese,
+} from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
 /** Le estensioni che il backend accetta (FotoService.TIPI). */
@@ -45,6 +58,10 @@ export class Galleria {
   readonly backupInCorso = signal(false);
   /** Importazione da seguire con la barra; null quando non ce n'è una da mostrare. */
   readonly importazione = signal<LavoroImportazione | null>(null);
+  /** Ricerca per contenuto: null finché non si sa, attiva=false se il servizio visione non c'è. */
+  readonly contenuto = signal<StatoContenuto | null>(null);
+  /** I risultati sono in ordine di somiglianza, non di data: niente giorni né timeline. */
+  readonly perContenuto = computed(() => !!(this.filtro().contenuto && this.filtro().q));
   /** Originali raggiungibili: sul PC sempre, sul server solo col cloud montato. */
   readonly archivioDisponibile = computed(() => {
     const c = this.cloud();
@@ -86,6 +103,7 @@ export class Galleria {
   private importazioneVista?: string;
   private richiesta?: Subscription;
   private avvisoTimer?: ReturnType<typeof setTimeout>;
+  private contenutoTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
     this.api.io().subscribe((io) => {
@@ -93,6 +111,7 @@ export class Galleria {
       if (io.admin) {
         this.aggiornaBackup();
       }
+      this.seguiContenuto();
     });
     this.aggiornaCloud();
     this.ricarica();
@@ -150,6 +169,31 @@ export class Galleria {
         this.importazioneTimer = setTimeout(() => this.seguiImportazione(), l?.stato === 'IN_CORSO' ? 1000 : 60000);
       },
       error: () => (this.importazioneTimer = setTimeout(() => this.seguiImportazione(), 60000)),
+    });
+  }
+
+  // ------------------------------------------------------------ ricerca per contenuto
+
+  async avviaIndiceContenuto(daCapo = false): Promise<void> {
+    await firstValueFrom(this.api.indicizzaContenuto(daCapo));
+    this.seguiContenuto();
+  }
+
+  annullaIndiceContenuto(): void {
+    this.api.annullaContenuto().subscribe(() => this.seguiContenuto());
+  }
+
+  /** Lo stato: agli admin ogni 3 secondi mentre "Indicizza contenuto" gira, ogni minuto altrimenti. */
+  private seguiContenuto(): void {
+    clearTimeout(this.contenutoTimer);
+    this.api.contenuto().subscribe({
+      next: (c) => {
+        this.contenuto.set(c);
+        if (c.attiva && this.io()?.admin) {
+          this.contenutoTimer = setTimeout(() => this.seguiContenuto(), c.lavoro?.stato === 'IN_CORSO' ? 3000 : 60000);
+        }
+      },
+      error: () => this.contenuto.set(null),
     });
   }
 
@@ -218,7 +262,10 @@ export class Galleria {
       return;
     }
     this.inCaricamento.set(true);
-    this.richiesta = this.api.cerca(this.filtro(), this.pagina, DIMENSIONE_PAGINA).subscribe({
+    const pagina = this.perContenuto()
+      ? this.api.cercaContenuto(this.filtro(), this.pagina, DIMENSIONE_PAGINA)
+      : this.api.cerca(this.filtro(), this.pagina, DIMENSIONE_PAGINA);
+    this.richiesta = pagina.subscribe({
       next: (p) => {
         this.foto.update((f) => [...f, ...p.foto]);
         this.totale.set(p.totale);
@@ -226,9 +273,13 @@ export class Galleria {
         this.pagina++;
         this.inCaricamento.set(false);
       },
-      error: () => {
+      error: (e: { status?: number; error?: { detail?: string } }) => {
         this.inCaricamento.set(false);
-        this.avvisa('Il server non risponde: è acceso?');
+        this.avvisa(
+          this.perContenuto() && e.status === 502
+            ? 'La ricerca per contenuto non risponde: riprova tra poco'
+            : (e.error?.detail ?? 'Il server non risponde: è acceso?'),
+        );
       },
     });
   }

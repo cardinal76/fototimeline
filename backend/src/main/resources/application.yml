@@ -56,6 +56,17 @@ fototimeline:
   # admin): ogni quanto controllare se è ora di un giro.
   telefono:
     controllo: PT5M
+  # Ricerca per contenuto ("spiaggia", "cane"): il servizio visione (CLIP),
+  # container a parte sul server. Vuoto = spenta: sul PC l'app va come prima.
+  visione:
+    url: ${VISIONE_URL:}
+    segreto: ${VISIONE_SEGRETO:}
+    # Somiglianza minima tra testo e foto, e distacco massimo dalla più simile.
+    soglia: ${FOTOTIMELINE_VISIONE_SOGLIA:0.24}
+    margine: ${FOTOTIMELINE_VISIONE_MARGINE:0.06}
+    massimo: 500
+    blocco: 16
+    attesa: PT20S
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

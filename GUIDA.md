@@ -188,6 +188,11 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
 - **Telefono**: la sincronizzazione da pCloud.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Per contenuto** (accanto al campo di ricerca): si scrive cosa c'è nella foto, "spiaggia",
+  "cane", "torta di compleanno", e si trovano le foto anche senza tag.
+- **Indicizza contenuto** (admin): la prima volta, dopo il trasloco, manda tutte le foto alla
+  ricerca per contenuto. Con 150.000 foto ci vogliono ore (anche una notte): va avanti da solo,
+  anche col cloud smontato, e se il server riparte riprende. Le foto nuove entrano da sole.
 
 Le modifiche all'app: pull request su `main`, poi il workflow **Rilascio** (Actions → Rilascio →
 Run workflow) la mette su server2.
@@ -208,3 +213,5 @@ Run workflow) la mette su server2.
 | pCloud `Invalid 'access_token' (2094)` | account europeo senza `hostname = eapi.pcloud.com` | rifare 3.1 dal PC |
 | "ARCHIVIO non può essere la radice" | `ARCHIVIO=/mnt/p` | una cartella nuova, es. `/mnt/p/Archivio foto` |
 | raccogli fermo | PC in sospensione o `P:` staccato | `p-up` e rilanciare: riprende |
+| "La ricerca per contenuto non risponde" | il container visione riparte o è fermo | `docker logs fototimeline-visione-1` su server2; si riprova dopo un minuto |
+| il rilascio dice "Manca VISIONE_SEGRETO" | `.env` di prima della ricerca per contenuto | aggiungere `VISIONE_SEGRETO=$(openssl rand -hex 32)` in `~/fototimeline/.env` |

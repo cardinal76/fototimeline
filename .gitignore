@@ -3,3 +3,7 @@ backend/target/
 backend/src/main/resources/static/
 frontend/node_modules/
 frontend/.angular/
+# Servizio visione: ambiente Python e cache dei test.
+visione/.venv/
+**/__pycache__/
+visione/.pytest_cache/

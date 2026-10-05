@@ -31,6 +31,7 @@ import javax.imageio.ImageIO;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -46,6 +47,8 @@ import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.repository.FotoRepository;
+import it.fototimeline.service.EventiFoto.FotoAggiunta;
+import it.fototimeline.service.EventiFoto.FotoEliminata;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
 import it.fototimeline.service.Risultati.Importazione;
@@ -90,15 +93,18 @@ public class FotoService {
     private final EstrattoreMetadati estrattore;
     private final StrumentiMedia media;
     private final Clock clock;
+    private final ApplicationEventPublisher eventi;
 
     public FotoService(FotoRepository repository, MongoTemplate mongo, ArchivioFile archivio,
-            EstrattoreMetadati estrattore, StrumentiMedia media, Optional<Clock> clock) {
+            EstrattoreMetadati estrattore, StrumentiMedia media, Optional<Clock> clock,
+            ApplicationEventPublisher eventi) {
         this.repository = repository;
         this.mongo = mongo;
         this.archivio = archivio;
         this.estrattore = estrattore;
         this.media = media;
         this.clock = clock.orElse(Clock.systemDefaultZone());
+        this.eventi = eventi;
     }
 
     // ---------------------------------------------------------------- ingresso
@@ -143,7 +149,9 @@ public class FotoService {
             foto.setPercorso(archivio.salvaOriginale(
                     nome, foto.getId(), letto.estensione(), foto.getScattataIl().toLocalDate(), file));
             anteprime(letto, file);
-            return new Caricamento(nome, Esito.CARICATA, repository.insert(foto), null);
+            Foto inserita = repository.insert(foto);
+            eventi.publishEvent(new FotoAggiunta(inserita.getId()));
+            return new Caricamento(nome, Esito.CARICATA, inserita, null);
         } catch (DuplicateKeyException e) {
             // Stesso file caricato in parallelo: ha vinto l'altro.
             archivio.elimina(foto.getId(), foto.getPercorso());
@@ -217,6 +225,8 @@ public class FotoService {
         } catch (RuntimeException e) {
             log.warn("Indicizzata ma non riesco a spostare {}: {}", percorso, e.getMessage());
         }
+        // Dopo il salvataggio dello spostamento, che altrimenti cancellerebbe il segno messo dalla ricerca per contenuto.
+        eventi.publishEvent(new FotoAggiunta(foto.getId()));
         return new Caricamento(nome, Esito.CARICATA, foto, null);
     }
 
@@ -602,13 +612,15 @@ public class FotoService {
         return repository.findById(id).map(foto -> {
             repository.delete(foto);
             archivio.elimina(foto.getId(), foto.getPercorso());
+            eventi.publishEvent(new FotoEliminata(foto.getId()));
             return true;
         }).orElse(false);
     }
 
     // ---------------------------------------------------------------- utilità
 
-    static Criteria criteri(FiltroFoto f) {
+    /** I filtri della timeline come criteri di Mongo (li usa anche la ricerca per contenuto). */
+    public static Criteria criteri(FiltroFoto f) {
         List<Criteria> e = new ArrayList<>();
         if (f.q() != null && !f.q().isBlank()) {
             Pattern p = Pattern.compile(Pattern.quote(f.q().trim()), Pattern.CASE_INSENSITIVE);
