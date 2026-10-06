@@ -557,6 +557,7 @@ backup): un'altra cartella di lavoro per ogni giro, per esempio
 | raccogli fermo | PC in sospensione o `P:` staccato | `p-up` e rilanciare: riprende |
 | "La ricerca per contenuto non risponde" | il container visione riparte o è fermo | `docker logs fototimeline-visione-1` su server2; si riprova dopo un minuto |
 | il rilascio dice "Manca VISIONE_SEGRETO" | `.env` di prima della ricerca per contenuto | aggiungere `VISIONE_SEGRETO=$(openssl rand -hex 32)` in `~/fototimeline/.env` |
+| scarica: `file name too long` | su pCloud un nome oltre 255 byte (didascalie lunghe), che il disco di Linux non accetta | `git pull` e rilanciare `scarica`: quei file arrivano col nome accorciato (`…~1a2b3c4d.jpg`), e `pulisci` cancella comunque l'originale |
 | Takeout: "Spazio insufficiente in /takeout ..." | su server2 non c'è posto per lo zip | liberare spazio (`df -h ~`) o rifare Takeout con zip più piccoli (6.1), poi **Avvia** |
 | Takeout: `didn't find section in config file` per `gdrive:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 6.2 |
 | Takeout: "Qui non si può: ... senza rclone" | app sul PC, non sul server | il Takeout si importa solo da server2 |
