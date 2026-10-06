@@ -17,6 +17,7 @@ import {
   Filtro,
   Foto,
   Io,
+  LavoroContenuto,
   LavoroImportazione,
   Modifica,
   ModificaTelefono,
@@ -30,6 +31,7 @@ import {
   RicordiTelegram,
   Salute,
   StatoCloud,
+  StatoContenuto,
   StatoConversioni,
   StatoImpronte,
   StatoTelefono,
@@ -45,13 +47,21 @@ export class FotoApi {
     return this.http.get<PaginaFoto>('/api/foto', { params: parametri(filtro).set('pagina', pagina).set('dimensione', dimensione) });
   }
 
+  /** Ricerca per contenuto: q è quello che c'è nella foto; le foto arrivano dalla più simile. */
+  cercaContenuto(filtro: Filtro, pagina: number, dimensione = 60): Observable<PaginaFoto> {
+    return this.http.get<PaginaFoto>('/api/foto/cerca-contenuto', {
+      params: parametri(filtro).set('pagina', pagina).set('dimensione', dimensione),
+    });
+  }
+
   timeline(filtro: Filtro): Observable<VoceMese[]> {
-    const { al: _, ...senzaSalto } = filtro;
+    const { al: _, ...senzaSalto } = soloTesti(filtro);
     return this.http.get<VoceMese[]>('/api/timeline', { params: parametri(senzaSalto) });
   }
 
+  /** Con la ricerca per contenuto la mappa mostra le foto degli altri filtri. */
   mappa(filtro: Filtro): Observable<PuntoMappa[]> {
-    const { al: _, ...senzaSalto } = filtro;
+    const { al: _, ...senzaSalto } = soloTesti(filtro);
     return this.http.get<PuntoMappa[]>('/api/mappa', { params: parametri(senzaSalto) });
   }
 
@@ -284,6 +294,20 @@ export class FotoApi {
     return this.http.post<void>(`/api/google/takeout/zip/${encodeURIComponent(id)}/riprova`, {});
   }
 
+  /** Se la ricerca per contenuto c'è, e a che punto è l'indice. */
+  contenuto(): Observable<StatoContenuto> {
+    return this.http.get<StatoContenuto>('/api/contenuto');
+  }
+
+  /** "Indicizza contenuto" in sottofondo (solo admin). */
+  indicizzaContenuto(daCapo = false): Observable<LavoroContenuto> {
+    return this.http.post<LavoroContenuto>('/api/contenuto/indicizza', {}, { params: daCapo ? { daCapo } : {} });
+  }
+
+  annullaContenuto(): Observable<void> {
+    return this.http.post<void>('/api/contenuto/annulla', {});
+  }
+
   modifica(id: string, modifica: Modifica): Observable<Foto> {
     return this.http.put<Foto>(`/api/foto/${id}`, modifica);
   }
@@ -337,9 +361,16 @@ export class FotoApi {
   }
 }
 
+/** Timeline e mappa cercano q nei testi: con la ricerca per contenuto q non vale per loro. */
+function soloTesti(filtro: Filtro): Filtro {
+  return filtro.contenuto ? { ...filtro, q: undefined, contenuto: undefined } : filtro;
+}
+
 function parametri(filtro: Filtro): HttpParams {
   let p = new HttpParams();
-  for (const [chiave, valore] of Object.entries(filtro)) {
+  // "contenuto" sceglie l'API, non è un filtro.
+  const { contenuto: _, ...filtri } = filtro;
+  for (const [chiave, valore] of Object.entries(filtri)) {
     if (valore !== undefined && valore !== null && valore !== '' && valore !== false) {
       p = p.set(chiave, String(valore));
     }

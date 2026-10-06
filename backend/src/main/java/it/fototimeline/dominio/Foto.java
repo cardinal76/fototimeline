@@ -95,6 +95,12 @@ public class Foto {
      * quasi uguali; null per i video e finché non è calcolata.
      */
     private Long impronta;
+    /**
+     * Quando la miniatura è entrata nell'indice della ricerca per contenuto
+     * (servizio visione); null = non ancora, la prende "Indicizza contenuto".
+     */
+    @Indexed
+    private Instant contenutoIndicizzato;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -200,4 +206,7 @@ public class Foto {
 
     public Long getImpronta() { return impronta; }
     public void setImpronta(Long impronta) { this.impronta = impronta; }
+
+    public Instant getContenutoIndicizzato() { return contenutoIndicizzato; }
+    public void setContenutoIndicizzato(Instant contenutoIndicizzato) { this.contenutoIndicizzato = contenutoIndicizzato; }
 }

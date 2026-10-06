@@ -94,6 +94,8 @@ export interface Filtro {
   luogo?: string;
   /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
   al?: string;
+  /** Cerca q in quello che c'è nella foto ("spiaggia", "cane"), non nei testi. */
+  contenuto?: boolean;
 }
 
 export type Esito = 'CARICATA' | 'DUPLICATA' | 'ERRORE';
@@ -279,6 +281,31 @@ export interface StatoTelefono {
   prossimoGiroIl?: string;
   /** I contatori del giro che sta girando (esito ancora vuoto). */
   giroInCorso?: GiroTelefono;
+}
+
+/** "Indicizza contenuto": manda a visione le foto che non sono ancora nell'indice. */
+export interface LavoroContenuto {
+  id: string;
+  stato: 'IN_CORSO' | 'FINITO' | 'ANNULLATO' | 'FALLITO';
+  iniziatoIl: string;
+  finitoIl?: string;
+  /** Le foto senza indice quando è partito. */
+  daFare: number;
+  fatte: number;
+  errori: number;
+  messaggi: string[];
+  errore?: string;
+}
+
+/** Ricerca per contenuto: se c'è (servizio visione configurato) e quante foto mancano all'indice. */
+export interface StatoContenuto {
+  attiva: boolean;
+  foto: number;
+  indicizzate: number;
+  mancanti: number;
+  /** Vettori nell'indice di visione; assente se visione non risponde. */
+  nellIndice?: number;
+  lavoro?: LavoroContenuto;
 }
 
 /** I telefoni visibili (l'admin tutti, gli altri il proprio) e quello che vale per tutti. */

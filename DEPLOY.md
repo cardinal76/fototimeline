@@ -8,7 +8,8 @@ dall'app.
 
 ```
 internet ─▶ caddy (HTTPS, Let's Encrypt) ─▶ app (Spring Boot + Angular) ─┬─▶ mongo
-                                                                          └─▶ rclone rcd ─WebDAV─▶ LifetimeCloud
+                                                                          ├─▶ rclone rcd ─WebDAV─▶ LifetimeCloud
+                                                                          └─▶ visione (CLIP, ricerca per contenuto)
 login: Keycloak di presenze, realm "fototimeline"
 ```
 
@@ -19,6 +20,7 @@ login: Keycloak di presenze, realm "fototimeline"
 | Miniature | volume Docker `fototimeline_miniature` su server2 (si rigenerano dagli originali) |
 | Video compatibili (H.264) | LifetimeCloud, `FotoTimeline/.compatibili/<id>.mp4` (si rifanno con "Converti video") |
 | Metadati (date, tag, album) | MongoDB, volume `fototimeline_mongo` su server2 |
+| Indice della ricerca per contenuto | volume `fototimeline_visione-dati` su server2 (si rifà dalle miniature) |
 | Configurazione e segreti | `~/fototimeline/.env` e `~/fototimeline/rclone/rclone.conf` su server2 |
 
 Il rilascio lo fa `.github/workflows/rilascio.yml` sul runner `fototimeline-build`
@@ -138,7 +140,9 @@ ssh server2 'chmod 600 ~/fototimeline/.env && nano ~/fototimeline/.env'
 ```
 
 Da compilare: dominio, password di Mongo e di rclone (stringhe lunghe a caso,
-per esempio `openssl rand -base64 32`) e il segreto del client del passo 3.
+per esempio `openssl rand -base64 32`), il segreto del client del passo 3 e
+`VISIONE_SEGRETO` (`openssl rand -hex 32`), che l'app e il servizio visione
+si scambiano anche se stanno solo sulla rete interna.
 
 ### 5. Il runner
 
@@ -156,8 +160,9 @@ git checkout -B produzione origin/main
 git push origin produzione
 ```
 
-Il workflow costruisce l'immagine, avvia i quattro container e aspetta che
-l'app sia sana. Poi:
+Il workflow costruisce le immagini (app e visione), avvia i cinque container e
+aspetta che l'app sia sana. La prima volta l'immagine di visione scarica torch
+e i pesi di CLIP: qualche minuto in più. Poi:
 
 1. apri `https://<dominio>` ed entra con l'utente del passo 3;
 2. in alto a destra: **Cloud smontato → Monta**;
@@ -334,6 +339,79 @@ confronta `foto-da-pcloud.sh` con la versione di prima di `lib-foto.sh`.
 I file caricati dal sito o dalle app di LifetimeCloud sono cifrati nel browser
 (cominciano con `LCB2`): via WebDAV arrivano cifrati e l'app non li legge. Le
 foto devono arrivare via WebDAV (rclone, l'app stessa, FolderSync sul telefono).
+
+### Ricerca per contenuto (visione)
+
+Con l'interruttore **Per contenuto** accanto al campo di ricerca si scrive cosa
+c'è nella foto, in italiano ("spiaggia", "cane", "torta di compleanno",
+"neve") e le foto arrivano dalla più somigliante, senza bisogno di tag. Gli
+altri filtri (tag, album, preferite) valgono anche qui; la mappa e la colonna
+dei mesi no (i risultati non sono in ordine di data).
+
+Lo fa il container `visione` (cartella `visione/`, Python con FastAPI), sulla
+rete interna e non esposto, con il segreto `VISIONE_SEGRETO`:
+
+- **il modello**: CLIP ViT-B/32 per le immagini (`openai/clip-vit-base-patch32`,
+  solo la parte visiva) e, per il testo,
+  `sentence-transformers/clip-ViT-B-32-multilingual-v1`, una DistilBERT
+  multilingue addestrata a dare per una frase italiana lo stesso vettore del
+  CLIP inglese. Scelto perché è il più leggero che capisce l'italiano: circa
+  220 milioni di parametri in tutto, contro i 370 di un CLIP con XLM-RoBERTa
+  (open_clip `xlm-roberta-base-ViT-B-32`) e il doppio dei modelli "large";
+  su CPU è quello che sta in 0,5 GB di RAM e fa una foto in 0,1–0,2 secondi.
+  La qualità è da CLIP B/32: le cose (animali, cibo, mezzi, paesaggi, neve,
+  mare) le trova bene, i dettagli fini e le scritte no. Il testo si cerca come
+  "una foto di …", che con CLIP funziona meglio della parola sola;
+- **i pesi** (~1,1 GB) entrano nell'immagine quando la si costruisce: a
+  runtime niente download;
+- **l'indice**: un vettore di 512 numeri (float16) per foto, in memoria nel
+  servizio e su disco nel volume `visione-dati` (`indice.npz` più un giornale
+  delle modifiche, scritto a ogni foto: un riavvio non perde niente). Nella
+  JVM dell'app (384 MB) non ci starebbe; l'app tiene solo, su ogni foto,
+  quando è entrata nell'indice (`contenutoIndicizzato`).
+
+Come entrano le foto:
+
+1. ogni foto nuova (caricamento, importazione, "Indicizza archivio") manda la
+   sua **miniatura**, già sul disco di server2, a visione, in sottofondo:
+   l'importazione non aspetta, e il cloud non serve;
+2. per quelle di prima, da admin: **Indicizza contenuto** in alto a destra (tra
+   parentesi quante ne mancano). Le manda a blocchi di 16, con l'avanzamento e
+   **Annulla**; se il server o l'app ripartono, riparte da solo da dove era
+   arrivato (prende solo le foto senza indice). Se una miniatura manca la rifà
+   dall'originale, e lì serve il cloud montato: con il cloud smontato quelle
+   foto restano tra gli errori e le riprende il giro dopo;
+3. una foto eliminata si toglie anche dall'indice.
+
+Se l'indice di visione va perso (volume cancellato) o si cambia modello,
+**Indicizza contenuto** con tutte le foto già indicizzate chiede se rifarlo
+**da capo**.
+
+**Quanto costa, con 150.000 foto:**
+
+| | |
+|---|---|
+| RAM di visione | ~0,45 GB a riposo (modello caricato), picchi ~0,9 GB mentre calcola un blocco; più ~150 MB di indice. Limite nel compose: 1,5 GB (`mem_limit`) |
+| CPU | 2 thread (`VISIONE_THREAD`), con `nice` e `cpu_shares` bassi: le build della CI passano avanti |
+| Disco | immagine ~2,6 GB (torch CPU ~1,4 GB, pesi ~1,1 GB); volume `visione-dati` ~160 MB |
+| Tempo di "Indicizza contenuto" | ~0,14 s a foto con 2 thread (misurato su 4 vCPU): 150.000 foto ≈ 6 ore; su server2, con le build in mezzo, anche 8–12. Si lascia andare di notte: riprende da solo |
+| Una foto nuova | ~0,2 s, in sottofondo |
+| Una ricerca | ~0,3 s (testo in vettore e confronto con tutto l'indice) |
+
+Quanto essere severi si regola con `FOTOTIMELINE_VISIONE_SOGLIA` (predefinito
+0,24: somiglianza minima, le foto giuste di solito stanno tra 0,25 e 0,33,
+quelle a caso intorno a 0,20) e `FOTOTIMELINE_VISIONE_MARGINE` (0,06: si
+tengono solo le foto entro questo distacco dalla più somigliante), nel
+`environment` dell'app.
+
+Sul PC, senza `VISIONE_URL`, la funzione non c'è e l'app va come prima. Per
+provarla in locale:
+
+```bash
+docker build -t fototimeline-visione visione/
+docker run -d -p 127.0.0.1:8000:8000 -e VISIONE_SEGRETO=prova -v visione-dati:/dati fototimeline-visione
+VISIONE_URL=http://localhost:8000 VISIONE_SEGRETO=prova ./mvnw spring-boot:run   # in backend/
+```
 
 ### Luoghi dal GPS (GeoNames)
 
@@ -577,6 +655,8 @@ C="docker compose -p fototimeline -f deploy/docker-compose.yml --env-file $HOME/
 $C ps
 $C logs -f app
 $C logs -f rclone
+$C logs -f visione                     # ricerca per contenuto
+docker stats --no-stream fototimeline-visione-1
 mountpoint ~/fototimeline/cloud        # montato o no, visto dall'host
 ```
 

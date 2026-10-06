@@ -202,6 +202,11 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   libreria con Google Takeout (sezione 6).
 - **Caricate da**: il filtro per vedere le foto portate da una persona; nel visore, "Caricata da".
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
+- **Per contenuto** (accanto al campo di ricerca): si scrive cosa c'è nella foto, "spiaggia",
+  "cane", "torta di compleanno", e si trovano le foto anche senza tag.
+- **Indicizza contenuto** (admin): la prima volta, dopo il trasloco, manda tutte le foto alla
+  ricerca per contenuto. Con 150.000 foto ci vogliono ore (anche una notte): va avanti da solo,
+  anche col cloud smontato, e se il server riparte riprende. Le foto nuove entrano da sole.
 - **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
   ce l'hanno; quelle nuove lo prendono da sole. Non serve il cloud montato, 150 mila foto in meno
   di un minuto. Dopo il primo rilascio con i luoghi va lanciato una volta; poi il filtro
@@ -550,6 +555,8 @@ backup): un'altra cartella di lavoro per ogni giro, per esempio
 | pCloud `Invalid 'access_token' (2094)` | account europeo senza `hostname = eapi.pcloud.com` | rifare 3.1 dal PC |
 | "ARCHIVIO non può essere la radice" | `ARCHIVIO=/mnt/p` | una cartella nuova, es. `/mnt/p/Archivio foto` |
 | raccogli fermo | PC in sospensione o `P:` staccato | `p-up` e rilanciare: riprende |
+| "La ricerca per contenuto non risponde" | il container visione riparte o è fermo | `docker logs fototimeline-visione-1` su server2; si riprova dopo un minuto |
+| il rilascio dice "Manca VISIONE_SEGRETO" | `.env` di prima della ricerca per contenuto | aggiungere `VISIONE_SEGRETO=$(openssl rand -hex 32)` in `~/fototimeline/.env` |
 | scarica: `file name too long` | su pCloud un nome oltre 255 byte (didascalie lunghe), che il disco di Linux non accetta | `git pull` e rilanciare `scarica`: quei file arrivano col nome accorciato (`…~1a2b3c4d.jpg`), e `pulisci` cancella comunque l'originale |
 | Takeout: "Spazio insufficiente in /takeout ..." | su server2 non c'è posto per lo zip | liberare spazio (`df -h ~`) o rifare Takeout con zip più piccoli (6.1), poi **Avvia** |
 | Takeout: `didn't find section in config file` per `gdrive:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 6.2 |

@@ -24,6 +24,7 @@ jobs:
           test -f "$ENV_FILE" || { echo "::error::Manca $ENV_FILE (vedi deploy/env.esempio e DEPLOY.md)"; exit 1; }
           set -a; . "$ENV_FILE"; set +a
           test -f "$FOTOTIMELINE_DATI/rclone/rclone.conf" || { echo "::error::Manca $FOTOTIMELINE_DATI/rclone/rclone.conf"; exit 1; }
+          test -n "${VISIONE_SEGRETO:-}" || { echo "::error::Manca VISIONE_SEGRETO in $ENV_FILE (openssl rand -hex 32, vedi deploy/env.esempio)"; exit 1; }
           mkdir -p "$FOTOTIMELINE_DATI/cloud"
           # Google Takeout: uno zip alla volta, scritto da rclone e letto (e cancellato) dall'app (uid 1000).
           mkdir -p "$FOTOTIMELINE_DATI/takeout"
@@ -33,6 +34,7 @@ jobs:
           fi
 
       - name: Costruisci e avvia
+        # Costruisce app e visione; la prima volta visione scarica torch e i pesi di CLIP (~2,5 GB).
         run: |
           docker compose -p fototimeline -f deploy/docker-compose.yml --env-file "$HOME/fototimeline/.env" \
             up -d --build --remove-orphans
