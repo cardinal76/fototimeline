@@ -129,6 +129,7 @@ conta_media() {
 raccogli_fonti() {
     touch "$MANIFEST" "$FONTI" "$IMPRONTE" "$DA_CONTROLLARE"
     carica_impronte
+    carica_nomi_lunghi
     declare -A FATTA
     while IFS=$'\t' read -r _ fonte _; do FATTA[$fonte]=1; done < "$FONTI"
 
@@ -163,7 +164,18 @@ raccogli_fonti() {
 }
 
 # Il percorso sotto RADICE di un file letto da BASE (che può essere la copia locale).
-fonte_di() { printf '%s/%s' "$RADICE" "${1#"$BASE"/}"; }
+# Un nome accorciato da scarica (LAVORO/nomi-lunghi.tsv) torna quello vero di pCloud.
+declare -A NOMI_LUNGHI=()
+fonte_di() {
+    local rel="${1#"$BASE"/}"
+    if [ "$BASE" = "$SPECCHIO" ] && [ -n "${NOMI_LUNGHI[$rel]:-}" ]; then rel="${NOMI_LUNGHI[$rel]}"; fi
+    printf '%s/%s' "$RADICE" "$rel"
+}
+carica_nomi_lunghi() {
+    local corto lungo
+    [ -f "$LAVORO/nomi-lunghi.tsv" ] || return 0
+    while IFS=$'\t' read -r corto lungo; do NOMI_LUNGHI[$corto]="$lungo"; done < "$LAVORO/nomi-lunghi.tsv"
+}
 
 # Un blocco di file sciolti: li collega (o copia, da P:), li ordina, segna da dove vengono.
 # Dalla copia locale sono collegamenti: niente spazio in più, e ordinate/ li tiene.

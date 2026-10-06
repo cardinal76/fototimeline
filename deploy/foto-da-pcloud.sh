@@ -57,6 +57,9 @@ RCLONE="${RCLONE:-rclone}"
 # File scaricati in parallelo da pCloud: con tante foto piccole il limite è l'attesa per
 # file, non la banda (8 -> 24 ha portato una fibra da 8 a 29 MB/s).
 TRASFERIMENTI="${TRASFERIMENTI:-24}"
+# Nomi di file più lunghi di così (in byte) si scaricano accorciati a NOME_CORTO byte.
+NOME_MAX="${NOME_MAX:-255}"
+NOME_CORTO="${NOME_CORTO:-180}"
 export TZ="${TZ:-Europe/Rome}"
 
 ORDINATE="$LAVORO/ordinate"
@@ -151,11 +154,62 @@ scarica() {
         printf -- '- *\n'
     } > "$filtri"
     mkdir -p "$SPECCHIO"
+    local lunghi
+    lunghi="$(nomi_lunghi "$filtri")"
     echo "Scarico da $PCLOUD in $SPECCHIO (si può interrompere e rilanciare)…"
-    rc copy "$PCLOUD" "$SPECCHIO" --filter-from "$filtri" --ignore-case \
+    rc copy "$PCLOUD" "$SPECCHIO" --filter-from "${lunghi:-$filtri}" --ignore-case \
         --transfers "$TRASFERIMENTI" --checkers $((TRASFERIMENTI + 8)) --stats-one-line --stats 30s --stats-log-level NOTICE
+    [ -n "$lunghi" ] && scarica_nomi_lunghi
     date +%s > "$LAVORO/fase-scarica.ok"
     echo "Scaricato: $(du -sh "$SPECCHIO" | cut -f1). Prossimo passo: $0 raccogli"
+}
+
+# Nomi di file oltre NOME_MAX byte: pCloud li accetta, il disco di Linux (255) no, e rclone
+# si fermerebbe con "file name too long". Li elenca in nomi-lunghi-remoti.txt e stampa un
+# filtro che li salta (vuoto se non ce ne sono): si scaricano a parte, accorciati.
+nomi_lunghi() {
+    local filtri="$1" elenco="$LAVORO/nomi-lunghi-remoti.txt" con="$LAVORO/filtri-scarica-lunghi.txt"
+    rc lsf -R --files-only --filter-from "$filtri" --ignore-case "$PCLOUD" \
+        | LC_ALL=C awk -F/ -v max="$NOME_MAX" 'length($NF) > max' > "$elenco.nuovo"
+    if [ ! -s "$elenco.nuovo" ]; then
+        rm -f "$elenco.nuovo" "$con"
+        return
+    fi
+    mv "$elenco.nuovo" "$elenco"
+    echo "$(wc -l < "$elenco") file con il nome troppo lungo: li scarico a parte, accorciati." >&2
+    {
+        # Prima regola che corrisponde vince: le esclusioni in testa. Nei filtri di
+        # rclone * ? [ ] { } \ vanno protetti.
+        sed 's/[][\\*?{}]/\\&/g; s|^|- /|' "$elenco"
+        cat "$filtri"
+    } > "$con"
+    printf '%s' "$con"
+}
+
+# Il nome accorciato: al massimo NOME_CORTO byte (senza spezzare le lettere accentate),
+# poi ~ e 8 cifre dell'impronta del percorso originale, poi l'estensione.
+nome_corto() {
+    local nome="$1" rel="$2" ext="" base
+    base="$nome"
+    case "$nome" in *.*) ext=".${nome##*.}"; base="${nome%.*}" ;; esac
+    base="$(printf '%s' "$base" | head -c "$NOME_CORTO" | iconv -f UTF-8 -t UTF-8 -c)"
+    printf '%s~%s%s' "$base" "$(printf '%s' "$rel" | sha1sum | cut -c1-8)" "$ext"
+}
+
+# Scarica i nomi lunghi accorciati; nomi-lunghi.tsv (nome in specchio \t nome su pCloud)
+# serve a raccogli e pulisci per ritrovare l'originale.
+scarica_nomi_lunghi() {
+    local elenco="$LAVORO/nomi-lunghi-remoti.txt" tsv="$LAVORO/nomi-lunghi.tsv" rel dir corto da
+    touch "$tsv"
+    while IFS= read -r rel; do
+        dir="$(dirname "$rel")"
+        corto="$(nome_corto "$(basename "$rel")" "$rel")"
+        [ "$dir" != . ] && corto="$dir/$corto"
+        case "$PCLOUD" in *:) da="$PCLOUD$rel" ;; *) da="$PCLOUD/$rel" ;; esac
+        rc copyto "$da" "$SPECCHIO/$corto" </dev/null
+        grep -Fq -- "$corto"$'\t' "$tsv" || printf '%s\t%s\n' "$corto" "$rel" >> "$tsv"
+        echo "  accorciato: $corto"
+    done < "$elenco"
 }
 
 # Da dove legge raccogli: la copia locale se scarica è finito, se no pCloud Drive.

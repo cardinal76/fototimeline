@@ -147,6 +147,34 @@ verifica "pulisci: tolto lo zip delle vacanze"         non_c_e "$T/p/Zip/vacanze
 verifica "pulisci: resta lo zip misto"                 c_e "$T/p/Zip/misto.zip"
 verifica "pulisci: resta TASSE"                        c_e "$T/p/TASSE/scansione.jpg"
 
+# --- 1b. nomi troppo lunghi per il disco (qui il limite è abbassato a 60 byte) ---------------
+L="$T/lunghi" LL="$HOME/foto-da-pcloud-lunghi"
+LUNGO="Auguri alla piccola di casa è già un anno che ci conosciamo #compleanno ;-) ok"
+jpg "$L/Foto/$LUNGO.jpg" lungo '2019:03:18 10:00:00' '2019-03-18 10:00'
+jpg "$L/Foto/corto.jpg" corto '2019:03:19 10:00:00' '2019-03-19 10:00'
+{
+    s="$QUI/foto-da-pcloud.sh"
+    export LAVORO="$LL" NOME_MAX=60 NOME_CORTO=20
+    RADICE="$L" ARCHIVIO="$L/Archivio foto" GIORNI=0 DESTINAZIONE="$T/dest-lunghi" "$s" anteprima
+    PCLOUD="$L" "$s" scarica
+    "$s" raccogli
+    "$s" carica
+    "$s" archivia
+    echo CANCELLA | "$s" pulisci
+    unset LAVORO NOME_MAX NOME_CORTO
+} > "$T/lunghi.txt" 2>&1
+CORTO="$(cut -f1 "$LL/nomi-lunghi.tsv" 2>/dev/null)"
+verifica "nome lungo scaricato accorciato ($CORTO)"   c_e "$LL/specchio/$CORTO"
+verifica "accorciato: al massimo 60 byte"             [ "$(printf '%s' "$(basename "$CORTO")" | LC_ALL=C wc -c)" -le 60 ]
+verifica "accorciato: lettere accentate intere"       iconv -f UTF-8 -t UTF-8 <<< "$CORTO"
+verifica "nome corto scaricato com'è"                 c_e "$LL/specchio/Foto/corto.jpg"
+verifica "accorciato in ordinate"                     c_e "$LL/ordinate/2019/03/18/$(basename "$CORTO")"
+verifica "fonte col nome vero di pCloud"              contiene "$LL/fonti.tsv" $'file\t'"$L/Foto/$LUNGO.jpg"$'\tsi'
+verifica "carica: in destinazione"                    c_e "$T/dest-lunghi/2019/03/18/$(basename "$CORTO")"
+verifica "pulisci: tolto l'originale col nome lungo"  non_c_e "$L/Foto/$LUNGO.jpg"
+verifica "pulisci: tolto anche quello corto"          non_c_e "$L/Foto/corto.jpg"
+[ "$KO" -gt 0 ] && cat "$T/lunghi.txt"
+
 # --- 2. foto-da-cartella.sh: una finta libreria di Amazon Foto -----------------------------
 echo "2. foto-da-cartella.sh"
 S="$T/c/Users/marco/Pictures/Amazon Photos Downloads"
