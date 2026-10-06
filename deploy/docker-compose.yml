@@ -44,6 +44,8 @@ services:
     volumes:
       - ${FOTOTIMELINE_DATI:?}/rclone:/config/rclone:ro
       - rclone-cache:/cache
+      # Google Takeout: rclone ci scarica uno zip alla volta, l'app lo apre (stesso percorso nei due container).
+      - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
       # rshared: il montaggio fatto qui dentro si vede sull'host e quindi nell'app.
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
@@ -73,16 +75,42 @@ services:
       # Vuota = spenta. Per esempio /cloud/Da importare: ci carica il telefono.
       FOTOTIMELINE_CARTELLA_AUTOMATICA: ${FOTOTIMELINE_CARTELLA_AUTOMATICA:-}
       FOTOTIMELINE_INTERVALLO_AUTOMATICO: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:-PT15M}
+      # Di chi è il telefono di quando era uno solo; vuoto = del primo admin che entra.
+      FOTOTIMELINE_TELEFONO_PROPRIETARIO: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:-}
+      # Versione compatibile (H.264) dei video HEVC: thread di ffmpeg e lato corto massimo.
+      FOTOTIMELINE_VIDEO_ATTIVA: ${FOTOTIMELINE_VIDEO_ATTIVA:-true}
+      FOTOTIMELINE_VIDEO_THREAD: ${FOTOTIMELINE_VIDEO_THREAD:-2}
+      FOTOTIMELINE_VIDEO_RISOLUZIONE: ${FOTOTIMELINE_VIDEO_RISOLUZIONE:-1080}
       RCLONE_RC_URL: http://rclone:5572
       RCLONE_RC_PASSWORD: ${RCLONE_RC_PASSWORD:?}
       RCLONE_REMOTO: ${RCLONE_REMOTO:-lifetime:}
       RCLONE_PUNTO_MONTAGGIO: /cloud
       RCLONE_MONTA_ALL_AVVIO: ${RCLONE_MONTA_ALL_AVVIO:-false}
+      # Avvisi su Telegram ai cambi della pagina "Salute"; vuoti = spenti. Il dominio fa il link nei messaggi.
+      FOTOTIMELINE_TELEGRAM_TOKEN: ${FOTOTIMELINE_TELEGRAM_TOKEN:-}
+      FOTOTIMELINE_TELEGRAM_CHAT: ${FOTOTIMELINE_TELEGRAM_CHAT:-}
+      FOTOTIMELINE_TELEGRAM_ATTENZIONE: ${FOTOTIMELINE_TELEGRAM_ATTENZIONE:-false}
+      # "Accadde oggi" su Telegram ogni mattina: valori di partenza, poi dall'app. Chat vuota = quella degli avvisi.
+      FOTOTIMELINE_RICORDI_ATTIVO: ${FOTOTIMELINE_RICORDI_ATTIVO:-true}
+      FOTOTIMELINE_RICORDI_ORA: ${FOTOTIMELINE_RICORDI_ORA:-08:00}
+      FOTOTIMELINE_RICORDI_FOTO: ${FOTOTIMELINE_RICORDI_FOTO:-6}
+      FOTOTIMELINE_RICORDI_CHAT: ${FOTOTIMELINE_RICORDI_CHAT:-}
+      FOTOTIMELINE_RICORDI_NESSUNO: ${FOTOTIMELINE_RICORDI_NESSUNO:-false}
+      FOTOTIMELINE_DOMINIO: ${FOTOTIMELINE_DOMINIO:?}
+      # "Importa da Google Takeout": dove sono gli zip (valore iniziale, poi dall'app) e quanto spazio lasciare.
+      FOTOTIMELINE_TAKEOUT_SORGENTE: ${FOTOTIMELINE_TAKEOUT_SORGENTE:-gdrive:Takeout}
+      FOTOTIMELINE_TAKEOUT_CARTELLA: /takeout
+      FOTOTIMELINE_TAKEOUT_RISERVA: ${FOTOTIMELINE_TAKEOUT_RISERVA:-2GB}
+      # "Scegli da Google Foto" (Picker API): client OAuth di Google; vuoti = funzione nascosta.
+      FOTOTIMELINE_GOOGLE_CLIENT_ID: ${FOTOTIMELINE_GOOGLE_CLIENT_ID:-}
+      FOTOTIMELINE_GOOGLE_CLIENT_SECRET: ${FOTOTIMELINE_GOOGLE_CLIENT_SECRET:-}
+      FOTOTIMELINE_GOOGLE_CHIAVE: ${FOTOTIMELINE_GOOGLE_CHIAVE:-}
       VISIONE_URL: http://visione:8000
       VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
     volumes:
       # Miniature sul disco di server2: dal cloud la timeline sarebbe lenta.
       - miniature:/miniature
+      - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
         target: /cloud

@@ -44,8 +44,11 @@ import org.springframework.stereotype.Service;
 
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
+import it.fototimeline.luoghi.GeocodificaInversa;
+import it.fototimeline.dominio.StatoConversione;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
+import it.fototimeline.quasiuguali.Impronta;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
@@ -92,17 +95,21 @@ public class FotoService {
     private final ArchivioFile archivio;
     private final EstrattoreMetadati estrattore;
     private final StrumentiMedia media;
+    private final GeocodificaInversa luoghi;
+    private final ConversioneVideo conversione;
     private final Clock clock;
     private final ApplicationEventPublisher eventi;
 
     public FotoService(FotoRepository repository, MongoTemplate mongo, ArchivioFile archivio,
-            EstrattoreMetadati estrattore, StrumentiMedia media, Optional<Clock> clock,
-            ApplicationEventPublisher eventi) {
+            EstrattoreMetadati estrattore, StrumentiMedia media, GeocodificaInversa luoghi, ConversioneVideo conversione,
+            Optional<Clock> clock, ApplicationEventPublisher eventi) {
         this.repository = repository;
         this.mongo = mongo;
         this.archivio = archivio;
         this.estrattore = estrattore;
         this.media = media;
+        this.luoghi = luoghi;
+        this.conversione = conversione;
         this.clock = clock.orElse(Clock.systemDefaultZone());
         this.eventi = eventi;
     }
@@ -111,11 +118,15 @@ public class FotoService {
 
     /** Come {@link #importa(String, Path, Instant, String)}, da byte in memoria (test, file piccoli). */
     public Caricamento importa(String nome, byte[] contenuto, Instant ultimaModifica, String album) {
+        return importa(nome, contenuto, ultimaModifica, album, null);
+    }
+
+    public Caricamento importa(String nome, byte[] contenuto, Instant ultimaModifica, String album, String caricataDa) {
         Path temporaneo = null;
         try {
             temporaneo = Files.createTempFile("fototimeline-", "." + estensione(nome));
             Files.write(temporaneo, contenuto);
-            return importa(nome, temporaneo, ultimaModifica, album);
+            return importa(nome, temporaneo, ultimaModifica, album, caricataDa);
         } catch (IOException e) {
             return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
         } finally {
@@ -130,6 +141,44 @@ public class FotoService {
      * errore senza lanciare.
      */
     public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album) {
+        return importa(nome, file, ultimaModifica, album, null);
+    }
+
+    /**
+     * @param caricataDa lo username di chi la porta (chi carica, chi importa, il
+     *                   proprietario del telefono); null se non si sa. Un
+     *                   duplicato tiene quello che aveva.
+     */
+    public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa) {
+        return importa(nome, file, ultimaModifica, album, caricataDa, null);
+    }
+
+    /**
+     * Quello che sa di una foto chi la porta da fuori (il JSON di Google
+     * Takeout, la data di Google Foto): vale solo dove il file non dice
+     * niente. Data: EXIF → questa ({@link OrigineData#GOOGLE}) → data del
+     * file → caricamento. GPS solo se l'EXIF non ce l'ha (0,0 non conta);
+     * descrizione solo se c'è; preferita se lo è.
+     */
+    public record MetadatiEsterni(LocalDateTime scattataIl, Double latitudine, Double longitudine,
+            String descrizione, boolean preferita) {
+
+        public static final MetadatiEsterni NESSUNO = new MetadatiEsterni(null, null, null, null, false);
+
+        /** True se ci sono coordinate buone: entrambe, nei limiti, non 0,0 (Google lo usa per "nessuna"). */
+        public boolean conPosizione() {
+            return latitudine != null && longitudine != null && Math.abs(latitudine) <= 90 && Math.abs(longitudine) <= 180
+                    && !(latitudine == 0 && longitudine == 0);
+        }
+    }
+
+    /**
+     * Come {@link #importa(String, Path, Instant, String, String)}, coi
+     * metadati di chi la porta ({@code esterni}, anche null). Il file non si
+     * tocca: quello che viene da fuori sta solo nella scheda.
+     */
+    public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
+            MetadatiEsterni esterni) {
         archivio.verificaDisponibile();
         Letto letto;
         try {
@@ -139,7 +188,15 @@ public class FotoService {
         }
         Foto foto = letto.foto();
         foto.setAlbum(pulisciAlbum(album));
-        if (ultimaModifica != null) {
+        foto.setCaricataDa(vuotoANull(caricataDa));
+        if (esterni != null) {
+            applica(foto, esterni);
+        }
+        LocalDateTime dataEsterna = esterni != null ? esterni.scattataIl() : null;
+        if (letto.data() == null && dataEsterna != null) {
+            foto.setScattataIl(dataEsterna);
+            foto.setOrigineData(OrigineData.GOOGLE);
+        } else if (ultimaModifica != null) {
             data(foto, letto.data(), LocalDateTime.ofInstant(ultimaModifica, clock.getZone()), OrigineData.FILE);
         } else {
             data(foto, letto.data(), LocalDateTime.now(clock), OrigineData.CARICAMENTO);
@@ -150,6 +207,7 @@ public class FotoService {
                     nome, foto.getId(), letto.estensione(), foto.getScattataIl().toLocalDate(), file));
             anteprime(letto, file);
             Foto inserita = repository.insert(foto);
+            segnalaConversione(foto);
             eventi.publishEvent(new FotoAggiunta(inserita.getId()));
             return new Caricamento(nome, Esito.CARICATA, inserita, null);
         } catch (DuplicateKeyException e) {
@@ -206,6 +264,7 @@ public class FotoService {
             }
             anteprime(letto, file);
             foto = repository.insert(foto);
+            segnalaConversione(foto);
         } catch (DuplicateKeyException e) {
             archivio.elimina(foto.getId(), null);
             return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
@@ -317,12 +376,15 @@ public class FotoService {
                     foto.setFotocamera(info.fotocamera());
                     foto.setLatitudine(info.latitudine());
                     foto.setLongitudine(info.longitudine());
+                    conversione.prepara(foto, info);
                     anteprima = Files.createTempFile("fototimeline-", ".jpg");
                     media.fotogramma(file, info.durata(), anteprima);
                     data = info.ripresoIl();
                 }
                 default -> throw new IllegalStateException(genere.name());
             }
+            // Dal GPS il nome del luogo: in memoria, niente rete.
+            luoghi.applica(foto);
             return new Letto(foto, genere, estensione, anteprima, data);
         } catch (Exception e) {
             eliminaSilenzioso(anteprima);
@@ -344,12 +406,43 @@ public class FotoService {
         }
     }
 
-    /** Miniatura e, per gli HEIC, vista JPEG. */
+    /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
     private void anteprime(Letto letto, Path file) throws IOException {
         Path anteprima = letto.anteprima();
         archivio.creaMiniatura(letto.foto().getId(), anteprima != null ? anteprima : file, anteprima == null);
         if (letto.genere() == Genere.HEIC) {
             archivio.salvaVista(letto.foto().getId(), anteprima);
+        }
+        if (letto.genere() != Genere.VIDEO) {
+            try {
+                letto.foto().setImpronta(Impronta.calcola(archivio.miniatura(letto.foto().getId())));
+            } catch (IOException | RuntimeException e) {
+                // Non blocca l'importazione: la riempie "Calcola impronte".
+                log.warn("Impronta di {} non calcolata: {}", letto.foto().getNomeOriginale(), e.toString());
+            }
+        }
+    }
+
+    /** Un video non compatibile appena entrato: la coda parte (in sottofondo). */
+    private void segnalaConversione(Foto foto) {
+        if (foto.getConversione() == StatoConversione.IN_CODA) {
+            conversione.segnala();
+        }
+    }
+
+    /** I metadati da fuori dove il file non dice niente (la data la sceglie chi chiama). */
+    private void applica(Foto foto, MetadatiEsterni esterni) {
+        if (foto.getLatitudine() == null && esterni.conPosizione()) {
+            foto.setLatitudine(esterni.latitudine());
+            foto.setLongitudine(esterni.longitudine());
+            luoghi.applica(foto);
+        }
+        String descrizione = vuotoANull(esterni.descrizione());
+        if (descrizione != null && foto.getDescrizione() == null) {
+            foto.setDescrizione(descrizione);
+        }
+        if (esterni.preferita()) {
+            foto.setPreferita(true);
         }
     }
 
@@ -404,10 +497,10 @@ public class FotoService {
                 criteri(filtro),
                 Criteria.where("latitudine").ne(null),
                 Criteria.where("longitudine").ne(null)));
-        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video");
+        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video", "luogo");
         return mongo.find(query, Foto.class).stream()
                 .map(f -> new PuntoMappa(f.getId(), f.getLatitudine(), f.getLongitudine(), f.getGiorno(),
-                        f.getTitolo(), f.isVideo()))
+                        f.getTitolo(), f.isVideo(), f.getLuogo()))
                 .toList();
     }
 
@@ -454,6 +547,20 @@ public class FotoService {
                 .toList();
     }
 
+    /** Per il filtro "Caricate da": chi ha portato foto e quante, dal più attivo. Senza le foto di nessuno. */
+    public List<Caricatore> caricateDa() {
+        var aggregazione = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("caricataDa").ne(null)),
+                Aggregation.group("caricataDa").count().as("conteggio"),
+                Aggregation.sort(Sort.by(Sort.Order.desc("conteggio"), Sort.Order.asc("_id"))));
+        return mongo.aggregate(aggregazione, Foto.class, Document.class).getMappedResults().stream()
+                .map(d -> new Caricatore(d.getString("_id"), ((Number) d.get("conteggio")).longValue()))
+                .toList();
+    }
+
+    public record Caricatore(String username, long conteggio) {
+    }
+
     public Path fileOriginale(Foto foto) {
         return archivio.originale(foto.getPercorso());
     }
@@ -483,6 +590,34 @@ public class FotoService {
             rifaiAnteprime(foto);
         }
         return vista;
+    }
+
+    /**
+     * Il file per {@code /file}.
+     *
+     * @param definitivo true se a quell'indirizzo non cambierà (si può tenere in
+     *                   cache per sempre); false per un video che aspetta la
+     *                   versione compatibile
+     */
+    public record FileServito(Path file, String contentType, String nome, boolean definitivo) {
+    }
+
+    /**
+     * Quello che va al browser per {@code /file}: per i video la versione
+     * compatibile, se c'è; l'originale per il resto, o se lo si chiede
+     * ({@code originale}, per esempio per scaricarlo).
+     */
+    public FileServito fileDaServire(Foto foto, boolean originale) {
+        if (foto.isVideo() && !originale && foto.getConversione() == StatoConversione.FATTA) {
+            Path compatibile = archivio.compatibile(foto.getId());
+            if (Files.exists(compatibile)) {
+                String nome = foto.getNomeOriginale();
+                int punto = nome.lastIndexOf('.');
+                return new FileServito(compatibile, "video/mp4", (punto < 0 ? nome : nome.substring(0, punto)) + ".mp4", true);
+            }
+        }
+        boolean definitivo = originale || !foto.isVideo() || Boolean.TRUE.equals(foto.getCompatibile());
+        return new FileServito(fileOriginale(foto), foto.getContentType(), foto.getNomeOriginale(), definitivo);
     }
 
     public String contentTypeVista(Foto foto) {
@@ -630,7 +765,10 @@ public class FotoService {
                     Criteria.where("nomeOriginale").regex(p),
                     Criteria.where("album").regex(p),
                     Criteria.where("fotocamera").regex(p),
-                    Criteria.where("tag").regex(p)));
+                    Criteria.where("tag").regex(p),
+                    Criteria.where("luogo").regex(p),
+                    Criteria.where("regione").regex(p),
+                    Criteria.where("nazione").regex(p)));
         }
         if (f.tag() != null && !f.tag().isBlank()) {
             e.add(Criteria.where("tag").is(f.tag().trim().toLowerCase(Locale.ROOT)));
@@ -638,8 +776,21 @@ public class FotoService {
         if (f.album() != null && !f.album().isBlank()) {
             e.add(Criteria.where("album").is(f.album().trim()));
         }
+        // Il luogo scelto dall'elenco (/api/luoghi): nazione, poi regione e luogo dentro di lei.
+        if (f.nazione() != null && !f.nazione().isBlank()) {
+            e.add(Criteria.where("codiceNazione").is(f.nazione().trim().toUpperCase(Locale.ROOT)));
+        }
+        if (f.regione() != null && !f.regione().isBlank()) {
+            e.add(Criteria.where("regione").is(f.regione().trim()));
+        }
+        if (f.luogo() != null && !f.luogo().isBlank()) {
+            e.add(Criteria.where("luogo").is(f.luogo().trim()));
+        }
         if (Boolean.TRUE.equals(f.preferite())) {
             e.add(Criteria.where("preferita").is(true));
+        }
+        if (f.caricataDa() != null && !f.caricataDa().isBlank()) {
+            e.add(Criteria.where("caricataDa").is(f.caricataDa().trim()));
         }
         if (f.dal() != null || f.al() != null) {
             Criteria data = Criteria.where("scattataIl");

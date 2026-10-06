@@ -1,0 +1,3 @@
+DE.02	Bavaria	Bavaria	2951839
+FR.11	Île-de-France	Ile-de-France	3012874
+IT.07	Lazio	Lazio	3174976

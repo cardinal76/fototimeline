@@ -3,9 +3,17 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
+  CollegamentoGoogle,
+  ModificaTakeout,
+  SceltaGoogle,
+  StatoTakeout,
+  CaricateDa,
   Caricamento,
   Cartella,
+  Condivisione,
   CopiaBackup,
+  ElencoTelefoni,
+  ElencoLuoghi,
   Filtro,
   Foto,
   Io,
@@ -13,13 +21,21 @@ import {
   LavoroImportazione,
   Modifica,
   ModificaTelefono,
+  NuovaCondivisione,
   Operazione,
   PaginaFoto,
+  PaginaGruppi,
   PuntoMappa,
+  ImpostazioniRicordiTelegram,
   Ricordo,
+  RicordiTelegram,
+  Salute,
   StatoCloud,
   StatoContenuto,
+  StatoConversioni,
+  StatoImpronte,
   StatoTelefono,
+  Utente,
   VoceMese,
 } from './modelli';
 
@@ -65,6 +81,26 @@ export class FotoApi {
     return this.http.get<string[]>('/api/album');
   }
 
+  /** Chi ha portato foto e quante, per il filtro "Caricate da". */
+  caricateDa(): Observable<CaricateDa[]> {
+    return this.http.get<CaricateDa[]>('/api/caricate-da');
+  }
+
+  /** Gli utenti entrati almeno una volta (solo admin). */
+  utenti(): Observable<Utente[]> {
+    return this.http.get<Utente[]>('/api/utenti');
+  }
+
+  /** Nazioni, regioni e luoghi con i conteggi, per il filtro "Luogo". */
+  luoghi(): Observable<ElencoLuoghi> {
+    return this.http.get<ElencoLuoghi>('/api/luoghi');
+  }
+
+  /** "Calcola luoghi" in sottofondo (solo admin); tutte = anche quelle che il luogo ce l'hanno. */
+  calcolaLuoghi(tutte: boolean): Observable<LavoroImportazione> {
+    return this.http.post<LavoroImportazione>('/api/archivio/luoghi', {}, { params: tutte ? { tutte } : {} });
+  }
+
   carica(file: File[], album?: string): Observable<HttpEvent<Caricamento[]>> {
     const dati = new FormData();
     file.forEach((f) => dati.append('file', f, f.name));
@@ -82,6 +118,20 @@ export class FotoApi {
   /** "Indicizza archivio": dà una scheda alle foto già nell'archivio che l'app non conosce (solo admin). */
   indicizza(): Observable<LavoroImportazione> {
     return this.http.post<LavoroImportazione>('/api/archivio/indicizza', {});
+  }
+
+  /** La coda delle versioni compatibili dei video. */
+  conversioni(): Observable<StatoConversioni> {
+    return this.http.get<StatoConversioni>('/api/archivio/video');
+  }
+
+  /** "Converti video": mette in coda i video già in archivio che ne hanno bisogno (solo admin). */
+  convertiVideo(): Observable<StatoConversioni> {
+    return this.http.post<StatoConversioni>('/api/archivio/video/converti', {});
+  }
+
+  annullaConversioni(): Observable<StatoConversioni> {
+    return this.http.post<StatoConversioni>('/api/archivio/video/annulla', {});
   }
 
   /** L'importazione in corso o l'ultima finita; null se non ce ne sono state. */
@@ -121,17 +171,127 @@ export class FotoApi {
     return this.http.post<StatoCloud>('/api/cloud/smonta', {});
   }
 
-  /** Sincronizzazione del telefono da pCloud (solo admin). */
-  telefono(): Observable<StatoTelefono> {
-    return this.http.get<StatoTelefono>('/api/telefono');
+  /** I telefoni della famiglia: l'admin li vede tutti, gli altri il proprio. */
+  telefoni(): Observable<ElencoTelefoni> {
+    return this.http.get<ElencoTelefoni>('/api/telefoni');
   }
 
-  salvaTelefono(modifica: ModificaTelefono): Observable<StatoTelefono> {
-    return this.http.put<StatoTelefono>('/api/telefono', modifica);
+  creaTelefono(modifica: ModificaTelefono): Observable<StatoTelefono> {
+    return this.http.post<StatoTelefono>('/api/telefoni', modifica);
   }
 
-  sincronizzaTelefono(): Observable<StatoTelefono> {
-    return this.http.post<StatoTelefono>('/api/telefono/sincronizza', {});
+  salvaTelefono(id: string, modifica: ModificaTelefono): Observable<StatoTelefono> {
+    return this.http.put<StatoTelefono>(`/api/telefoni/${encodeURIComponent(id)}`, modifica);
+  }
+
+  eliminaTelefono(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/telefoni/${encodeURIComponent(id)}`);
+  }
+
+  sincronizzaTelefono(id: string): Observable<StatoTelefono> {
+    return this.http.post<StatoTelefono>(`/api/telefoni/${encodeURIComponent(id)}/sincronizza`, {});
+  }
+
+  /** Gruppi di foto quasi uguali, dal più numeroso. */
+  quasiUguali(pagina: number, dimensione = 20): Observable<PaginaGruppi> {
+    return this.http.get<PaginaGruppi>('/api/quasi-uguali', { params: { pagina, dimensione } });
+  }
+
+  /** Elimina le foto "togli" di un gruppo; quelle tenute (se più d'una) non si propongono più insieme. */
+  risolvi(tieni: string[], togli: string[]): Observable<{ eliminate: number }> {
+    return this.http.post<{ eliminate: number }>('/api/quasi-uguali/risolvi', { tieni, togli });
+  }
+
+  /** "Non sono doppioni". */
+  ignora(ids: string[]): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/ignora', { ids });
+  }
+
+  statoImpronte(): Observable<StatoImpronte> {
+    return this.http.get<StatoImpronte>('/api/quasi-uguali/calcola');
+  }
+
+  /** "Calcola impronte" per le foto che non l'hanno (solo admin). */
+  calcolaImpronte(): Observable<StatoImpronte> {
+    return this.http.post<StatoImpronte>('/api/quasi-uguali/calcola', {});
+  }
+
+  annullaImpronte(): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/calcola/annulla', {});
+  }
+
+  /** La pagina "Salute" (solo admin). */
+  salute(): Observable<Salute> {
+    return this.http.get<Salute>('/api/salute');
+  }
+
+  /** Un messaggio di prova su Telegram: 409 se non è configurato. */
+  provaTelegram(): Observable<void> {
+    return this.http.post<void>('/api/salute/prova', {});
+  }
+
+  /** "Ricordi su Telegram" (solo admin). */
+  ricordiTelegram(): Observable<RicordiTelegram> {
+    return this.http.get<RicordiTelegram>('/api/ricordi-telegram');
+  }
+
+  salvaRicordiTelegram(impostazioni: ImpostazioniRicordiTelegram): Observable<RicordiTelegram> {
+    return this.http.put<RicordiTelegram>('/api/ricordi-telegram', impostazioni);
+  }
+
+  /** I ricordi di oggi subito, anche se già mandati: 409 se Telegram non è configurato. */
+  provaRicordiTelegram(): Observable<{ messaggio: string }> {
+    return this.http.post<{ messaggio: string }>('/api/ricordi-telegram/prova', {});
+  }
+
+  // ------------------------------------------------------------ Google Foto
+
+  /** La funzione c'è? Sono collegato? La mia scelta in corso. */
+  google(): Observable<CollegamentoGoogle> {
+    return this.http.get<CollegamentoGoogle>('/api/google');
+  }
+
+  /** Una nuova scelta col Picker: la pagina di Google da aprire è in pickerUri. */
+  nuovaSceltaGoogle(): Observable<SceltaGoogle> {
+    return this.http.post<SceltaGoogle>('/api/google/scelta', {});
+  }
+
+  /** La scelta in corso o l'ultima; null se non ce n'è. */
+  sceltaGoogle(): Observable<SceltaGoogle | null> {
+    return this.http.get<SceltaGoogle | null>('/api/google/scelta');
+  }
+
+  annullaSceltaGoogle(): Observable<void> {
+    return this.http.post<void>('/api/google/scelta/annulla', {});
+  }
+
+  chiudiSceltaGoogle(): Observable<void> {
+    return this.http.post<void>('/api/google/scelta/chiudi', {});
+  }
+
+  scollegaGoogle(): Observable<void> {
+    return this.http.post<void>('/api/google/scollega', {});
+  }
+
+  /** "Importa da Google Takeout" (solo admin). */
+  takeout(): Observable<StatoTakeout> {
+    return this.http.get<StatoTakeout>('/api/google/takeout');
+  }
+
+  salvaTakeout(modifica: ModificaTakeout): Observable<StatoTakeout> {
+    return this.http.put<StatoTakeout>('/api/google/takeout', modifica);
+  }
+
+  avviaTakeout(): Observable<unknown> {
+    return this.http.post('/api/google/takeout/avvia', {});
+  }
+
+  annullaTakeout(): Observable<void> {
+    return this.http.post<void>('/api/google/takeout/annulla', {});
+  }
+
+  riprovaZip(id: string): Observable<void> {
+    return this.http.post<void>(`/api/google/takeout/zip/${encodeURIComponent(id)}/riprova`, {});
   }
 
   /** Se la ricerca per contenuto c'è, e a che punto è l'indice. */
@@ -160,6 +320,24 @@ export class FotoApi {
     return this.http.post<{ modificate: number }>('/api/foto/multiple', { ids, operazione, valore });
   }
 
+  /** Link pubblici: si creano, si elencano (i propri; l'admin tutti) e si revocano. */
+  creaCondivisione(nuova: NuovaCondivisione): Observable<Condivisione> {
+    return this.http.post<Condivisione>('/api/condivisioni', nuova);
+  }
+
+  condivisioni(): Observable<Condivisione[]> {
+    return this.http.get<Condivisione[]>('/api/condivisioni');
+  }
+
+  revocaCondivisione(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/condivisioni/${id}`);
+  }
+
+  /** L'indirizzo da mandare: la pagina pubblica, che non chiede il login. */
+  static linkCondivisione(c: Condivisione): string {
+    return `${location.origin}/c/${c.token}`;
+  }
+
   static miniatura(f: Foto): string {
     return `/api/foto/${f.id}/miniatura`;
   }
@@ -171,6 +349,15 @@ export class FotoApi {
 
   static originale(f: Foto, scarica = false): string {
     return `/api/foto/${f.id}/file${scarica ? '?scarica=true' : ''}`;
+  }
+
+  /**
+   * Il video da riprodurre: il server dà la versione compatibile se c'è.
+   * Con la compatibile l'indirizzo cambia (c=1): il browser può avere in
+   * cache l'originale servito prima della conversione.
+   */
+  static video(f: Foto): string {
+    return `/api/foto/${f.id}/file${f.conversione === 'FATTA' ? '?c=1' : ''}`;
   }
 }
 

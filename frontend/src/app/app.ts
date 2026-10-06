@@ -12,12 +12,30 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
+import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { Cartella, Foto, ModificaTelefono, StatoContenuto, StatoTelefono } from './modelli';
+import { GoogleFoto } from './google-foto';
+import {
+  Cartella,
+  CollegamentoGoogle,
+  Condivisione,
+  ElencoTelefoni,
+  Foto,
+  ImpostazioniRicordiTelegram,
+  ModificaTelefono,
+  RicordiTelegram,
+  StatoContenuto,
+  StatoSalute,
+  StatoTelefono,
+  Utente,
+} from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
+import { QuasiUguali } from './quasi-uguali';
+import { inAttesa } from './condivisi-in-attesa';
+import { RiceviCondivisi } from './ricevi-condivisi';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -28,7 +46,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Mappa, NgTemplateOutlet, Ricordi, TimelineNav, Visore],
+  imports: [DatePipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -56,17 +74,36 @@ export class App {
   /** Sul server (cartella del cloud) si sposta, come deciso; sul PC si copia. */
   protected sposta = false;
   protected ricerca = '';
-  protected readonly dialogoTelefono = signal(false);
-  protected readonly telefono = signal<StatoTelefono | null>(null);
+  protected readonly dialogoTelefoni = signal(false);
+  protected readonly telefoni = signal<ElencoTelefoni | null>(null);
+  /** Gli utenti visti finora, per scegliere il proprietario (solo admin). */
+  protected readonly utenti = signal<Utente[]>([]);
+  /** Il telefono nel sotto-dialogo di modifica: un id, "nuovo" per aggiungerne uno, null se chiuso. */
+  protected readonly telefonoInModifica = signal<string | null>(null);
   protected readonly salvandoTelefono = signal(false);
-  protected moduloTelefono: ModificaTelefono = {
-    attiva: false,
-    sorgente: '',
-    intervalloOre: 6,
-    giorniPrimaDiCancellare: 7,
-    copieInParallelo: 6,
-  };
-  private telefonoTimer?: ReturnType<typeof setTimeout>;
+  protected moduloTelefono: ModificaTelefono = nuovoTelefono();
+  private telefoniTimer?: ReturnType<typeof setTimeout>;
+  protected readonly dialogoQuasiUguali = signal(false);
+  /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
+  protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
+  protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
+  protected readonly creandoLink = signal(false);
+  protected readonly linkCreato = signal<string | null>(null);
+  protected readonly dialogoCondivisioni = signal(false);
+  protected readonly condivisioni = signal<Condivisione[] | null>(null);
+  protected readonly dialogoSalute = signal(false);
+  protected readonly controlloSalute = signal(false);
+  protected readonly provaInCorso = signal(false);
+  /** "Ricordi su Telegram", nel dialogo della salute. */
+  protected readonly ricordiTelegram = signal<RicordiTelegram | null>(null);
+  protected moduloRicordi: ImpostazioniRicordiTelegram = { attivo: true, ora: '08:00', foto: 6, nessunRicordo: false };
+  protected readonly salvandoRicordi = signal(false);
+  protected readonly provaRicordiInCorso = signal(false);
+  /** "Carica N foto dal telefono": file arrivati con "Condividi → FotoTimeline" (sw.js). */
+  protected readonly dialogoDalTelefono = signal(false);
+  /** "Google Foto": il bottone c'è se il server ha le credenziali di Google (o per l'admin, il Takeout). */
+  protected readonly google = signal<CollegamentoGoogle | null>(null);
+  protected readonly dialogoGoogle = signal(false);
 
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
@@ -81,6 +118,68 @@ export class App {
         { root: this.scorrimento().nativeElement, rootMargin: '1200px' },
       ).observe(this.fondo().nativeElement);
     });
+    void this.condivisiDalTelefono();
+    this.ritornoDaGoogle();
+    this.api.google().subscribe({ next: (g) => this.google.set(g), error: () => this.google.set(null) });
+  }
+
+  /** Dopo il consenso Google torna a /?google=collegato (o negato, errore): si riapre il dialogo. */
+  private ritornoDaGoogle(): void {
+    const parametri = new URLSearchParams(location.search);
+    const esito = parametri.get('google');
+    if (esito === null) {
+      return;
+    }
+    parametri.delete('google');
+    const resto = parametri.toString();
+    history.replaceState(history.state, '', location.pathname + (resto ? `?${resto}` : '') + location.hash);
+    this.galleria.avvisa(
+      esito === 'collegato'
+        ? 'Google collegato: ora puoi scegliere le foto'
+        : esito === 'negato'
+          ? 'Collegamento a Google annullato'
+          : 'Collegamento a Google non riuscito: riprova',
+    );
+    this.apriGoogle();
+  }
+
+  protected apriGoogle(): void {
+    if (this.galleria.io()?.admin && this.galleria.io()?.login && !this.utenti().length) {
+      this.api.utenti().subscribe({ next: (u) => this.utenti.set(u), error: () => this.utenti.set([]) });
+    }
+    this.dialogoGoogle.set(true);
+  }
+
+  // ------------------------------------------------------------ dal telefono
+
+  /**
+   * Il service worker manda a /?condivisi=<lotto> dopo aver messo da parte i
+   * file; senza service worker il server manda a /?condivisi=senza-app. Il
+   * dialogo si apre anche senza parametro se ci sono file in attesa (per
+   * esempio dopo un login o un "Più tardi").
+   */
+  private async condivisiDalTelefono(): Promise<void> {
+    const parametri = new URLSearchParams(location.search);
+    const condivisi = parametri.get('condivisi');
+    if (condivisi !== null) {
+      parametri.delete('condivisi');
+      const resto = parametri.toString();
+      history.replaceState(history.state, '', location.pathname + (resto ? `?${resto}` : '') + location.hash);
+      if (condivisi === 'senza-app') {
+        this.galleria.avvisa("La condivisione non è arrivata all'app: riapri FotoTimeline e riprova a condividere");
+      } else if (condivisi === 'errore') {
+        this.galleria.avvisa('Il telefono non è riuscito a tenere i file condivisi (spazio pieno?)');
+      } else if (condivisi === 'vuoto') {
+        this.galleria.avvisa('Nessun file arrivato dalla condivisione');
+      }
+    }
+    try {
+      if ((await inAttesa()).length) {
+        this.dialogoDalTelefono.set(true);
+      }
+    } catch {
+      // Senza IndexedDB (navigazione privata di alcuni browser): niente da caricare.
+    }
   }
 
   // ------------------------------------------------------------ griglia
@@ -155,6 +254,10 @@ export class App {
     this.galleria.imposta({ album: album || undefined });
   }
 
+  protected scegliCaricataDa(username: string): void {
+    this.galleria.imposta({ caricataDa: username || undefined });
+  }
+
   protected azzera(): void {
     this.ricerca = '';
     // L'interruttore "per contenuto" è un modo di cercare, non un filtro: resta com'è.
@@ -174,23 +277,39 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.luogo);
   }
 
   // ------------------------------------------------------------ selezione
 
   /**
    * Esc chiude quello che è aperto sopra la timeline: il dialogo di
-   * importazione o del telefono, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
+   * importazione, dei telefoni, delle quasi uguali o della salute, altrimenti la selezione. Il visore gestisce il suo Esc da sé.
    */
   protected esc(): void {
     if (this.aperta()) {
       return;
     }
-    if (this.dialogoImporta()) {
+    if (this.dialogoDalTelefono()) {
+      // Lo gestisce RiceviCondivisi (non durante l'invio).
+      return;
+    }
+    if (this.dialogoGoogle()) {
+      this.dialogoGoogle.set(false);
+    } else if (this.dialogoCondividi()) {
+      this.dialogoCondividi.set(null);
+    } else if (this.dialogoCondivisioni()) {
+      this.dialogoCondivisioni.set(false);
+    } else if (this.dialogoImporta()) {
       this.chiudiImporta();
-    } else if (this.dialogoTelefono()) {
-      this.chiudiTelefono();
+    } else if (this.telefonoInModifica()) {
+      this.telefonoInModifica.set(null);
+    } else if (this.dialogoTelefoni()) {
+      this.chiudiTelefoni();
+    } else if (this.dialogoQuasiUguali()) {
+      this.dialogoQuasiUguali.set(false);
+    } else if (this.dialogoSalute()) {
+      this.chiudiSalute();
     } else if (this.selezione()) {
       this.esciSelezione();
     }
@@ -352,6 +471,44 @@ export class App {
     return righe.join('\n');
   }
 
+  /**
+   * "Calcola luoghi": le foto col GPS senza luogo; se non ce ne sono, chiede
+   * se rifarle tutte (per esempio dopo un aggiornamento del dataset).
+   */
+  protected async calcolaLuoghi(): Promise<void> {
+    const daCalcolare = this.galleria.luoghi()?.daCalcolare ?? 0;
+    const tutte = daCalcolare === 0;
+    if (tutte && !confirm('Tutte le foto col GPS hanno già il luogo. Ricalcolarle tutte?')) {
+      return;
+    }
+    try {
+      await this.galleria.avviaLuoghi(tutte);
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Calcolo dei luoghi non partito');
+    }
+  }
+
+  protected async convertiVideo(): Promise<void> {
+    if (
+      !confirm(
+        'Prepara una versione compatibile (H.264) dei video che non tutti i browser sanno riprodurre, ' +
+          "come gli HEVC dell'iPhone. Gira in sottofondo, un video alla volta: può richiedere ore.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await this.galleria.convertiVideo();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Conversione dei video non partita');
+    }
+  }
+
+  protected percentualeConversioni(): number {
+    const s = this.galleria.conversioni();
+    return s && s.fatti + s.errori + s.daFare ? Math.round(((s.fatti + s.errori) / (s.fatti + s.errori + s.daFare)) * 100) : 0;
+  }
+
   protected percentualeImportazione(): number {
     const l = this.galleria.importazione();
     return l && l.trovate ? Math.round((l.fatte / l.trovate) * 100) : 0;
@@ -361,34 +518,76 @@ export class App {
     this.dialogoImporta.set(false);
   }
 
-  // ------------------------------------------------------------ telefono
+  // ------------------------------------------------------------ telefoni
 
-  protected apriTelefono(): void {
-    this.dialogoTelefono.set(true);
-    this.telefono.set(null);
-    this.api.telefono().subscribe({
+  protected apriTelefoni(): void {
+    this.dialogoTelefoni.set(true);
+    this.telefonoInModifica.set(null);
+    this.telefoni.set(null);
+    if (this.galleria.io()?.admin && this.galleria.io()?.login) {
+      this.api.utenti().subscribe({ next: (u) => this.utenti.set(u), error: () => this.utenti.set([]) });
+    }
+    this.aggiornaTelefoni(true);
+  }
+
+  /** Chiede l'elenco; mentre un giro è in coda o in corso lo riguarda ogni 3 secondi. */
+  private aggiornaTelefoni(prima = false): void {
+    clearTimeout(this.telefoniTimer);
+    this.api.telefoni().subscribe({
       next: (t) => {
-        this.moduloTelefono = {
-          attiva: t.attiva,
-          sorgente: t.sorgente,
-          intervalloOre: t.intervalloOre,
-          giorniPrimaDiCancellare: t.giorniPrimaDiCancellare,
-          copieInParallelo: t.copieInParallelo,
-        };
-        this.mostraTelefono(t);
+        if (!this.dialogoTelefoni()) return;
+        this.telefoni.set(t);
+        if (t.telefoni.some((s) => s.inCorso)) {
+          this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 3000);
+        }
       },
       error: (e: unknown) => {
-        this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione del telefono non leggibile');
-        this.chiudiTelefono();
+        if (prima) {
+          this.galleria.avvisa(dettaglio(e) ?? 'Telefoni non leggibili');
+          this.chiudiTelefoni();
+        } else if (this.dialogoTelefoni()) {
+          this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 3000);
+        }
       },
     });
   }
 
+  /** Il nome di un utente visto finora, per l'elenco; altrimenti lo username. */
+  protected nomeUtente(username?: string): string {
+    if (!username) return 'nessuno';
+    if (username === this.galleria.io()?.username) return this.galleria.io()?.nome ?? username;
+    return this.utenti().find((u) => u.username === username)?.nome ?? this.galleria.nomeDi(username);
+  }
+
+  protected aggiungiTelefono(): void {
+    this.moduloTelefono = nuovoTelefono();
+    this.telefonoInModifica.set('nuovo');
+  }
+
+  protected modificaTelefono(t: StatoTelefono): void {
+    this.moduloTelefono = {
+      nome: t.nome,
+      proprietario: t.proprietario ?? '',
+      attiva: t.attiva,
+      sorgente: t.sorgente,
+      intervalloOre: t.intervalloOre,
+      giorniPrimaDiCancellare: t.giorniPrimaDiCancellare,
+      copieInParallelo: t.copieInParallelo,
+    };
+    this.telefonoInModifica.set(t.id);
+  }
+
   protected async salvaTelefono(): Promise<void> {
+    const id = this.telefonoInModifica();
+    if (!id) return;
     this.salvandoTelefono.set(true);
     try {
-      this.mostraTelefono(await firstValueFrom(this.api.salvaTelefono(this.moduloTelefono)));
-      this.galleria.avvisa('Impostazioni del telefono salvate');
+      await firstValueFrom(
+        id === 'nuovo' ? this.api.creaTelefono(this.moduloTelefono) : this.api.salvaTelefono(id, this.moduloTelefono),
+      );
+      this.galleria.avvisa(id === 'nuovo' ? `${this.moduloTelefono.nome} aggiunto` : 'Impostazioni del telefono salvate');
+      this.telefonoInModifica.set(null);
+      this.aggiornaTelefoni();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Salvataggio non riuscito');
     } finally {
@@ -396,9 +595,28 @@ export class App {
     }
   }
 
-  protected async sincronizzaOra(): Promise<void> {
+  protected async eliminaTelefono(t: StatoTelefono): Promise<void> {
+    if (
+      !confirm(
+        `Togliere "${t.nome}"? Le foto già arrivate restano; le copie restano registrate, ` +
+          'così se lo rimetti con la stessa cartella non ricopia niente.',
+      )
+    ) {
+      return;
+    }
     try {
-      this.mostraTelefono(await firstValueFrom(this.api.sincronizzaTelefono()));
+      await firstValueFrom(this.api.eliminaTelefono(t.id));
+      this.galleria.avvisa(`${t.nome} tolto`);
+      this.aggiornaTelefoni();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non riesco a toglierlo');
+    }
+  }
+
+  protected async sincronizzaOra(t: StatoTelefono): Promise<void> {
+    try {
+      await firstValueFrom(this.api.sincronizzaTelefono(t.id));
+      this.aggiornaTelefoni();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione non partita');
     }
@@ -413,25 +631,158 @@ export class App {
       : quando.toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
-  /** Mostra lo stato; mentre un giro è in corso lo riguarda ogni 3 secondi. */
-  private mostraTelefono(t: StatoTelefono): void {
-    this.telefono.set(t);
-    clearTimeout(this.telefonoTimer);
-    if (t.inCorso && this.dialogoTelefono()) {
-      this.telefonoTimer = setTimeout(
-        () =>
-          this.api.telefono().subscribe({
-            next: (n) => this.dialogoTelefono() && this.mostraTelefono(n),
-            error: () => this.dialogoTelefono() && this.mostraTelefono(t),
-          }),
-        3000,
-      );
+  protected chiudiTelefoni(): void {
+    clearTimeout(this.telefoniTimer);
+    this.telefonoInModifica.set(null);
+    this.dialogoTelefoni.set(false);
+  }
+
+  // ------------------------------------------------------------ condivisione
+
+  protected apriCondividiSelezione(): void {
+    const ids = [...this.galleria.selezionate()];
+    this.apriCondividi({ ids, descrizione: `${ids.length} foto selezionate` }, '');
+  }
+
+  protected apriCondividiAlbum(): void {
+    const album = this.galleria.filtro().album;
+    if (album) {
+      this.apriCondividi({ album, descrizione: `tutte le foto dell'album "${album}"` }, album);
     }
   }
 
-  protected chiudiTelefono(): void {
-    clearTimeout(this.telefonoTimer);
-    this.dialogoTelefono.set(false);
+  private apriCondividi(scelta: { ids?: string[]; album?: string; descrizione: string }, titolo: string): void {
+    this.moduloCondividi = { titolo, giorni: 7, download: false, posizione: false };
+    this.linkCreato.set(null);
+    this.dialogoCondividi.set(scelta);
+  }
+
+  protected async creaLink(): Promise<void> {
+    const scelta = this.dialogoCondividi();
+    if (!scelta) return;
+    this.creandoLink.set(true);
+    try {
+      const c = await firstValueFrom(
+        this.api.creaCondivisione({ ...this.moduloCondividi, ids: scelta.ids, album: scelta.album }),
+      );
+      this.linkCreato.set(FotoApi.linkCondivisione(c));
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Link non creato');
+    } finally {
+      this.creandoLink.set(false);
+    }
+  }
+
+  protected async copia(link: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(link);
+      this.galleria.avvisa('Link copiato');
+    } catch {
+      // Senza HTTPS o senza permesso: lo si copia a mano dal campo.
+      this.galleria.avvisa('Copia non riuscita: seleziona il link e copialo a mano');
+    }
+  }
+
+  protected chiudiCondividi(): void {
+    if (this.linkCreato() && this.selezione()) {
+      this.esciSelezione();
+    }
+    this.dialogoCondividi.set(null);
+  }
+
+  protected apriCondivisioni(): void {
+    this.dialogoCondivisioni.set(true);
+    this.condivisioni.set(null);
+    this.api.condivisioni().subscribe({
+      next: (c) => this.condivisioni.set(c),
+      error: () => {
+        this.galleria.avvisa('Condivisioni non leggibili');
+        this.dialogoCondivisioni.set(false);
+      },
+    });
+  }
+
+  protected link(c: Condivisione): string {
+    return FotoApi.linkCondivisione(c);
+  }
+
+  protected async revoca(c: Condivisione): Promise<void> {
+    if (!confirm(`Revocare "${c.titolo}"? Chi ha il link non vedrà più le foto.`)) return;
+    try {
+      await firstValueFrom(this.api.revocaCondivisione(c.id));
+      this.condivisioni.update((l) => l?.map((x) => (x.id === c.id ? { ...x, revocata: true } : x)) ?? null);
+    } catch {
+      this.galleria.avvisa('Revoca non riuscita');
+    }
+  }
+
+  // ------------------------------------------------------------ salute
+
+  protected apriSalute(): void {
+    this.dialogoSalute.set(true);
+    void this.aggiornaSalute();
+    this.api.ricordiTelegram().subscribe({ next: (r) => this.mostraRicordi(r), error: () => this.ricordiTelegram.set(null) });
+  }
+
+  private mostraRicordi(r: RicordiTelegram): void {
+    this.ricordiTelegram.set(r);
+    this.moduloRicordi = { attivo: r.attivo, ora: r.ora, foto: r.foto, nessunRicordo: r.nessunRicordo };
+  }
+
+  protected async salvaRicordi(): Promise<void> {
+    this.salvandoRicordi.set(true);
+    try {
+      this.mostraRicordi(await firstValueFrom(this.api.salvaRicordiTelegram(this.moduloRicordi)));
+      this.galleria.avvisa('Ricordi su Telegram salvati');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Impostazioni dei ricordi non salvate');
+    } finally {
+      this.salvandoRicordi.set(false);
+    }
+  }
+
+  protected async provaRicordi(): Promise<void> {
+    this.provaRicordiInCorso.set(true);
+    try {
+      const esito = await firstValueFrom(this.api.provaRicordiTelegram());
+      this.galleria.avvisa(esito.messaggio);
+      this.api.ricordiTelegram().subscribe({ next: (r) => this.ricordiTelegram.set(r), error: () => {} });
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Ricordi non mandati');
+    } finally {
+      this.provaRicordiInCorso.set(false);
+    }
+  }
+
+  protected async aggiornaSalute(): Promise<void> {
+    this.controlloSalute.set(true);
+    try {
+      if (!(await this.galleria.aggiornaSalute())) {
+        this.galleria.avvisa('Salute non leggibile');
+      }
+    } finally {
+      this.controlloSalute.set(false);
+    }
+  }
+
+  protected async provaTelegram(): Promise<void> {
+    this.provaInCorso.set(true);
+    try {
+      await firstValueFrom(this.api.provaTelegram());
+      this.galleria.avvisa('Messaggio di prova mandato su Telegram');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Messaggio di prova non mandato');
+    } finally {
+      this.provaInCorso.set(false);
+    }
+  }
+
+  protected chiudiSalute(): void {
+    this.dialogoSalute.set(false);
+  }
+
+  protected nomeStato(s: StatoSalute): string {
+    return s === 'OK' ? 'tutto a posto' : s === 'ATTENZIONE' ? 'da guardare' : 'qualcosa non va';
   }
 
   protected logout(): void {
@@ -441,4 +792,16 @@ export class App {
 
 function dettaglio(e: unknown): string | undefined {
   return (e as { error?: { detail?: string } }).error?.detail;
+}
+
+function nuovoTelefono(): ModificaTelefono {
+  return {
+    nome: '',
+    proprietario: '',
+    attiva: false,
+    sorgente: 'pcloud:Automatic Upload',
+    intervalloOre: 6,
+    giorniPrimaDiCancellare: 7,
+    copieInParallelo: 6,
+  };
 }

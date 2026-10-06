@@ -271,6 +271,31 @@ class FotoServiceTest {
         assertThat(service.ricordi(java.time.LocalDate.of(2026, 10, 4), 1).getFirst().foto()).hasSize(1);
     }
 
+    @Test
+    void caricataDaEFiltroCaricateDa() throws IOException {
+        var gennaio = Instant.parse("2024-01-10T10:00:00Z");
+        var diAnna = service.importa("a.png", immagine(Color.RED, "png"), gennaio, null, "anna").foto();
+        service.importa("b.png", immagine(Color.GREEN, "png"), gennaio, null, "anna");
+        service.importa("c.png", immagine(Color.BLUE, "png"), Instant.parse("2024-02-10T10:00:00Z"), null, "marco");
+        var vecchia = service.importa("d.png", immagine(Color.ORANGE, "png"), gennaio, null).foto();
+
+        assertThat(diAnna.getCaricataDa()).isEqualTo("anna");
+        assertThat(vecchia.getCaricataDa()).isNull();
+        // Un doppione caricato da un altro non cambia chi l'ha portata.
+        var doppione = service.importa("copia.png", immagine(Color.RED, "png"), gennaio, null, "marco");
+        assertThat(doppione.esito()).isEqualTo(Esito.DUPLICATA);
+        assertThat(repository.findById(diAnna.getId()).orElseThrow().getCaricataDa()).isEqualTo("anna");
+
+        assertThat(service.caricateDa()).containsExactly(new FotoService.Caricatore("anna", 2),
+                new FotoService.Caricatore("marco", 1));
+        var soloAnna = new FiltroFoto(null, null, null, null, null, null, "anna");
+        assertThat(service.cerca(soloAnna, 0, 10).totale()).isEqualTo(2);
+        assertThat(service.timeline(soloAnna)).containsExactly(new VoceMese(2024, 1, 2));
+        assertThat(service.cerca(new FiltroFoto(null, null, null, null, null, null, "marco"), 0, 10).foto())
+                .extracting(f -> f.getNomeOriginale()).containsExactly("c.png");
+        assertThat(service.cerca(TUTTO, 0, 10).totale()).isEqualTo(4);
+    }
+
     private String importa(Color colore, String quando) throws IOException {
         return service.importa("foto.png", immagine(colore, "png"), Instant.parse(quando), null).foto().getId();
     }

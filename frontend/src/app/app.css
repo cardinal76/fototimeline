@@ -419,6 +419,20 @@ progress {
   justify-content: flex-end;
   gap: 0.5rem;
 }
+.dialogo.telefoni,
+.dialogo.salute {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.elenco-telefoni {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.elenco-telefoni .riga {
+  display: flex;
+  justify-content: space-between;
+}
 .rilascio {
   position: fixed;
   inset: 0.75rem;
@@ -566,4 +580,40 @@ main[hidden] {
 }
 .barra .link.errore {
   color: var(--pericolo);
+}
+
+/* La coda dei video sta a sinistra: può girare per ore insieme a tutto il resto. */
+.avanzamento.conversione {
+  right: auto;
+  left: 1.25rem;
+}
+.avanzamento .corrente {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* ---------------------------------------------------------- salute */
+.pallino {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: var(--testo-tenue);
+}
+.pallino[data-stato='OK'] { background: #3fb950; }
+.pallino[data-stato='ATTENZIONE'] { background: #d29922; }
+.pallino[data-stato='ERRORE'] { background: var(--pericolo); }
+.voci-salute {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.voci-salute > li {
+  display: flex;
+  gap: 0.4rem;
 }

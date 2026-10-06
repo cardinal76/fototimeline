@@ -24,17 +24,36 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * token. L'access token arriva qui direttamente dal token endpoint, in HTTPS,
  * nello scambio del codice: per OIDC basta questo a fidarsi del contenuto,
  * senza verificarne la firma.
+ *
+ * <p>È anche il momento del login: l'utente entra nella collezione {@code utenti}.
  */
 public class RuoliKeycloak extends OidcUserService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    private final RegistroUtenti registro;
+    private final String ruoloAdmin;
+
+    public RuoliKeycloak(RegistroUtenti registro, String ruoloAdmin) {
+        this.registro = registro;
+        this.ruoloAdmin = ruoloAdmin;
+    }
 
     @Override
     public OidcUser loadUser(OidcUserRequest richiesta) {
         OidcUser utente = super.loadUser(richiesta);
         Set<GrantedAuthority> autorita = new HashSet<>(utente.getAuthorities());
         autorita.addAll(ruoliDiRealm(richiesta.getAccessToken().getTokenValue()));
-        return new DefaultOidcUser(autorita, utente.getIdToken(), utente.getUserInfo(), "preferred_username");
+        var conRuoli = new DefaultOidcUser(autorita, utente.getIdToken(), utente.getUserInfo(), "preferred_username");
+        boolean admin = autorita.stream().anyMatch(a -> a.getAuthority().equals("ROLE_" + ruoloAdmin));
+        try {
+            registro.registra(conRuoli.getPreferredUsername(),
+                    conRuoli.getFullName() != null ? conRuoli.getFullName() : conRuoli.getPreferredUsername(),
+                    conRuoli.getEmail(), admin);
+        } catch (RuntimeException e) {
+            // Il registro serve per i nomi: un Mongo lento non deve impedire il login.
+        }
+        return conRuoli;
     }
 
     static Collection<GrantedAuthority> ruoliDiRealm(String accessToken) {

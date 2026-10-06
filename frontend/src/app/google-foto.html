@@ -1,0 +1,216 @@
+<div class="velo" (click)="chiudi.emit()">
+  <section class="dialogo" role="dialog" aria-modal="true" aria-labelledby="titolo-google" (click)="$event.stopPropagation()">
+    <header>
+      <h2 id="titolo-google">Google Foto</h2>
+      <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
+    </header>
+
+    @if (google(); as g) {
+      @if (g.configurato) {
+        <section class="parte" aria-labelledby="titolo-scegli">
+          <h3 id="titolo-scegli">Scegli da Google Foto</h3>
+          <p class="tenue">
+            Scegli alcune foto dal tuo account Google Foto: l'app le scarica e le aggiunge all'archivio, a tuo nome.
+            Quelle già presenti si saltano.
+          </p>
+          @if (!g.collegato) {
+            <p>Prima collega il tuo account Google: ti chiederà il permesso di leggere solo le foto che scegli.</p>
+            <div class="azioni">
+              <button type="button" class="primario" (click)="collega()">Collega Google</button>
+            </div>
+          } @else {
+            @if (scelta(); as s) {
+              <div class="stato" role="status" aria-live="polite">
+                @switch (s.fase) {
+                  @case ('ATTESA_SCELTA') {
+                    <p>
+                      <span class="rotella" aria-hidden="true"></span>
+                      Scegli le foto nella scheda di Google, poi premi <b>Fine</b>: l'app se ne accorge da sola.
+                    </p>
+                  }
+                  @case ('SCARICO') {
+                    <p>Scarico e importo: {{ s.fatte }} di {{ s.totali }}</p>
+                    <progress [value]="percentualeScelta(s)" max="100"></progress>
+                  }
+                  @case ('FINITA') {
+                    <p>Fatto: {{ s.totali }} scelte.</p>
+                  }
+                  @case ('ANNULLATA') {
+                    <p>Annullata.</p>
+                  }
+                  @case ('SCADUTA') {
+                    <p class="errore">Nessuna foto scelta in tempo: riprova.</p>
+                  }
+                  @case ('FALLITA') {
+                    <p class="errore">Non riuscita: {{ s.errore }}</p>
+                  }
+                }
+                @if (s.fatte) {
+                  <p class="tenue">
+                    {{ s.nuove }} nuove · {{ s.giaPresenti }} già presenti
+                    @if (s.errori) {
+                      · <span class="errore">{{ s.errori }} errori</span>
+                    }
+                  </p>
+                }
+                @if (s.messaggi.length) {
+                  <ul class="errori">
+                    @for (m of s.messaggi.slice(0, 8); track $index) {
+                      <li>{{ m }}</li>
+                    }
+                  </ul>
+                }
+                <div class="azioni">
+                  @if (s.inCorso) {
+                    @if (s.fase === 'ATTESA_SCELTA') {
+                      <button type="button" (click)="riapri(s)">Riapri la pagina di Google</button>
+                    }
+                    <button type="button" (click)="annullaScelta()">Annulla</button>
+                  } @else {
+                    <button type="button" (click)="chiudiScelta()">Va bene</button>
+                  }
+                </div>
+              </div>
+            }
+            <div class="azioni">
+              <button type="button" class="link" (click)="scollega()">Scollega Google</button>
+              <button type="button" class="primario" [disabled]="occupato() || scelta()?.inCorso" (click)="scegli()">
+                {{ occupato() ? 'Apro Google…' : 'Scegli foto' }}
+              </button>
+            </div>
+          }
+        </section>
+      } @else if (!admin()) {
+        <p class="tenue">Google Foto non è configurato su questo server: chiedi a chi lo gestisce.</p>
+      }
+    }
+
+    @if (admin()) {
+      <section class="parte" aria-labelledby="titolo-takeout">
+        <h3 id="titolo-takeout">Importa da Google Takeout</h3>
+        <p class="tenue">
+          Tutta la libreria: Google Takeout mette gli zip su Google Drive e l'app li importa uno alla volta, con le date,
+          i luoghi, le descrizioni, le preferite e gli album presi dai file JSON di Google. Come prepararlo: GUIDA.md,
+          "Google Foto".
+        </p>
+        @if (takeout(); as t) {
+          @if (!t.disponibile) {
+            <p class="errore">Qui non si può: {{ t.motivo }}</p>
+          }
+          @if (t.lavoro; as l) {
+            <div class="stato" role="status" aria-live="polite">
+              <p>
+                <b>
+                  @switch (l.fase) {
+                    @case ('ELENCO') { Cerco gli zip… }
+                    @case ('SCARICO') { Scarico {{ l.zip }} ({{ gb(l.scaricati) }} di {{ gb(l.daScaricare) }})… }
+                    @case ('IMPORTO') { Importo {{ l.zip }}: file {{ l.fileFatti | number }} di {{ l.fileTotali | number }} }
+                    @case ('ATTESA_CLOUD') { Aspetto che il cloud sia montato… }
+                    @case ('PULIZIA') { Tolgo da Drive gli zip vecchi… }
+                    @case ('FINITO') { Finito {{ l.finitoIl | date: 'd MMM, HH:mm' }} }
+                    @case ('ANNULLATO') { Annullato: con Avvia riparte da dove era }
+                    @case ('FALLITO') { Non riuscito }
+                  }
+                </b>
+                @if (l.inCorso && l.zipTotali) {
+                  <span class="tenue"> · zip {{ l.zipIndice }} di {{ l.zipTotali }}</span>
+                }
+              </p>
+              @if (l.inCorso) {
+                <progress [value]="percentualeTakeout(t)" max="100"></progress>
+              }
+              <p class="tenue">
+                {{ l.nuove | number }} nuove · {{ l.giaPresenti | number }} già presenti · {{ l.senzaJson | number }} senza JSON
+                · {{ l.saltati | number }} saltati (formato)
+                @if (l.errori) {
+                  · <span class="errore">{{ l.errori | number }} errori</span>
+                }
+              </p>
+              @if (l.errore) {
+                <p class="errore">{{ l.errore }}</p>
+              }
+              @if (l.messaggi.length) {
+                <ul class="errori">
+                  @for (m of l.messaggi.slice(0, 8); track $index) {
+                    <li>{{ m }}</li>
+                  }
+                </ul>
+              }
+            </div>
+          }
+
+          <form class="impostazioni" (ngSubmit)="salvaTakeout()">
+            <label>
+              Dove sono gli zip (remote di rclone e cartella)
+              <input name="sorgente" required [(ngModel)]="modulo.sorgente" placeholder="gdrive:Takeout" />
+            </label>
+            <label>
+              Le foto sono "caricate da"
+              @if (utenti().length) {
+                <select name="proprietario" [(ngModel)]="modulo.proprietario">
+                  <option value="">chi preme Avvia</option>
+                  @for (u of utenti(); track u.username) {
+                    <option [value]="u.username">{{ u.nome }} ({{ u.username }})</option>
+                  }
+                </select>
+              } @else {
+                <input name="proprietario" [(ngModel)]="modulo.proprietario" placeholder="vuoto = chi preme Avvia" />
+              }
+            </label>
+            <label>
+              Togli gli zip da Drive dopo quanti giorni dall'importazione (0 = mai)
+              <input name="giorni" type="number" min="0" [(ngModel)]="modulo.giorniPrimaDiCancellare" />
+            </label>
+            <p class="tenue">Gli zip si scaricano uno alla volta in <code>{{ t.cartella }}</code> sul server: serve spazio libero
+              quanto lo zip più grande, più un margine.</p>
+            <div class="azioni">
+              <button type="submit" [disabled]="salvando()">{{ salvando() ? 'Salvo…' : 'Salva' }}</button>
+              @if (t.lavoro?.inCorso) {
+                <button type="button" class="pericolo" (click)="annullaTakeout()">Annulla</button>
+              } @else {
+                <button type="button" class="primario" [disabled]="!t.disponibile" (click)="avviaTakeout()">Avvia</button>
+              }
+            </div>
+          </form>
+
+          @if (t.registro.length) {
+            <table class="registro">
+              <caption class="tenue">Zip già visti</caption>
+              <thead>
+                <tr><th>Zip</th><th>Stato</th><th>File</th><th>Nuove</th><th>Già presenti</th><th>Errori</th><th></th></tr>
+              </thead>
+              <tbody>
+                @for (z of t.registro; track z.id) {
+                  <tr [attr.data-stato]="z.stato">
+                    <td>
+                      {{ z.nome }}
+                      <span class="tenue">· {{ gb(z.dimensione) }}</span>
+                      @if (z.cancellatoIl) {
+                        <span class="tenue">· tolto da Drive</span>
+                      }
+                      @if (z.errore) {
+                        <div class="errore">{{ z.errore }}</div>
+                      }
+                    </td>
+                    <td>{{ nomeStatoZip(z) }}</td>
+                    <td>{{ z.fatti | number }} / {{ z.file | number }}</td>
+                    <td>{{ z.nuove | number }}</td>
+                    <td>{{ z.giaPresenti | number }}</td>
+                    <td>{{ z.errori | number }}</td>
+                    <td>
+                      @if (z.stato === 'CON_ERRORI' || z.stato === 'FATTO') {
+                        <button type="button" class="link" [disabled]="t.lavoro?.inCorso" (click)="riprova(z)">Riprova</button>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        } @else {
+          <p class="tenue">Carico…</p>
+        }
+      </section>
+    }
+  </section>
+</div>

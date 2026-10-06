@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import it.fototimeline.cloud.ArchivioNonDisponibile;
 import it.fototimeline.cloud.RcloneNonRiesce;
 import it.fototimeline.contenuto.VisioneNonRisponde;
+import it.fototimeline.salute.Telegram.TelegramNonRiesce;
 
 @RestControllerAdvice
 public class GestoreErrori {
@@ -24,6 +25,11 @@ public class GestoreErrori {
 
     @ExceptionHandler(VisioneNonRisponde.class)
     public ProblemDetail visione(VisioneNonRisponde e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, e.getMessage());
+    }
+
+    @ExceptionHandler(TelegramNonRiesce.class)
+    public ProblemDetail telegram(TelegramNonRiesce e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
 

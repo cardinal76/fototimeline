@@ -3,6 +3,8 @@
 Gestore di foto con timeline, da usare in locale sul proprio PC.
 
 **Le foto da pCloud, passo per passo** (trasloco, telefono, problemi noti): [GUIDA.md](GUIDA.md).
+**Da Amazon Foto** (o da qualsiasi cartella del PC): libreria scaricata con l'app per Windows,
+poi `deploy/foto-da-cartella.sh`; [GUIDA.md](GUIDA.md), "Da Amazon Foto".
 Il server: [DEPLOY.md](DEPLOY.md).
 
 - **Backend**: Spring Boot 3.5, Java 21, Maven, MongoDB (solo metadati).
@@ -52,20 +54,61 @@ Il server: [DEPLOY.md](DEPLOY.md).
   stessa barra delle importazioni.
 - **Importazione automatica**: una cartella (per esempio quella dove il
   telefono carica nel cloud) che ogni 15 minuti si svuota nell'archivio.
-- **Foto dal telefono via pCloud** (admin, sul server): ogni tot ore copia le
-  foto nuove da pCloud ("Automatic Upload") nella cartella automatica e, dopo
-  qualche giorno, le toglie da pCloud se sono state importate (DEPLOY.md).
-- **Visore** a schermo intero: ← → per scorrere, `F` preferita, `I` pannello
-  informazioni, `Esc` chiude. Dal pannello si modificano titolo, descrizione,
-  tag, album, data; si scarica l'originale o si elimina.
+- **Foto dai telefoni via pCloud** (sul server): un elenco di telefoni, uno per
+  familiare, ognuno con la sua cartella su pCloud (anche su account diversi),
+  il suo proprietario e i suoi orari. Ogni tot ore copia le foto nuove nella
+  cartella automatica e, dopo qualche giorno, le toglie da pCloud se sono
+  state importate. L'admin li aggiunge e li cambia; ognuno vede lo stato del
+  proprio e può lanciarne un giro (DEPLOY.md).
+- **Google Foto**, in due modi (pulsante *Google Foto*; dettagli sotto,
+  "Google Foto"):
+  - **Importa da Google Takeout** (admin, sul server): tutta la libreria dagli
+    zip che Google Takeout mette su Google Drive, uno zip alla volta, con data,
+    luogo, descrizione, preferita e album presi dai JSON di Google dove l'EXIF
+    non c'è. Registro degli zip fatti, riparte dopo un riavvio, si annulla.
+  - **Scegli da Google Foto** (chiunque sia entrato): collega il proprio
+    account Google, sceglie le foto nella pagina di Google (Picker API) e
+    l'app le scarica e le importa come *Carica foto*.
+- **Archivio di famiglia**: tutti vedono tutte le foto, ma ogni foto sa chi
+  l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
+  o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
+- **Visore** a tutto schermo: si vede solo la foto; ← → o il dito per
+  scorrere, `P` preferita, `I` pannello dei dettagli (si ricorda se lo si
+  lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
+  chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
+  si scarica l'originale o si elimina.
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
+- **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,
+  in italiano: "Sperlonga, Lazio · Italia", "Parigi, Île-de-France · Francia"),
+  calcolato sul server senza servizi esterni con i dati di
+  [GeoNames](https://www.geonames.org/) (CC BY 4.0). Si vede nel visore e nel
+  popup della mappa; il filtro **📍 Luogo** sceglie nazione, regione o luogo
+  da un elenco con i conteggi, o li cerca per nome. Le foto nuove lo prendono
+  all'importazione; per quelle già in archivio c'è **Calcola luoghi** (admin),
+  in sottofondo con la barra. Oltre 30 km dal centro abitato più vicino (mare
+  aperto) il luogo resta sconosciuto.
 - **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
-  anni passati ("3 anni fa"); si chiude fino al giorno dopo.
+  anni passati ("3 anni fa"); si chiude fino al giorno dopo. Ogni mattina
+  (alle 8, si cambia) anche su Telegram, nella chat degli avvisi o in una a
+  parte: fino a 6 foto, una per anno prima e le preferite prima, niente video
+  né quasi doppioni, con il luogo e il link "Tutte le foto di oggi"
+  (`/?ricordi=oggi`). Mai due volte lo stesso giorno; se all'ora giusta l'app
+  era giù, appena riparte. Impostazioni nel dialogo **Salute** (admin).
 - **App sul telefono**: dal browser "Aggiungi a schermata Home" / "Installa
   app" (manifest, icone, service worker); si apre a schermo intero.
+- **Condividi → FotoTimeline** (Android, Chrome/Edge; non iPhone): dalla
+  galleria si scelgono foto e video, "Condividi" e l'app installata. Il service
+  worker li tiene sul telefono (IndexedDB) e apre l'app su "Carica N foto dal
+  telefono": anteprime, album facoltativo, caricamento uno alla volta col
+  normale `POST /api/foto` (login, CSRF, doppioni come sempre). Se la sessione
+  è scaduta o il cloud è smontato i file aspettano lì (fino a 24 ore) e il
+  dialogo torna alla riapertura. Dettagli sotto, "Condividi dal telefono".
 - **Backup dei metadati**: ogni giorno una copia di date, titoli, tag e album
   nell'archivio (`.backup/`), ripristinabile con `mongoimport`.
+- **Salute** (admin): rclone, cloud, backup, telefoni, importazioni, spazio e
+  numeri dell'archivio con un pallino verde/giallo/rosso; avvisi su Telegram
+  quando una voce cambia stato (DEPLOY.md).
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
 - **Ricerca per contenuto** (sul server, col servizio `visione`): con
@@ -74,9 +117,26 @@ Il server: [DEPLOY.md](DEPLOY.md).
   "neve") e le foto arrivano dalla più somigliante, senza tag. CLIP
   multilingue su CPU, tutto in casa (DEPLOY.md). Sul PC, senza `VISIONE_URL`,
   l'interruttore non c'è.
+  fotocamera, luogo), tag, album, luogo, solo preferite, "Caricate da" (chi le
+  ha portate, con quante foto).
+- **Foto quasi uguali**: raffiche, scatti ripetuti, la stessa foto ridimensionata o
+  ricompressa da WhatsApp. Un gruppo alla volta con le miniature affiancate e,
+  sotto, risoluzione, peso, data e fotocamera; suggerisce quale tenere (la
+  risoluzione più alta, poi il file più grande, poi chi ha l'EXIF, poi la più
+  vecchia; le preferite restano sempre). "Togli le altre" elimina le scartate,
+  "Non sono doppioni" non le ripropone più. Il confronto usa un'impronta
+  percettiva (pHash a 64 bit) calcolata dalla miniatura all'importazione; per le
+  foto già in archivio c'è **Calcola impronte** (admin), in sottofondo.
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
   prendere un giorno intero.
+- **Condividere con un link** (chi non ha un account, per esempio gli amici
+  dopo una festa): dalla selezione (*Condividi…*) o da un album aperto
+  (*Condividi album*) si crea un link `https://<dominio>/c/<token>` con
+  titolo, scadenza (1, 7, 30 giorni o mai), download degli originali sì/no e
+  posizione GPS sì/no. Chi lo apre vede una galleria di sola lettura, senza
+  menu né login. *Condivisioni* elenca i link (visite, scadenza) con *Copia
+  link* e *Revoca*. Dettagli sotto, "Link di condivisione".
 
 Formati: JPEG, PNG, GIF, BMP, WebP, **HEIC** (iPhone) e **video** MP4/MOV.
 HEIC e video richiedono programmi esterni, che nel container ci sono: sul PC
@@ -86,9 +146,14 @@ rifiuta solo quei formati.
 
 - Gli **HEIC** restano HEIC nell'archivio; al browser arriva una "vista" JPEG.
 - I **video** prendono data, posizione e durata dal file; l'anteprima è un
-  fotogramma. Si riproducono nel browser così come sono: H.264 ovunque, HEVC
-  (i MOV recenti dell'iPhone) solo dove il browser lo supporta (Safari, Chrome
-  con accelerazione hardware).
+  fotogramma. Quelli H.264 con audio AAC/MP3 si riproducono così come sono.
+  Gli altri (HEVC dei MOV recenti dell'iPhone, VP9, ProRes, H.264 a 10 bit,
+  audio PCM), che non tutti i browser leggono, ricevono in sottofondo una
+  **versione compatibile** H.264/AAC in MP4, al massimo 1080p: un video alla
+  volta, con ffmpeg a priorità bassa. Finché non c'è, il visore avvisa "in
+  conversione" e offre l'originale da scaricare. Per i video già in archivio
+  c'è **Converti video** (admin). L'originale non si tocca: i convertiti
+  stanno in `<archivio>/.compatibili/<id>.mp4`.
 
 ## Sul server
 
@@ -147,6 +212,31 @@ java -jar target/fototimeline-1.0.0.jar
 | `VISIONE_SEGRETO`       | (vuoto)                                   | Segreto condiviso con visione (header `X-Visione-Segreto`) |
 | `FOTOTIMELINE_VISIONE_SOGLIA` | `0.24`                              | Somiglianza minima di un risultato per contenuto |
 | `FOTOTIMELINE_VISIONE_MARGINE` | `0.06`                             | Distacco massimo dalla foto più somigliante |
+| `FOTOTIMELINE_TELEFONO_PROPRIETARIO` | (vuoto)                      | Di chi è il telefono migrato da quando era uno solo; vuoto = del primo admin che entra |
+| `FOTOTIMELINE_LUOGHI`   | (vuoto; nel container `/app/geonames`)    | Cartella dei file di GeoNames; vuoto = niente luoghi |
+| `FOTOTIMELINE_LUOGHI_DISTANZA` | `30`                               | Km oltre i quali il luogo è sconosciuto  |
+| `FOTOTIMELINE_VIDEO_ATTIVA` | `true`                                | Versione compatibile dei video non H.264 |
+| `FOTOTIMELINE_VIDEO_RISOLUZIONE` | `1080`                           | Lato corto massimo dei convertiti (i 4K scendono) |
+| `FOTOTIMELINE_VIDEO_THREAD` | `2`                                   | Thread di ffmpeg per una conversione     |
+| `FOTOTIMELINE_VIDEO_DESTINAZIONE` | `<archivio>/.compatibili`       | Dove vanno i convertiti                  |
+| `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
+| `FOTOTIMELINE_TELEGRAM_TOKEN`, `FOTOTIMELINE_TELEGRAM_CHAT` | (vuoti) | Avvisi su Telegram della pagina "Salute"; vuoti = spenti |
+| `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
+| `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
+| `FOTOTIMELINE_DOMINIO`  | (vuoto)                                   | Il link all'app nei messaggi di Telegram |
+| `FOTOTIMELINE_RICORDI_ATTIVO` | `true`                              | "Accadde oggi" su Telegram ogni mattina (serve anche il token); valore iniziale, poi dall'app |
+| `FOTOTIMELINE_RICORDI_ORA` | `08:00`                                | Da che ora mandarli (valore iniziale)    |
+| `FOTOTIMELINE_RICORDI_FOTO` | `6`                                   | Foto al massimo, 1–10 (valore iniziale)  |
+| `FOTOTIMELINE_RICORDI_CHAT` | (vuoto)                               | Chat dei ricordi; vuota = quella degli avvisi |
+| `FOTOTIMELINE_RICORDI_FUSO` | `Europe/Rome`                         | Fuso dell'ora e del "giorno di oggi"     |
+| `FOTOTIMELINE_RICORDI_NESSUNO` | `false`                            | "Nessun ricordo oggi" nei giorni senza foto (valore iniziale) |
+| `FOTOTIMELINE_TAKEOUT_SORGENTE` | `gdrive:Takeout`                  | Dove sono gli zip di Google Takeout (remote di rclone e cartella); valore iniziale, poi dall'app |
+| `FOTOTIMELINE_TAKEOUT_CARTELLA` | `<tmp>/fototimeline-takeout` (container: `/takeout`) | Dove si scarica uno zip alla volta, sul disco del server |
+| `FOTOTIMELINE_TAKEOUT_CARTELLA_RCLONE` | (uguale alla precedente)   | La stessa cartella vista dal container di rclone |
+| `FOTOTIMELINE_TAKEOUT_RISERVA` | `2GB`                              | Spazio da lasciare libero oltre allo zip; se manca, si ferma e lo dice |
+| `FOTOTIMELINE_GOOGLE_CLIENT_ID`, `FOTOTIMELINE_GOOGLE_CLIENT_SECRET` | (vuoti) | Client OAuth di Google per "Scegli da Google Foto"; vuoti = funzione nascosta |
+| `FOTOTIMELINE_GOOGLE_CHIAVE` | (vuota)                              | Chiave per cifrare i refresh token in MongoDB; vuota = derivata dal client secret |
+| `FOTOTIMELINE_GOOGLE_REDIRECT` | (vuoto)                            | Redirect URI fisso; vuoto = `<indirizzo dell'app>/api/google/callback` |
 
 Sul PC il server ascolta solo su `127.0.0.1`: non c'è login e *Importa
 cartella* legge qualunque cartella. Con il login spento e un altro indirizzo
@@ -160,36 +250,223 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
 | GET    | `/api/importazioni/corrente` | Importazione in corso o ultima finita (204 se nessuna)     |
 | POST   | `/api/importazioni/annulla`  | Ferma quella in corso                                      |
 | GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
-| GET    | `/api/io`                    | Utente collegato, se è admin, radice di importazione       |
+| GET    | `/api/io`                    | Utente collegato (`username`, `nome`), se è admin, radice di importazione; registra l'utente in `utenti` |
+| GET    | `/api/utenti`                | Utenti entrati almeno una volta: username, nome, email, primo e ultimo accesso, admin (ruolo `fototimeline-admin`) |
+| GET    | `/api/caricate-da`           | Chi ha portato foto e quante (`username`, `nome`, `conteggio`), per il filtro |
 | GET    | `/api/cloud`                 | Cloud montato o no                                         |
 | GET    | `/api/backup`                | Backup dei metadati presenti                               |
 | POST   | `/api/backup`                | Fa subito un backup (ruolo `fototimeline-admin`)           |
 | POST   | `/api/cloud/monta`, `/smonta`| Monta o smonta il cloud (ruolo `fototimeline-admin`)       |
-| GET    | `/api/telefono`              | Sincronizzazione del telefono: impostazioni, ultimo giro, `disponibile`/`motivo`, `inCorso` (ruolo `fototimeline-admin`) |
-| PUT    | `/api/telefono`              | `{ attiva, sorgente, intervalloOre, giorniPrimaDiCancellare }` (400 fuori misura; admin) |
-| POST   | `/api/telefono/sincronizza`  | Un giro subito, in sottofondo: 202, 409 se già in corso (admin) |
+| GET    | `/api/telefoni`              | `{ disponibile, motivo, destinazione, telefoni: [...] }`: ogni telefono con impostazioni, `inCorso`/`inCoda`, ultimo giro, giro in corso, prossimo giro. L'admin li vede tutti, gli altri solo i propri |
+| POST   | `/api/telefoni`              | Aggiunge un telefono: `{ nome, proprietario, sorgente, attiva, intervalloOre, giorniPrimaDiCancellare, copieInParallelo }` (201; 400 fuori misura o cartella già usata; admin) |
+| PUT    | `/api/telefoni/{id}`         | Cambia un telefono, stessi campi (null = com'è; admin) |
+| DELETE | `/api/telefoni/{id}`         | Toglie un telefono; il registro delle copie resta (204; 409 durante un giro; admin) |
+| POST   | `/api/telefoni/{id}/sincronizza` | Un giro subito, in coda dietro agli altri: 202, 409 se già in coda (admin o proprietario) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
 | GET    | `/api/foto/cerca-contenuto`  | Ricerca per contenuto: `q` (cosa c'è nella foto), `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione`; foto dalla più somigliante (409 se la funzione è spenta, 502 se visione non risponde) |
 | GET    | `/api/contenuto`             | Ricerca per contenuto: `attiva`, foto, `indicizzate`, `mancanti`, `nellIndice`, ultimo lavoro |
 | POST   | `/api/contenuto/indicizza`   | "Indicizza contenuto" in sottofondo (`daCapo=true` per rifare tutto); 202, 409 se già in corso (admin) |
 | POST   | `/api/contenuto/annulla`     | Ferma "Indicizza contenuto" (admin)                        |
+| GET    | `/api/archivio/video`        | Coda dei video da convertire: `fatti`, `daFare`, `corrente`, `percentuale`, `inAttesa` (cloud smontato) |
+| POST   | `/api/archivio/video/converti` | "Converti video": mette in coda i video già in archivio che ne hanno bisogno, 202 (admin) |
+| POST   | `/api/archivio/video/annulla`  | Ferma quello in corso e svuota la coda (admin)          |
+| GET    | `/api/quasi-uguali`          | Gruppi di foto quasi uguali (`pagina`, `dimensione`), dal più numeroso, con la `suggerita` da tenere |
+| POST   | `/api/quasi-uguali/risolvi`  | `{ tieni: [id], togli: [id] }`: elimina le `togli` come `DELETE /api/foto/{id}` (503 col cloud smontato, 400 per una preferita) |
+| POST   | `/api/quasi-uguali/ignora`   | `{ ids: [id] }`: "non sono doppioni", il gruppo non ricompare |
+| GET    | `/api/quasi-uguali/calcola`  | "Calcola impronte": stato, avanzamento e foto ancora senza impronta |
+| POST   | `/api/quasi-uguali/calcola`  | Lo avvia in sottofondo: 202, 409 se già in corso (ruolo `fototimeline-admin`); `/calcola/annulla` lo ferma |
+| GET    | `/api/salute`                | `{ stato, voci: [{ chiave, titolo, stato, messaggio, dettagli }], controllatoIl, avvisiTelegram }`, stato `OK`/`ATTENZIONE`/`ERRORE` (admin) |
+| POST   | `/api/salute/prova`          | Messaggio di prova su Telegram: 204, 409 se non configurato, 502 se Telegram rifiuta (admin) |
+| GET    | `/api/ricordi-telegram`      | `{ attivo, ora, foto, nessunRicordo, telegramConfigurato, chatSeparata, fuso, ultimoGiorno, ultimoInvioIl, ultimoEsito }` (admin; mai token né chat) |
+| PUT    | `/api/ricordi-telegram`      | `{ attivo, ora: "HH:mm", foto: 1–10, nessunRicordo }`: salvati in Mongo, 400 se non validi (admin) |
+| POST   | `/api/ricordi-telegram/prova` | I ricordi di oggi subito, anche se già mandati (senza ricordi "Nessun ricordo oggi"): `{ messaggio }`, 409 se Telegram non è configurato, 502 se rifiuta (admin) |
+| GET    | `/salute`                    | Healthcheck di Docker: `ok`, senza login                   |
+| POST   | `/ricevi-condivisi`          | Action dello `share_target`: la prende il service worker; se arriva al server, 303 verso `/?condivisi=senza-app` senza leggere i file |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
 | POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto                  |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
-| GET    | `/api/foto/{id}/file`        | Originale (`?scarica=true` per scaricarlo); con `Range` per i video |
+| GET    | `/api/foto/{id}/file`        | Il file, con `Range` per i video: la versione compatibile se c'è, altrimenti l'originale; `?originale=true` o `?scarica=true` (allegato) per l'originale |
 | GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
-| GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline)                |
+| GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline), col nome del luogo |
+| GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, regioni: [{ nome, conteggio, luoghi: [{ nome, conteggio }] }] }] }`, i più fotografati prima |
+| POST   | `/api/archivio/luoghi`       | "Calcola luoghi" in sottofondo, stato come `/api/importa`; `?tutte=true` rifà anche quelle che ce l'hanno (ruolo `fototimeline-admin`; 409 senza dataset) |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
+
+Google Foto (dietro login; il Takeout solo `fototimeline-admin`; mai client
+secret né token nelle risposte):
+
+| Metodo | Percorso                     | Cosa fa                                                    |
+|--------|------------------------------|------------------------------------------------------------|
+| GET    | `/api/google`                | `{ configurato, collegato, collegatoIl, scelta }` per l'utente |
+| GET    | `/api/google/collega`        | Navigazione: 302 al consenso di Google (solo lo scope `photospicker.mediaitems.readonly`), `state` in sessione; 404 se non configurato |
+| GET    | `/api/google/callback`       | Ritorno da Google: controlla `state` (sessione, utente, 15 minuti), scambia il codice, salva il refresh token cifrato; 302 a `/?google=collegato` (o `negato`, `errore`) |
+| POST   | `/api/google/scelta`         | Nuova sessione del Picker: 201 con `pickerUri` (già con `/autoclose`); 409 se non collegato o già una in corso, 503 col cloud smontato |
+| GET    | `/api/google/scelta`         | La scelta in corso o l'ultima: `fase` (`ATTESA_SCELTA`, `SCARICO`, `FINITA`, `ANNULLATA`, `SCADUTA`, `FALLITA`), `totali`, `fatte`, `nuove`, `giaPresenti`, `errori`, `messaggi` (204 se nessuna) |
+| POST   | `/api/google/scelta/annulla`, `/chiudi` | Ferma quella in corso; toglie dalla vista quella finita |
+| POST   | `/api/google/scollega`       | Revoca il token su Google e lo cancella (204)              |
+| GET    | `/api/google/takeout`        | `{ disponibile, motivo, sorgente, proprietario, giorniPrimaDiCancellare, cartella, lavoro, registro }` (admin) |
+| PUT    | `/api/google/takeout`        | `{ sorgente, proprietario, giorniPrimaDiCancellare }` (400 se non validi; admin) |
+| POST   | `/api/google/takeout/avvia`  | Parte in sottofondo: 202, 409 se già in corso o senza rclone (admin) |
+| POST   | `/api/google/takeout/annulla` | Si ferma dopo il file in corso; lo zip riparte da lì al prossimo *Avvia* (admin) |
+| POST   | `/api/google/takeout/zip/{id}/riprova` | Toglie uno zip dal registro: al prossimo *Avvia* si rifà (admin) |
+
+Link di condivisione (dietro login come il resto):
+
+| Metodo | Percorso                     | Cosa fa                                                    |
+|--------|------------------------------|------------------------------------------------------------|
+| POST   | `/api/condivisioni`          | Crea: `{ titolo, ids \| album \| dal+al, giorni: 1/7/30/null, download, posizione }` → 201 col token |
+| GET    | `/api/condivisioni`          | I link dell'utente (l'admin li vede tutti), con visite e ultimo accesso |
+| DELETE | `/api/condivisioni/{id}`     | Revoca (solo chi l'ha creato o l'admin; per gli altri 404)  |
+
+**Pubbliche, senza login** (solo GET; ogni richiesta controlla il token):
+
+| Metodo | Percorso                                        | Cosa fa                                        |
+|--------|-------------------------------------------------|------------------------------------------------|
+| GET    | `/c/{token}`                                    | La pagina (index.html dell'app, che mostra solo la galleria) |
+| GET    | `/api/condivise/{token}`                        | Titolo, scadenza, download, foto; 404 link sconosciuto, 410 scaduto o revocato |
+| GET    | `/api/condivise/{token}/foto/{id}/miniatura`    | Miniatura                                      |
+| GET    | `/api/condivise/{token}/foto/{id}/vista`        | JPEG al massimo di 2048 px, senza EXIF         |
+| GET    | `/api/condivise/{token}/foto/{id}/video`        | Il video (originale, con `Range`)              |
+| GET    | `/api/condivise/{token}/foto/{id}/originale`    | Originale da scaricare (403 senza download)    |
+| GET    | `/api/condivise/{token}/zip`                    | Tutti gli originali in uno zip (403 senza download) |
+
+### Link di condivisione
+
+- **Chi li crea**: ogni utente collegato (vede già tutte le foto, e il link
+  porta il suo nome); ognuno vede e revoca i suoi, l'admin tutti.
+- **Token**: 256 bit da `SecureRandom` in base64url (43 caratteri). È
+  salvato in chiaro in `condivisioni`, perché chi ha creato il link possa
+  ricopiarlo: chi legge il database può aprire i link.
+- **Le foto sono fissate alla creazione**: un album che cresce dopo non
+  allarga il link; le foto eliminate spariscono. Al massimo 2000 per link.
+- **Una foto che non è nel link risponde 404**, come un token sconosciuto.
+- **Chi ha il link vede** titolo del link, data di scatto, titolo della foto,
+  dimensioni e durata dei video. **Non vede** nome del file, percorso nel
+  cloud, descrizione, tag, album, fotocamera, hash, chi ha creato il link; la
+  posizione GPS solo se spuntata ("Includi la posizione", spenta di solito).
+- **Le foto si vedono da un JPEG ridotto e senza metadati**, fatto la prima
+  volta dall'originale e tenuto in `<miniature>/condivise/`. I **video** si
+  guardano dall'originale anche senza download (altrimenti non si
+  guarderebbero): il file può contenere la posizione registrata dal telefono.
+  Con il download permesso, originali e zip sono i file come sono, EXIF e GPS
+  compresi (il dialogo lo dice).
+- **Zip** scritto direttamente sulla risposta, un file alla volta a pezzi di
+  64 KB (la JVM ha 384 MB). JPEG e video non si ricomprimono (deflate livello
+  0); non STORED perché vorrebbe CRC e dimensione prima di ogni file, cioè
+  leggerlo due volte dal cloud. Nei download i nomi sono la data di scatto
+  (`2024-05-17 14.03.22.jpg`), non quelli dell'archivio.
+- **Cloud smontato**: la galleria e le miniature si vedono; vista non ancora
+  preparata, originali e zip rispondono 503 con un messaggio per chi ha il link.
+- **Freno per IP** (`LimiteRichieste`, in memoria): 1200 richieste al minuto
+  sui path pubblici e, dopo 20 link sconosciuti (o foto fuori dal link) in 15
+  minuti, 429 per 15 minuti. Gli IPv6 contano per la loro /64.
+  `fototimeline.condivisioni.*` in `application.yml`.
+- La pagina risponde con `Referrer-Policy: no-referrer` e `X-Robots-Tag: noindex`.
+
+### Condividi dal telefono
+
+- Il manifest ha uno `share_target` (`POST /ricevi-condivisi`, multipart, campo
+  `file` per `image/*` e `video/*`, anche `.heic` e `.mov`; titolo e testo si
+  ignorano). Android lo aggiunge al foglio "Condividi" per la PWA installata.
+- La POST la prende `sw.js`: mette ogni file in IndexedDB
+  (`fototimeline-condivisi`, archivio `file`: nome, tipo, dimensione, data di
+  modifica, momento d'arrivo, il file) e risponde 303 verso
+  `/?condivisi=<lotto>`. Non serve il login: i file restano sul telefono.
+- L'app (`ricevi-condivisi.ts`, `condivisi-in-attesa.ts`) all'avvio, con o
+  senza `?condivisi=`, guarda se ci sono file in attesa e apre il dialogo. Ogni
+  file è una `POST /api/foto` a sé e si toglie da IndexedDB appena il server
+  risponde (nuova, già presente o rifiutata); con 503 (cloud smontato), rete
+  assente o 401 si ferma e i rimasti aspettano. Dopo 24 ore li butta il service
+  worker (o l'app).
+- **Senza service worker** (prima apertura, browser senza) la POST arriva al
+  server senza token CSRF: il CSRF la respinge come ogni altra, e solo per quel
+  percorso invece del 403 c'è un 303 verso `/?condivisi=senza-app` (l'app dice
+  di riaprirla e riprovare; senza login quell'indirizzo porta a Keycloak). Il
+  CSRF non ha eccezioni e i file non si leggono: si carica solo da
+  `/api/foto`. `RiceviCondivisiController` risponde allo stesso modo se una
+  POST col token arrivasse fin lì. Test in `SicurezzaTest`.
+
+### Google Foto
+
+Da marzo 2025 la Google Photos Library API vede solo le foto caricate
+dall'app stessa: la libreria intera si porta via con **Google Takeout**, le
+scelte puntuali con la **Picker API**. Pacchetto `google`.
+
+**Importa da Google Takeout** (`ImportazioneTakeout`, thread `takeout`, uno
+zip alla volta):
+
+- elenca gli `.zip` della sorgente (`gdrive:Takeout`) con `operations/list`;
+  quelli nel registro `takeout_zip` (chiave nome + dimensione + data) come
+  `FATTO` o `CON_ERRORI` si saltano, `IN_CORSO` riparte dal file a cui era
+  arrivato (`fatti`), `FALLITO` si rifà;
+- prima di scaricare controlla lo spazio (`zip + FOTOTIMELINE_TAKEOUT_RISERVA`)
+  e, se manca, si ferma col messaggio; lo scarica con `operations/copyfile`
+  asincrono (`_async`, `job/status`, `job/stop` annullando, `core/stats` per
+  la barra) in `/takeout`, una cartella del disco di server2 montata sia in
+  rclone sia nell'app;
+- lo apre con `java.util.zip.ZipFile` (accesso diretto, ZIP64 compreso, niente
+  estrazione completa): un file alla volta va in un temporaneo accanto allo
+  zip e passa da `FotoService.importa` (doppioni per SHA-256, miniature,
+  luoghi, impronte), poi lo zip si cancella;
+- **JSON di Takeout** (`SidecarTakeout`): `nome.jpg.json`,
+  `nome.jpg.supplemental-metadata.json` anche tagliato
+  (`.supplemental-metad.json`), nomi tagliati a 46–51 caratteri,
+  `nome.json` dei Takeout vecchi, `nome(1).jpg` ↔ `nome.jpg(1).json`,
+  `-edited`/`-modificato` col JSON dell'originale, Live Photo e foto in
+  movimento (`.MOV`, `.MP4`, `.MP` accanto alla foto) col JSON della foto. I
+  `.MP` dei Pixel entrano come `.mp4`;
+- dal JSON (`MetadatiTakeout`): `photoTakenTime` (UTC, portato nel fuso
+  dell'app; `creationTime` se manca) vale come data **solo se l'EXIF non ce
+  l'ha** (`origineData = GOOGLE`); `geoData`, poi `geoDataExif` (0,0 = niente)
+  solo se l'EXIF non ha il GPS; `description`; `favorited` → preferita. I file
+  non si riscrivono (nell'immagine non c'è exiftool): i metadati di Google
+  stanno solo nella scheda in MongoDB (e quindi nel backup dei metadati);
+- album: il `title` del `metadata.json` della cartella, altrimenti il nome
+  della cartella; le cartelle per anno ("Photos from 2019", "Foto dal 2019"),
+  Cestino e Archivio non sono album. Un album che l'app ha già, scritto con
+  altre maiuscole, si riusa;
+- contatori per zip: nuove, già presenti, senza JSON, saltati (formati che
+  l'archivio non accetta, per esempio `.avi`), errori;
+- col cloud smontato aspetta; dopo un riavvio riparte da solo se era in corso
+  (`impostazioni/google-takeout`, `richiesto`); "Caricate da" è il proprietario
+  scelto o chi ha premuto *Avvia*; con `giorniPrimaDiCancellare > 0` toglie da
+  Drive gli zip `FATTO` (senza errori) dopo quei giorni, se su Drive c'è
+  ancora lo stesso file;
+- la pagina "Salute" ha la voce `google-takeout`: rossa se uno zip non è
+  entrato, gialla se ha file non entrati (*Riprova* nel pannello).
+
+**Scegli da Google Foto** (`SceltaGoogleFoto`, `ClientGoogle`, senza SDK):
+
+- OAuth 2.0 *authorization code* con `access_type=offline`, `prompt=consent`
+  e il solo scope `photospicker.mediaitems.readonly`; `state` casuale in
+  sessione, legato all'utente, valido 15 minuti, confrontato a tempo costante.
+  Il callback è `/api/google/callback`, dietro login come il resto;
+- il refresh token sta in `google_token` (uno per utente) cifrato con
+  AES-256-GCM: chiave = SHA-256 di `FOTOTIMELINE_GOOGLE_CHIAVE` o, se manca,
+  del client secret; IV casuale, username come dato associato. Cambiando chiave
+  o secret ognuno ricollega Google. L'access token resta in memoria. Un
+  `invalid_grant` (revocato, scaduto) cancella il token e chiede di ricollegare;
+- `POST sessions` → l'app apre `pickerUri/autoclose` in una scheda nuova → un
+  thread chiede `GET sessions/{id}` ogni `pollInterval`, fino a `timeoutIn`,
+  finché `mediaItemsSet` → `GET mediaItems` (pagine da 100) → ogni file da
+  `baseUrl=d` (foto) o `=dv` (video) con `Authorization: Bearer`, su disco →
+  `FotoService.importa` con `caricataDa` = l'utente e `createTime` come data
+  di riserva → `DELETE sessions/{id}`. Un file che non riesce conta come
+  errore e si passa al successivo.
+
+Test: `SidecarTakeoutTest` (nomi e JSON), `ImportazioneTakeoutTest` (zip veri
+generati nel test, rclone finto), `SceltaGoogleFotoTest` (Google simulato con
+`MockRestServiceServer`), `SicurezzaTest`.
 
 ## Test
 
@@ -224,6 +501,24 @@ Solo sulla rete interna di Docker, tutte (tranne `/salute`) con l'header
 | POST   | `/clip/indice` | Più foto insieme: multipart, un `file` per foto con l'id come nome del file |
 | DELETE | `/clip/indice/{id}` | Toglie (404 se non c'era) |
 | GET    | `/clip/cerca` | `q`, `k` (≤ 2000), `soglia` → `{"risultati":[{"id","punteggio"}]}` dal più simile |
+il binario di MongoDB. Per i luoghi usano un mini dataset di GeoNames in
+`src/test/resources/geonames` (Roma, Sperlonga, Parigi, ...).
+
+### Luoghi sul PC
+
+Il dataset non sta nel repository. Per avere i luoghi anche sul PC:
+
+```bash
+mkdir -p ~/geonames && cd ~/geonames
+curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
+curl -O https://download.geonames.org/export/dump/admin1CodesASCII.txt
+curl -O https://download.geonames.org/export/dump/countryInfo.txt
+export FOTOTIMELINE_LUOGHI=~/geonames      # poi ./mvnw spring-boot:run
+```
+
+Così i nomi stranieri restano quelli di GeoNames (Rome, Paris); i nomi in
+italiano vengono da `alternateNames-it.txt`, che fa il Dockerfile (stage
+`geonames`).
 
 ## CI su server2
 

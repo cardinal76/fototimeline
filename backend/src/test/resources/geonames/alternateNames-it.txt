@@ -1,0 +1,12 @@
+1348641	3169070	it	Roma	1					
+1656930	3166283	it	Sperlonga						
+1656319	3176843	it	Fondi						
+1643943	3176438	it	Gaeta						
+1646306	3165762	it	Terracina						
+1992515	3175058	it	Latina						
+1592132	2988507	it	Parigi						
+1598938	2867714	it	Monaco di Baviera						
+1350464	3174976	it	Lazio	1	1				
+7825609	3174976	it	Regione Lazio						
+17922002	3012874	it	Île-de-France						
+1894576	2951839	it	Baviera						
