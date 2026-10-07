@@ -66,6 +66,8 @@ fototimeline:
   importazione-automatica:
     cartella: ${FOTOTIMELINE_CARTELLA_AUTOMATICA:}
     intervallo: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:PT15M}
+    # I file modificati da meno di così aspettano il giro dopo: forse sono ancora in copia.
+    attesa: ${FOTOTIMELINE_ATTESA_AUTOMATICA:PT10M}
   # Foto nuove dai telefoni (pCloud) nella cartella automatica (i telefoni si
   # aggiungono nell'app, da admin): ogni quanto controllare se è ora di un giro.
   telefono:

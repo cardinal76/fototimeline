@@ -67,7 +67,7 @@ class SincronizzazioneTelefonoTest {
     private static final CloudProperties CLOUD = new CloudProperties("http://rclone:5572", "fototimeline",
             "password-di-prova", "lifetime:", "/cloud", false, 0);
     private static final ImportazioneAutomaticaProperties AUTOMATICA =
-            new ImportazioneAutomaticaProperties(Path.of("/cloud/telefono"), null);
+            new ImportazioneAutomaticaProperties(Path.of("/cloud/telefono"), null, null);
 
     @TempDir
     static Path archivio;
@@ -216,6 +216,85 @@ class SincronizzazioneTelefonoTest {
                 .containsExactly("Pixel 8/IMG_0001.jpg");
         // La copia a metà non resta lì ad aspettare l'importazione.
         assertThat(rclone.lifetime).containsOnlyKeys("telefono/Pixel 8 - IMG_0001.jpg");
+    }
+
+    @Test
+    void laCopiaEAsincronaEIVideoGrandiNonScadonoColTimeoutHttp() {
+        rclone.pcloud.put("Automatic Upload/Pixel 8/VID_0001.mp4", 3L * SincronizzazioneTelefono.GRANDE);
+        rclone.pcloud.put("Automatic Upload/Pixel 8/IMG_0002.jpg", 100L);
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.copiati()).isEqualTo(2);
+        assertThat(rclone.asincrone("operations/copyfile")).isEqualTo(2);
+        assertThat(rclone.chiamate("job/status")).hasSize(2);
+        assertThat(rclone.lifetime).containsEntry("telefono/Pixel 8 - VID_0001.mp4", 3L * SincronizzazioneTelefono.GRANDE);
+    }
+
+    @Test
+    void unaRispostaPersaMaIlFileArrivatoInteroNonEUnErrore() {
+        rclone.pcloud.put("Automatic Upload/Pixel 8/VID_0001.mp4", 5000L);
+        rclone.risposteCadute.add("Automatic Upload/Pixel 8/VID_0001.mp4");
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.copiati()).isEqualTo(1);
+        // Arrivato intero: non si ricopia.
+        assertThat(rclone.chiamate("operations/copyfile")).hasSize(1);
+        assertThat(mongo.findAll(CopiaTelefono.class)).extracting(CopiaTelefono::destinazione)
+                .containsExactly("telefono/Pixel 8 - VID_0001.mp4");
+    }
+
+    @Test
+    void unaCopiaNonRiuscitaSiRiprovaUnaVolta() {
+        rclone.pcloud.put("Automatic Upload/Pixel 8/VID_0001.mp4", 5000L);
+        rclone.fallisconoUnaVolta.add("Automatic Upload/Pixel 8/VID_0001.mp4");
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.copiati()).isEqualTo(1);
+        assertThat(rclone.chiamate("operations/copyfile")).hasSize(2);
+        assertThat(rclone.lifetime).containsEntry("telefono/Pixel 8 - VID_0001.mp4", 5000L);
+    }
+
+    @Test
+    void unaCopiaCheNonFiniscePiuSiFermaEIGliAltriVannoAvanti() {
+        sincronizzazione.tempiCopia(Duration.ofMillis(5), Duration.ofMillis(50));
+        rclone.pcloud.put("Automatic Upload/Pixel 8/VID_0001.mp4", 1000L);
+        rclone.pcloud.put("Automatic Upload/Pixel 8/IMG_0002.jpg", 100L);
+        rclone.lenti.add("Automatic Upload/Pixel 8/VID_0001.mp4");
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.ERRORE);
+        assertThat(giro.copiati()).isEqualTo(1);
+        assertThat(giro.errori()).isEqualTo(1);
+        assertThat(giro.messaggiErrori()).singleElement().asString().contains("VID_0001.mp4", "non finita");
+        // Fermata in rclone, e riprovata una volta prima di arrendersi.
+        assertThat(rclone.chiamate("job/stop")).hasSize(2);
+        assertThat(mongo.findAll(CopiaTelefono.class)).extracting(CopiaTelefono::percorso)
+                .containsExactly("Pixel 8/IMG_0002.jpg");
+        // Al giro dopo si riprova.
+        rclone.lenti.clear();
+        assertThat(sincronizzazione.sincronizza(marco).copiati()).isEqualTo(1);
+    }
+
+    @Test
+    void unFileArrivatoInteroInUnGiroDiPrimaNonSiRicopiaConUnAltroNome() {
+        rclone.pcloud.put("Automatic Upload/Pixel 8/VID_0001.mp4", 5000L);
+        // Il giro di prima aveva smesso di aspettare, ma rclone l'aveva finita.
+        rclone.lifetime.put("telefono/Pixel 8 - VID_0001.mp4", 5000L);
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.copiati()).isEqualTo(1);
+        assertThat(rclone.chiamate("operations/copyfile")).isEmpty();
+        assertThat(rclone.lifetime).containsOnlyKeys("telefono/Pixel 8 - VID_0001.mp4");
+        assertThat(mongo.findAll(CopiaTelefono.class)).extracting(CopiaTelefono::destinazione)
+                .containsExactly("telefono/Pixel 8 - VID_0001.mp4");
     }
 
     @Test
@@ -554,7 +633,7 @@ class SincronizzazioneTelefonoTest {
         var cloud = new CloudProperties("http://rclone:5572", "fototimeline", "password-di-prova", "lifetime:",
                 montaggio.toString(), false, 0);
         Path cartella = montaggio.resolve("telefono");
-        var conDisco = nuova(cloud, new ImportazioneAutomaticaProperties(cartella, null), "");
+        var conDisco = nuova(cloud, new ImportazioneAutomaticaProperties(cartella, null, null), "");
         String anna = conDisco.crea(new Modifica("Telefono di Anna", "anna", null, "pcloud-anna:Automatic Upload",
                 null, null, null)).id();
         rclone.pcloud.put("Automatic Upload/Camera/IMG_0001.png", 100L);
@@ -584,6 +663,26 @@ class SincronizzazioneTelefonoTest {
         assertThat(fotoService.album()).isEmpty();
     }
 
+    @Test
+    void mentreSiCopiaIlFileELImportazioneNonLoLegge(@TempDir Path montaggio) {
+        var cloud = new CloudProperties("http://rclone:5572", "fototimeline", "password-di-prova", "lifetime:",
+                montaggio.toString(), false, 0);
+        var conDisco = nuova(cloud, new ImportazioneAutomaticaProperties(montaggio.resolve("telefono"), null, null), "");
+        String id = conDisco.crea(new Modifica("Telefono", "marco", null, "pcloud-anna:Automatic Upload",
+                null, null, null)).id();
+        rclone.pcloudAnna.put("Automatic Upload/Camera/VID_0001.mp4", 5000L);
+        Path file = montaggio.resolve("telefono/Camera - VID_0001.mp4");
+        List<Boolean> visti = new ArrayList<>();
+        rclone.duranteLaCopia = destinazione -> visti.add(conDisco.inArrivo(montaggio.resolve(destinazione)));
+
+        conDisco.sincronizza(id);
+
+        assertThat(visti).containsExactly(true);
+        // Registrato: non è più in arrivo.
+        assertThat(conDisco.inArrivo(file)).isFalse();
+        assertThat(conDisco.caricataDa(file)).isEqualTo("marco");
+    }
+
     private static byte[] immagine(Color colore) throws IOException {
         var img = new BufferedImage(32, 24, BufferedImage.TYPE_INT_RGB);
         var g = img.createGraphics();
@@ -605,9 +704,9 @@ class SincronizzazioneTelefonoTest {
         assertThatThrownBy(() -> pc.avvia(marco)).isInstanceOf(IllegalStateException.class);
         assertThat(pc.caricataDa(Path.of("/cloud/telefono/IMG_0001.jpg"))).isNull();
 
-        var fuori = nuova(CLOUD, new ImportazioneAutomaticaProperties(Path.of("/altrove/telefono"), null), "");
+        var fuori = nuova(CLOUD, new ImportazioneAutomaticaProperties(Path.of("/altrove/telefono"), null, null), "");
         assertThat(fuori.motivo()).contains("non sta dentro il punto di montaggio");
-        var senza = nuova(CLOUD, new ImportazioneAutomaticaProperties(null, null), "");
+        var senza = nuova(CLOUD, new ImportazioneAutomaticaProperties(null, null, null), "");
         assertThat(senza.motivo()).contains("non è impostata");
     }
 
@@ -632,7 +731,17 @@ class SincronizzazioneTelefonoTest {
         final Map<String, Long> pcloudAnna = new LinkedHashMap<>();
         /** File della sorgente che arrivano in destinazione a metà. */
         final List<String> troncati = new ArrayList<>();
+        /** Copie che non finiscono mai (job/status dice sempre "in corso"). */
+        final List<String> lenti = new ArrayList<>();
+        /** Copie che rclone finisce, ma la risposta si perde (il "Request cancelled" di produzione). */
+        final List<String> risposteCadute = new ArrayList<>();
+        /** Copie che la prima volta falliscono senza copiare niente, la seconda vanno. */
+        final List<String> fallisconoUnaVolta = new ArrayList<>();
         final List<Map<String, Object>> chiamate = new ArrayList<>();
+        /** Chiamato a ogni job/status con la destinazione, mentre la copia "gira". */
+        java.util.function.Consumer<String> duranteLaCopia = destinazione -> {
+        };
+        private final Map<Long, List<String>> job = new HashMap<>();
 
         FintoRclone(RestClient.Builder builder) {
             MockRestServiceServer.bindTo(builder).build()
@@ -640,14 +749,21 @@ class SincronizzazioneTelefonoTest {
                     .andRespond(this::rispondi);
         }
 
+        /** Le chiamate di un comando, coi parametri; {@code _async} a parte ({@link #asincrone}). */
         synchronized List<Map<String, Object>> chiamate(String comando) {
             return chiamate.stream().filter(c -> comando.equals(c.get("comando")))
                     .map(c -> {
                         Map<String, Object> p = new HashMap<>(c);
                         p.remove("comando");
+                        p.remove("_async");
                         return p;
                     })
                     .toList();
+        }
+
+        synchronized long asincrone(String comando) {
+            return chiamate.stream().filter(c -> comando.equals(c.get("comando")))
+                    .filter(c -> Boolean.TRUE.equals(c.get("_async"))).count();
         }
 
         @SuppressWarnings("unchecked")
@@ -680,10 +796,31 @@ class SincronizzazioneTelefonoTest {
                 }
                 case "operations/copyfile" -> {
                     String da = (String) p.get("srcRemote");
-                    long dimensione = remoto(p.get("srcFs")).get(da);
-                    remoto(p.get("dstFs")).put((String) p.get("dstRemote"), troncati.contains(da) ? dimensione / 2 : dimensione);
+                    if (fallisconoUnaVolta.remove(da)) {
+                        throw new IOException("Request cancelled");
+                    }
+                    if (!lenti.contains(da)) {
+                        long dimensione = remoto(p.get("srcFs")).get(da);
+                        remoto(p.get("dstFs")).put((String) p.get("dstRemote"),
+                                troncati.contains(da) ? dimensione / 2 : dimensione);
+                    }
+                    if (risposteCadute.contains(da)) {
+                        throw new IOException("Request cancelled");
+                    }
+                    if (Boolean.TRUE.equals(p.get("_async"))) {
+                        long id = job.size() + 1L;
+                        job.put(id, List.of(da, (String) p.get("dstRemote")));
+                        yield Map.of("jobid", id);
+                    }
                     yield Map.of();
                 }
+                case "job/status" -> {
+                    List<String> copia = job.get(((Number) p.get("jobid")).longValue());
+                    String da = copia.get(0);
+                    duranteLaCopia.accept(copia.get(1));
+                    yield Map.of("finished", !lenti.contains(da), "success", true, "error", "");
+                }
+                case "job/stop" -> Map.of();
                 case "operations/deletefile" -> {
                     remoto(p.get("fs")).remove((String) p.get("remote"));
                     yield Map.of();

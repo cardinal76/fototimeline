@@ -28,11 +28,13 @@ import org.springframework.test.context.DynamicPropertySource;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.repository.FotoRepository;
+import it.fototimeline.service.FileScartato;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.Origine;
 import it.fototimeline.service.LavoriImportazione.Stato;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
+import it.fototimeline.service.MemoriaImportazione;
 import it.fototimeline.service.ProvenienzaFile;
 
 @SpringBootTest(properties = "de.flapdoodle.mongodb.embedded.version=7.0.14")
@@ -54,6 +56,8 @@ class LavoriImportazioneTest {
     static void proprieta(DynamicPropertyRegistry r) {
         r.add("fototimeline.archivio", () -> disco.resolve("archivio").toString());
         r.add("fototimeline.importazione-automatica.cartella", () -> disco.resolve("telefono").toString());
+        // I file dei test sono appena scritti: senza attesa, se no li lascerebbe al giro dopo.
+        r.add("fototimeline.importazione-automatica.attesa", () -> "PT0S");
     }
 
     @Autowired
@@ -68,11 +72,21 @@ class LavoriImportazioneTest {
     @Autowired
     StrumentiMedia media;
 
+    @Autowired
+    MemoriaImportazione memoria;
+
     @BeforeEach
     void svuota() throws Exception {
         aspettaFine();
         repository.findAll().forEach(f -> service.elimina(f.getId()));
-        Files.createDirectories(disco.resolve("telefono"));
+        memoria.dimenticaTutti();
+        Path telefono = disco.resolve("telefono");
+        if (Files.isDirectory(telefono)) {
+            try (var file = Files.walk(telefono)) {
+                file.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+        Files.createDirectories(telefono);
     }
 
     @Test
@@ -152,6 +166,51 @@ class LavoriImportazioneTest {
         assertThat(fine.rimossi()).isEqualTo(2);
         assertThat(telefono).isEmptyDirectory();
         assertThat(repository.findAll()).extracting(Foto::isVideo).containsExactlyInAnyOrder(true, false);
+    }
+
+    @Test
+    void unFileRottoSiRicordaENonFaRipartireIlGiroSeNonCambia() throws Exception {
+        Path telefono = disco.resolve("telefono");
+        Path rotto = telefono.resolve("IMG_rotta.jpg");
+        Files.write(rotto, new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
+        Files.write(telefono.resolve("IMG_buona.png"), immagine(Color.MAGENTA));
+
+        lavori.controllaCartellaAutomatica();
+        StatoLavoro primo = aspettaFine();
+        assertThat(primo.importate()).isEqualTo(1);
+        assertThat(primo.errori()).isEqualTo(1);
+        assertThat(primo.messaggi()).singleElement().asString().contains("IMG_rotta.jpg", "Immagine illeggibile");
+        assertThat(lavori.scartati()).extracting(FileScartato::percorso).containsExactly(rotto.toString());
+
+        // Resta solo quello rotto, uguale: nessun giro a vuoto.
+        lavori.controllaCartellaAutomatica();
+        assertThat(lavori.corrente().orElseThrow().id()).isEqualTo(primo.id());
+
+        // Cambiato (per esempio ricopiato intero): si rilegge.
+        Files.write(rotto, immagine(Color.CYAN));
+        lavori.controllaCartellaAutomatica();
+        StatoLavoro secondo = aspettaFine();
+        assertThat(secondo.id()).isNotEqualTo(primo.id());
+        assertThat(secondo.importate()).isEqualTo(1);
+        assertThat(secondo.errori()).isZero();
+        assertThat(lavori.scartati()).isEmpty();
+    }
+
+    @Test
+    void riprovaRileggeIFileGiaFalliti() throws Exception {
+        Path telefono = disco.resolve("telefono");
+        Files.write(telefono.resolve("IMG_rotta.jpg"), new byte[] {9, 9, 9, 9, 9});
+        Files.write(telefono.resolve("IMG_altra.png"), immagine(Color.PINK));
+        lavori.controllaCartellaAutomatica();
+        aspettaFine();
+
+        assertThat(lavori.riprovaScartati()).isEqualTo(1);
+        lavori.controllaCartellaAutomatica();
+        StatoLavoro daCapo = aspettaFine();
+
+        assertThat(daCapo.trovate()).isEqualTo(1);
+        assertThat(daCapo.errori()).isEqualTo(1);
+        assertThat(daCapo.saltate()).isZero();
     }
 
     private void copia(String risorsa, Path dove) throws IOException {

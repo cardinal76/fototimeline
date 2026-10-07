@@ -185,6 +185,24 @@ l'app guarda in quella cartella di LifetimeCloud e, se ci sono foto o video
 Basta far caricare all'app di LifetimeCloud sul telefono le foto in quella
 cartella.
 
+Gira da sola e può durare ore: il riquadro parte ridotto a un indicatore nella
+barra in alto ("Importo 3%"), che con un clic si riapre; con la ✕ si nasconde
+di nuovo, e finita senza errori sparisce. Un clic su "N errori" li elenca.
+Ogni giro lascia stare, senza leggerli:
+
+- i file modificati da meno di `FOTOTIMELINE_ATTESA_AUTOMATICA` (10 minuti) e
+  quelli che la sincronizzazione dei telefoni sta ancora copiando: entrano al
+  giro dopo, non a metà;
+- i file già falliti per colpa loro (cifrati `LCB2`, immagini o video che non
+  si leggono), finché dimensione e data di modifica restano quelle: si
+  ricordano in MongoDB (`importazione_scartati`) e nel riquadro sono "N già
+  falliti", con l'elenco e **Riprova tutti** (admin). Gli errori che possono
+  passare da soli (cloud che non risponde, programmi mancanti) si riprovano a
+  ogni giro.
+
+Un file tolto da altri mentre il giro gira conta fra quelli "tolti
+dall'origine", non fra gli errori.
+
 ### Foto nuove dai telefoni (pCloud)
 
 Ogni familiare ha il suo telefono, che carica le foto su **pCloud** (cartella
@@ -218,6 +236,11 @@ I telefoni girano uno alla volta: se due sono in ritardo, il secondo aspetta
 "in coda". La copia passa dall'API di rclone (`operations/list`, `copyfile`,
 `stat`, `deletefile`), non dal montaggio: funziona anche col cloud smontato, e
 le foto aspettano nella cartella automatica finché non lo si monta.
+`copyfile` è asincrono (`_async`, seguito con `job/status`): un video da un
+gigabyte richiede minuti, più del timeout di una chiamata HTTP (60 secondi).
+Ogni copia ha un tempo massimo (15 minuti più quanto serve a 256 KB/s), i file
+sopra i 100 MB si copiano uno alla volta, e una copia che rclone dà per
+fallita si controlla con `stat` (arrivata intera vale) e si riprova una volta.
 
 **Il remote `pcloud`**, una volta sola, su server2:
 

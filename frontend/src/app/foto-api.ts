@@ -18,6 +18,7 @@ import {
   Foto,
   Io,
   LavoroContenuto,
+  FileScartato,
   LavoroImportazione,
   Modifica,
   ModificaTelefono,
@@ -141,6 +142,16 @@ export class FotoApi {
 
   annullaImportazione(): Observable<void> {
     return this.http.post<void>('/api/importazioni/annulla', {});
+  }
+
+  /** I file della cartella automatica che non si rileggono finché non cambiano. */
+  scartati(): Observable<FileScartato[]> {
+    return this.http.get<FileScartato[]>('/api/importazioni/scartati');
+  }
+
+  /** "Riprova" (admin): al prossimo giro si rileggono. */
+  riprovaScartati(): Observable<{ dimenticati: number }> {
+    return this.http.post<{ dimenticati: number }>('/api/importazioni/scartati/riprova', {});
   }
 
   cartelle(percorso?: string): Observable<Cartella> {

@@ -163,6 +163,24 @@
   width: 56px;
   margin-top: 0;
 }
+/* L'importazione nascosta: un clic e torna il riquadro. */
+.lavoro-importazione {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+.lavoro-importazione .girello {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: 0.15rem;
+  border: 2px solid var(--testo-tenue);
+  border-top-color: var(--accento);
+  border-radius: 50%;
+  animation: gira 0.8s linear infinite;
+}
 
 /* ---------------------------------------------------------- tendine */
 .tendina {
@@ -389,6 +407,9 @@
   .lavoro-contenuto {
     order: 99;
     flex-basis: 100%;
+  }
+  .lavoro-importazione {
+    order: 98;
   }
   .tendina,
   .pannello-filtri {

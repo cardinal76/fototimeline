@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
@@ -77,6 +78,25 @@ public class FotoService {
             Map.entry("mp4", "video/mp4"),
             Map.entry("m4v", "video/mp4"),
             Map.entry("mov", "video/quicktime"));
+
+    /**
+     * I file caricati dal sito o dalle app di LifetimeCloud: cifrati nel
+     * browser, via WebDAV arrivano così e non si possono leggere.
+     */
+    public static final String CIFRATO_LIFETIME = "File cifrato da LifetimeCloud (caricato dal sito o dall'app): "
+            + "non si può leggere, va caricato via WebDAV";
+    private static final byte[] INTESTAZIONE_LCB2 = {'L', 'C', 'B', '2'};
+
+    /**
+     * True se l'errore dipende dal contenuto del file (cifrato, formato
+     * sconosciuto, immagine o video che non si leggono): rileggerlo uguale
+     * darebbe lo stesso errore. Gli altri (cloud che non risponde, programmi
+     * mancanti sul server) possono passare da soli.
+     */
+    public static boolean erroreDelFile(String messaggio) {
+        return messaggio != null && (messaggio.equals(CIFRATO_LIFETIME) || messaggio.startsWith("Formato non supportato")
+                || messaggio.startsWith("Immagine illeggibile") || messaggio.startsWith("Video illeggibile"));
+    }
 
     /** Come si legge un file: le foto con Java, HEIC e video con programmi esterni (StrumentiMedia). */
     enum Genere { FOTO, HEIC, VIDEO }
@@ -315,16 +335,21 @@ public class FotoService {
         if (genere == null) {
             throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato"));
         }
-        if (genere == Genere.HEIC && !media.heicDisponibile()) {
-            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server"));
-        }
-        if (genere == Genere.VIDEO && !media.videoDisponibile()) {
-            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server"));
-        }
-
         String hash;
         long dimensione;
         try {
+            // Prima di tutto (anche degli strumenti che mancano): un file cifrato resta
+            // illeggibile comunque, ed è un errore del file, da ricordare; e non vale la
+            // pena di scaricarlo tutto per l'hash.
+            if (cifratoLifetime(file)) {
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, CIFRATO_LIFETIME));
+            }
+            if (genere == Genere.HEIC && !media.heicDisponibile()) {
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server"));
+            }
+            if (genere == Genere.VIDEO && !media.videoDisponibile()) {
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server"));
+            }
             hash = sha256(file);
             dimensione = Files.size(file);
         } catch (IOException e) {
@@ -852,6 +877,13 @@ public class FotoService {
             } finally {
                 lettore.dispose();
             }
+        }
+    }
+
+    /** I primi byte sono {@code LCB2}: cifrato da LifetimeCloud. */
+    static boolean cifratoLifetime(Path file) throws IOException {
+        try (var in = Files.newInputStream(file)) {
+            return Arrays.equals(in.readNBytes(INTESTAZIONE_LCB2.length), INTESTAZIONE_LCB2);
         }
     }
 

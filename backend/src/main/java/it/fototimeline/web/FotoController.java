@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -35,6 +36,7 @@ import it.fototimeline.service.FotoService;
 import it.fototimeline.service.FotoService.Modifica;
 import it.fototimeline.service.FotoService.Operazione;
 import it.fototimeline.service.ImportazioneCartelle;
+import it.fototimeline.service.FileScartato;
 import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 import it.fototimeline.service.Risultati.Cartella;
@@ -173,6 +175,18 @@ public class FotoController {
     @PostMapping("/importazioni/annulla")
     public ResponseEntity<Void> annullaImportazione() {
         return lavori.annulla() ? ResponseEntity.accepted().build() : ResponseEntity.noContent().build();
+    }
+
+    /** I file della cartella automatica falliti per colpa loro, che non si rileggono finché non cambiano. */
+    @GetMapping("/importazioni/scartati")
+    public List<FileScartato> scartati() {
+        return lavori.scartati();
+    }
+
+    /** "Riprova" (solo admin): al prossimo giro si rileggono anche quelli. */
+    @PostMapping("/importazioni/scartati/riprova")
+    public Map<String, Long> riprovaScartati() {
+        return Map.of("dimenticati", lavori.riprovaScartati());
     }
 
     /** Sottocartelle per il navigatore di "Importa cartella"; senza percorso parte dalla radice consentita. */

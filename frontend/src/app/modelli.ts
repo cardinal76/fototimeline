@@ -152,6 +152,19 @@ export interface LavoroImportazione {
   rimossi: number;
   messaggi: string[];
   errore?: string;
+  /** Solo cartella automatica: file già falliti uguali in un giro prima, non riletti. */
+  saltate?: number;
+  /** Solo cartella automatica: file ancora in copia, lasciati al giro dopo. */
+  inArrivo?: number;
+}
+
+/** Un file della cartella automatica fallito per colpa sua: non si rilegge finché non cambia. */
+export interface FileScartato {
+  percorso: string;
+  dimensione: number;
+  modificatoIl?: string;
+  motivo: string;
+  quando: string;
 }
 
 export interface StatoCloud {

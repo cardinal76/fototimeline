@@ -67,7 +67,7 @@ class SaluteTest {
     private static final CloudProperties CLOUD = new CloudProperties("http://rclone:5572", "fototimeline",
             "password-di-prova", "lifetime:", "/cloud", false, 0);
     private static final ImportazioneAutomaticaProperties AUTOMATICA =
-            new ImportazioneAutomaticaProperties(Path.of("/cloud/telefono"), null);
+            new ImportazioneAutomaticaProperties(Path.of("/cloud/telefono"), null, null);
     /** Finto, costruito qui: deve restare fuori da log e messaggi. */
     private static final String TOKEN = "123456:" + "token-segreto-di-prova";
 

@@ -13,4 +13,12 @@ public interface ProvenienzaFile {
 
     /** Lo username di chi l'ha portato, o null se non si sa (per esempio messo lì a mano). */
     String caricataDa(Path file);
+
+    /**
+     * True se il file lo si sta ancora copiando: l'importazione automatica lo
+     * lascia al giro dopo, senza leggerlo a metà.
+     */
+    default boolean inArrivo(Path file) {
+        return false;
+    }
 }
