@@ -9,6 +9,9 @@
 #    lib-foto.sh, da git): stesse uscite e stessi file in ogni fase, con e senza scarica.
 # 2. foto-da-cartella.sh su una finta libreria di Amazon Foto: foto sciolte e zip, doppioni
 #    " (1)", album, data dal nome, file senza data, doppioni e nomi del lavoro di pCloud.
+# 3. PARALLELI: 1100 file sciolti e 12 zip (foto in comune, nomi uguali con foto diverse, uno
+#    zip rovinato, uno con altri file): con PARALLELI=1, 3 e 4 stessa uscita e stessi file;
+#    con PARALLELI=4 ucciso a metà più volte e rilanciato, stesso risultato del giro intero.
 #
 # Serve: exiftool, rclone, zip, unzip (ffmpeg facoltativo, per un video vero).
 set -uo pipefail
@@ -252,6 +255,104 @@ verifica "archivia: zip del mese"                        c_e "$T/archivio-amazon
 verifica "lavoro di pCloud non toccato"                  [ "$prima" = "$(impronte_pcloud)" ]
 verifica "sorgente non toccata"                          c_e "$S/2019/IMG_20190101_120000 (1).jpg"
 verifica "impostazioni ricordate"                        contiene "$A/impostazioni" "ESCLUDI=Documenti"
+
+# --- 3. PARALLELI: in fila o in parallelo, stessi file; e ripresa dopo un kill a metà ----
+echo "3. PARALLELI"
+M="$T/molti"
+base64 -d <<< "$JPG" > "$T/vuota.jpg"
+cp "$T/vuota.jpg" "$T/exif-a.jpg"; exiftool -q -overwrite_original -DateTimeOriginal='2016:07:08 10:00:00' "$T/exif-a.jpg"
+cp "$T/vuota.jpg" "$T/exif-b.jpg"; exiftool -q -overwrite_original -DateTimeOriginal='2017:03:04 10:00:00' "$T/exif-b.jpg"
+veloce() {   # veloce FILE MODELLO TESTO MTIME: come jpg, senza un exiftool per file
+    mkdir -p "$(dirname "$1")"
+    { cat "$2"; printf '%s' "$3"; } > "$1"
+    touch -d "$4" "$1"
+}
+# 1100 file sciolti (tre blocchi da 500): nomi che si ripetono in cartelle diverse, con
+# contenuto diverso e lo stesso giorno, e qualche copia identica.
+for ((i = 0; i < 1100; i++)); do
+    veloce "$M/Sciolti/c$((i % 9))/IMG_$((i % 40)).jpg" "$T/vuota.jpg" "s$i" "2012-01-0$((i % 5 + 1)) 12:00"
+done
+cp -p "$M/Sciolti/c1/IMG_1.jpg" "$M/Sciolti/copia-di-IMG_1.jpg"
+# 12 zip: in ognuno IMG_1..IMG_20 con contenuto suo (nomi uguali, foto diverse, stesse
+# date), alcune foto uguali a quelle di altri zip, alcune uguali ai file sciolti.
+for ((z = 1; z <= 12; z++)); do
+    d="$T/zz/$z"
+    for ((i = 1; i <= 20; i++)); do
+        case $((i % 3)) in
+            0) veloce "$d/IMG_$i.jpg" "$T/exif-a.jpg" "z$z-$i" '2020-01-01 10:00' ;;
+            1) veloce "$d/IMG_$i.jpg" "$T/exif-b.jpg" "z$z-$i" '2020-01-01 10:00' ;;
+            *) veloce "$d/sub/IMG_$i.jpg" "$T/vuota.jpg" "z$z-$i" "2013-0$((i % 4 + 1))-01 10:00" ;;
+        esac
+    done
+    veloce "$d/comune.jpg" "$T/exif-a.jpg" "in tutti gli zip" '2020-01-01 10:00'
+    [ $((z % 4)) = 0 ] && veloce "$d/meta.jpg" "$T/exif-b.jpg" "z$((z - 1))-1" '2020-01-01 10:00'
+    cp -p "$M/Sciolti/c$((z % 9))/IMG_$z.jpg" "$d/dagli-sciolti.jpg"
+    [ "$z" = 5 ] && finto "$d/nota.txt" nota '2017-01-02 10:00'
+    mkdir -p "$M/Zip/z$((z % 3))"
+    (cd "$d" && zip -q -r -X "$M/Zip/z$((z % 3))/album-$z.zip" .)
+done
+printf 'rovinato' > "$M/Zip/z1/rovinato.zip"
+touch -d '2018-01-01 10:00' "$M"/Zip/*/*.zip
+rm -rf "$T/zz"
+
+# raccogli con un PARALLELI su una copia di $M; in $2 l'uscita e in $2.file i file di lavoro.
+raccogli_molti() {   # raccogli_molti PARALLELI USCITA [solo-avvio]
+    local l="$HOME/molti-$1" r="$T/molti-$1"
+    rm -rf "$l" "$r"; cp -a "$M" "$r"
+    LAVORO="$l" RADICE="$r" ARCHIVIO="$r/Archivio foto" "$QUI/foto-da-pcloud.sh" anteprima > /dev/null
+    [ "${3:-}" = solo-avvio ] && return 0
+    local inizio=$SECONDS
+    LAVORO="$l" PARALLELI="$1" "$QUI/foto-da-pcloud.sh" raccogli 2>&1 | sed "s|$r|RADICE|g; s|$l|LAVORO|g" > "$2"
+    echo "  ($((SECONDS - inizio)) s con PARALLELI=$1)"
+    stato_molti "$l" "$r" > "$2.file"
+}
+stato_molti() {   # i file di lavoro e ordinate/, coi percorsi tolti
+    local l="$1" r="$2" f
+    for f in impronte.tsv manifest.tsv fonti.tsv da-controllare.txt; do
+        echo "-- $f"; sed "s|$r|RADICE|g; s|$l|LAVORO|g" "$l/$f"
+    done
+    echo "-- ordinate"; (cd "$l/ordinate" && find . -type f -exec sha256sum {} + | sort -k2)
+    echo "-- tmp"; ls -A "$l/tmp" 2>/dev/null
+}
+raccogli_molti 1 "$T/molti-1.txt"
+raccogli_molti 4 "$T/molti-4.txt"
+raccogli_molti 3 "$T/molti-3.txt"
+verifica "PARALLELI=1: tutti gli zip fatti"             [ "$(grep -c '^zip' "$HOME/molti-1/fonti.tsv")" -eq 13 ]
+verifica "PARALLELI=1: nomi uguali con un numero"       c_e "$HOME/molti-1/ordinate/2016/07/08/IMG_3_2.jpg"
+verifica "PARALLELI=4: stessa uscita di PARALLELI=1"    cmp -s "$T/molti-1.txt" "$T/molti-4.txt"
+verifica "PARALLELI=4: stessi file e stessi nomi"       cmp -s "$T/molti-1.txt.file" "$T/molti-4.txt.file"
+verifica "PARALLELI=3: stessi file e stessi nomi"       cmp -s "$T/molti-1.txt.file" "$T/molti-3.txt.file"
+verifica "PARALLELI=4: niente doppioni in ordinate"     [ "$(sed -n '/^-- ordinate/,/^-- tmp/p' "$T/molti-4.txt.file" | grep -c '^[0-9a-f]')" -eq "$(sort -u "$HOME/molti-4/impronte.tsv" | cut -f1 | sort -u | wc -l)" ]
+verifica "zip rovinato e zip con altri file segnati"    contiene "$HOME/molti-4/da-controllare.txt" "zip con 1 altri file"
+# shellcheck disable=SC2016
+verifica "PARALLELI=0 rifiutato"                        bash -c '! LAVORO="$1" PARALLELI=0 "$2" raccogli >/dev/null 2>&1' _ "$HOME/molti-4" "$QUI/foto-da-pcloud.sh"
+cmp -s "$T/molti-1.txt.file" "$T/molti-4.txt.file" || diff "$T/molti-1.txt.file" "$T/molti-4.txt.file" | head -30
+cmp -s "$T/molti-1.txt" "$T/molti-4.txt" || diff "$T/molti-1.txt" "$T/molti-4.txt" | head -30
+
+# Ripresa: raccogli con PARALLELI=4 ucciso (kill, come pkill) a metà più volte, poi finito.
+raccogli_molti 4 - solo-avvio
+l="$HOME/molti-4" r="$T/molti-4" uccisi=0 restati=0
+# Il primo giro si ferma tra i file sciolti, gli altri dopo 2, 5 e 9 zip in fonti.tsv.
+for dopo in sciolti 2 5 9; do
+    LAVORO="$l" PARALLELI=4 "$QUI/foto-da-pcloud.sh" raccogli > "$T/ucciso.txt" 2>&1 &
+    pid=$!
+    if [ "$dopo" = sciolti ]; then
+        sleep 1
+    else
+        until [ "$(grep -c '^zip' "$l/fonti.tsv" 2>/dev/null)" -ge "$dopo" ] || ! kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
+    fi
+    kill -TERM "$pid" 2>/dev/null && uccisi=$((uccisi + 1))
+    wait "$pid"
+    sleep 0.5
+    pgrep -f "$l/tmp" > /dev/null && restati=$((restati + 1))
+done
+echo "  ($uccisi volte ucciso a metà; $(grep -c '^zip' "$l/fonti.tsv") zip su 13 fatti prima dell'ultimo giro)"
+LAVORO="$l" PARALLELI=4 "$QUI/foto-da-pcloud.sh" raccogli > "$T/ripreso.txt" 2>&1
+stato_molti "$l" "$r" > "$T/ripreso.file"
+verifica "ripresa: ucciso a metà quattro volte"         [ "$uccisi" -eq 4 ]
+verifica "ripresa: niente processi rimasti dopo il kill" [ "$restati" -eq 0 ]
+verifica "ripresa: stessi file e nomi del giro intero"  cmp -s "$T/molti-1.txt.file" "$T/ripreso.file"
+cmp -s "$T/molti-1.txt.file" "$T/ripreso.file" || diff "$T/molti-1.txt.file" "$T/ripreso.file" | head -30
 
 echo
 if [ "$KO" -gt 0 ]; then

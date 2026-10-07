@@ -112,6 +112,19 @@ tail -f ~/foto-da-pcloud/raccogli.log        # Ctrl+C chiude solo il tail
 Gli zip con dentro altri file e i file non letti restano su pCloud: sono in
 `~/foto-da-pcloud/da-controllare.txt`.
 
+Raccogli prepara **4 zip insieme** (li apre, legge le date, calcola le impronte), uno per
+core, e li mette in `ordinate/` uno alla volta nell'ordine di sempre: stessi nomi e stessi
+file di un giro in fila. Per cambiare il numero si mette `PARALLELI` davanti, a ogni
+lancio (non si ricorda): `PARALLELI=2` se il PC serve per altro o il disco è quasi pieno
+(restano aperti al massimo `PARALLELI`+1 zip insieme), `PARALLELI=1` per fare tutto in fila.
+
+```bash
+PARALLELI=2 nohup ./deploy/foto-da-pcloud.sh raccogli > ~/foto-da-pcloud/raccogli.log 2>&1 &
+```
+
+Per fermarlo: `pkill -f "foto-da-pcloud.sh raccogli"` (si fermano anche i 4 al lavoro).
+Rilanciato, riprende: uno zip conta come fatto solo quando è in `fonti.tsv`.
+
 **2.3 Carica** su LifetimeCloud, poi nell'app **Monta** e **Indicizza archivio**:
 
 ```bash
@@ -504,6 +517,8 @@ nohup ./deploy/foto-da-cartella.sh raccogli > ~/foto-da-amazon/raccogli.log 2>&1
 tail -f ~/foto-da-amazon/raccogli.log        # Ctrl+C chiude solo il tail
 ./deploy/foto-da-cartella.sh stato
 ```
+
+Anche qui 4 zip si preparano insieme; `PARALLELI=1` davanti per farli in fila (vedi 2.2).
 
 **A.5 Controllare** prima di caricare:
 

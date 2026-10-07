@@ -28,6 +28,8 @@
 #                 dalla data del file, che dopo un download è spesso il giorno del download
 #   DESTINAZIONE  predefinita lifetime:FotoTimeline
 #   ARCHIVIO      solo per archivia: dove mettere uno zip per mese (vuota: niente archivia)
+#   PARALLELI     in raccogli, quanti zip (o blocchi di file sciolti) si preparano insieme
+#                 (predefinito 4; 1 = in fila). Non si ricorda: va data a ogni raccogli
 #
 # Ogni fase si può rilanciare: riprende da dove era arrivata. La cartella di origine non si
 # cancella mai: quando la timeline va bene, la si butta a mano. Dopo carica, nell'app:
