@@ -437,10 +437,49 @@ applica_zip() {
     echo "    ${#membri[@]} foto e video$([ "$altri" -gt 0 ] && echo ", $altri altri file: lo zip resta $DOVE_ORIGINE")"
 }
 
+# Le cartelle di ordinate/ che mancano in DESTINAZIONE, create prima della copia e una
+# alla volta. Il perché: rclone (webdav), prima di ogni file, fa MKCOL della sua cartella;
+# con CARICA_PARALLELI file insieme, due MKCOL della stessa cartella nuova partono insieme
+# e LifetimeCloud ne crea due (o tre) con lo stesso nome, invece di rispondere 405 al
+# secondo. rclone e l'app ne vedono una sola: i file delle altre spariscono. Se la cartella
+# c'è già il MKCOL risponde 405 e non si duplica niente, quindi con le cartelle pronte la
+# copia in parallelo non ne crea più.
+# Le crea un solo rclone copy di un albero di cartelle vuote con --checkers 1 e --transfers 1:
+# una dopo l'altra (provato con rclone 1.60 e 1.75: mai due MKCOL insieme), i genitori
+# prima dei figli o creati da rclone quando servono, con un solo avvio. Un rclone mkdir per
+# cartella costerebbe ogni volta avvio, autenticazione e una PROPFIND in più.
+# Se in DESTINAZIONE ci sono già cartelle doppie si ferma: prima sistema-cartelle-doppie.sh.
+crea_cartelle_mancanti() {
+    local prof ci_sono doppie mancanti vuote
+    # La radice da sola: se DESTINAZIONE non c'è ancora la crea, se c'è non fa niente.
+    rc mkdir "$DESTINAZIONE"
+    # Si leggono da DESTINAZIONE solo i livelli di ordinate/ (AAAA/MM/GG): pochi elenchi.
+    prof=$(cd "$ORDINATE" && find . -mindepth 1 -type d | awk -F/ 'NF - 1 > p { p = NF - 1 } END { print p + 0 }')
+    [ "$prof" -gt 0 ] || return 0
+    ci_sono="$(rc lsf -R --dirs-only --max-depth "$prof" "$DESTINAZIONE")" \
+        || errore "non riesco a leggere le cartelle di $DESTINAZIONE: rilancia $0 carica"
+    doppie="$(printf '%s\n' "$ci_sono" | LC_ALL=C sort | uniq -d)"
+    if [ -n "$doppie" ]; then
+        printf '%s\n' "$doppie" | sed -n '1,20s|^|    |p' >&2
+        errore "in $DESTINAZIONE ci sono cartelle doppie (sopra): prima sistemale con sistema-cartelle-doppie.sh, poi rilancia $0 carica"
+    fi
+    mancanti="$(LC_ALL=C comm -23 \
+        <(cd "$ORDINATE" && find . -mindepth 1 -type d | sed 's|^\./||; s|$|/|' | LC_ALL=C sort) \
+        <(printf '%s\n' "$ci_sono" | LC_ALL=C sort))"
+    [ -n "$mancanti" ] || return 0
+    echo "Creo $(printf '%s\n' "$mancanti" | wc -l) cartelle in $DESTINAZIONE, una alla volta…"
+    vuote="$(mktemp -d)"
+    printf '%s\n' "$mancanti" | (cd "$vuote" && xargs -d '\n' mkdir -p)
+    rc copy "$vuote" "$DESTINAZIONE" --create-empty-src-dirs --transfers 1 --checkers 1 \
+        || { rm -rf "$vuote"; errore "le cartelle in $DESTINAZIONE non si creano: rilancia $0 carica"; }
+    rm -rf "$vuote"
+}
+
 # ordinate/ -> DESTINAZIONE, poi controlla; se torna scrive fase-carica.ok.
 carica_ordinate() {
     richiede "$RCLONE"
     [ -d "$ORDINATE" ] || errore "prima: $0 raccogli"
+    crea_cartelle_mancanti
     echo "Copio $ORDINATE in $DESTINAZIONE…"
     # Tanti file piccoli su WebDAV: con 4 alla volta si usava ~1 MB/s di una linea da
     # 25 MB/s, il tempo se ne va nell'attesa di ogni file. CARICA_PARALLELI per cambiarlo.
