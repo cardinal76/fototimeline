@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -19,6 +21,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
@@ -73,6 +77,8 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
     static final long GRANDE = 100L * 1024 * 1024;
     /** La velocità più bassa che si aspetta da una copia, per il suo tempo massimo. */
     private static final long BYTE_AL_SECONDO = 256L * 1024;
+    /** Il numero che {@link #libero} aggiunge al nome: {@code IMG_1 (2)}. */
+    private static final Pattern NUMERO = Pattern.compile("(.+) \\((\\d{1,9})\\)");
 
     private final Rclone rclone;
     private final CloudProperties cloud;
@@ -499,12 +505,22 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         // updateFirst e non upsert: un telefono tolto durante il giro non torna.
         mongo.updateFirst(Query.query(Criteria.where("_id").is(id)), Update.update("ultimoGiro", giro),
                 SorgenteTelefono.class);
-        log.info("Sincronizzazione di {} {}: {} trovati, {} copiati, {} già copiati, {} tolti dalla sorgente, {} errori",
-                s.nome(), esito, giro.trovati(), giro.copiati(), giro.giaCopiati(), giro.cancellati(), giro.errori());
+        log.info("Sincronizzazione di {} {}: {} trovati, {} copiati, {} già copiati, {} tolti dalla sorgente, "
+                + "{} copie a metà tolte, {} errori", s.nome(), esito, giro.trovati(), giro.copiati(), giro.giaCopiati(),
+                giro.cancellati(), giro.aMetaTolte(), giro.errori());
         return giro;
     }
 
-    /** Copia nella cartella automatica i file della sorgente che non sono nel registro. */
+    /** Un file della sorgente nei formati dell'archivio, come lo dà operations/list. */
+    private record FileSorgente(String relativo, long dimensione, Instant modificatoIl) {
+    }
+
+    /**
+     * Copia nella cartella automatica i file della sorgente che non sono nel
+     * registro. Prima toglie le copie a metà lasciate dai giri di prima
+     * ({@link #togliCopieAMeta}): i loro file, se non sono nel registro, si
+     * ricopiano interi in questo stesso giro.
+     */
     private void copia(SorgenteTelefono telefono, Sorgente sorgente, String cartella, Instant adesso, Contatori c) {
         int inParallelo = telefono.copie();
         Map<String, Object> risposta = rclone.chiama("operations/list", Map.of(
@@ -519,6 +535,20 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         if (!(risposta.get("list") instanceof List<?> lista)) {
             throw new IllegalStateException("operations/list: risposta di rclone senza elenco");
         }
+        List<FileSorgente> file = new ArrayList<>();
+        for (Object o : lista) {
+            if (!(o instanceof Map<?, ?> voce) || Boolean.TRUE.equals(voce.get("IsDir"))
+                    || !(voce.get("Path") instanceof String path)) {
+                continue;
+            }
+            String relativo = sorgente.relativo(path);
+            String nome = relativo.substring(relativo.lastIndexOf('/') + 1);
+            if (nome.startsWith(".") || !FotoService.eMedia(nome)) {
+                continue;
+            }
+            file.add(new FileSorgente(relativo, numero(voce.get("Size")), data(voce.get("ModTime"))));
+        }
+        togliCopieAMeta(sorgente, cartella, file, c);
         // I nomi presi in questo giro: due copie in parallelo non devono scegliere lo stesso.
         Set<String> prenotati = ConcurrentHashMap.newKeySet();
         Semaphore grandi = new Semaphore(1);
@@ -529,18 +559,10 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         });
         List<Future<?>> lavori = new ArrayList<>();
         try {
-            for (Object o : lista) {
-                if (!(o instanceof Map<?, ?> voce) || Boolean.TRUE.equals(voce.get("IsDir"))
-                        || !(voce.get("Path") instanceof String path)) {
-                    continue;
-                }
-                String relativo = sorgente.relativo(path);
-                String nome = relativo.substring(relativo.lastIndexOf('/') + 1);
-                if (nome.startsWith(".") || !FotoService.eMedia(nome)) {
-                    continue;
-                }
+            for (FileSorgente f : file) {
+                String relativo = f.relativo();
+                long dimensione = f.dimensione();
                 c.trovato();
-                long dimensione = numero(voce.get("Size"));
                 if (registrate.contains(chiave(relativo, dimensione))) {
                     c.giaCopiato();
                     continue;
@@ -554,7 +576,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                         }
                         destinazione = copiaFile(sorgente, relativo, dimensione, cartella, prenotati);
                         mongo.insert(new CopiaTelefono(new ObjectId().toHexString(), sorgente.testo(), telefono.id(),
-                                telefono.proprietario(), relativo, dimensione, data(voce.get("ModTime")), destinazione,
+                                telefono.proprietario(), relativo, dimensione, f.modificatoIl(), destinazione,
                                 adesso, null));
                         registrate.add(chiave(relativo, dimensione));
                         if (c.copiato() % 100 == 0) {
@@ -599,7 +621,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
      */
     private String copiaFile(Sorgente sorgente, String relativo, long dimensione, String cartella,
             Set<String> prenotati) {
-        String voluto = cartella + "/" + relativo.replace("/", " - ");
+        String voluto = voluto(cartella, relativo);
         Map<?, ?> gia = stat(cloud.remoto(), voluto);
         if (gia != null && numero(gia.get("Size")) == dimensione && prenotati.add(voluto)) {
             log.info("Telefono, {}: già arrivato intero in {}, non lo ricopio", relativo, voluto);
@@ -659,6 +681,158 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
             throw new IllegalStateException("copia incompleta: " + dimensione + " byte attesi, " + arrivati);
         }
         return destinazione;
+    }
+
+    /** Dove va un file della sorgente, se il nome è libero: {@code Pixel 8/IMG_1.jpg} → {@code telefono/Pixel 8 - IMG_1.jpg}. */
+    private static String voluto(String cartella, String relativo) {
+        return cartella + "/" + relativo.replace("/", " - ");
+    }
+
+    /**
+     * Toglie dalla cartella automatica le copie a metà lasciate dai giri di
+     * prima della copia asincrona: il timeout annullava i video grandi e il
+     * giro dopo li ricopiava come "nome (2)", "nome (3)"..., anche quelli a
+     * metà. Una copia a metà è un file che:
+     * <ul>
+     * <li>ha il nome che {@link #libero} dà a un file della sorgente
+     * ({@code nome.ext} o {@code nome (N).ext}), ed è <b>più piccolo</b> di
+     * tutti i file della sorgente che possono aver preso quel nome: un file
+     * troncato è sempre più corto, uno della stessa dimensione o più grande
+     * non si tocca;</li>
+     * <li>non è nel registro: lì entra solo una copia controllata intera,
+     * e così {@link #cancella} (che guarda il registro) non scambia mai una
+     * copia tolta qui per un file importato, né toglie l'originale da pCloud;</li>
+     * <li>non si sta copiando: né da questo programma ({@link #inArrivo}) né
+     * da rclone ({@code core/stats}, per una copia rimasta da prima di un
+     * riavvio), e un attimo prima di toglierlo ha ancora la stessa dimensione.</li>
+     * </ul>
+     * La sorgente non si tocca. Il file della sorgente, se non è nel registro,
+     * si ricopia intero subito dopo, nello stesso giro; se è nel registro una
+     * sua copia intera è già arrivata. Se rclone non risponde per l'elenco
+     * della cartella o per le copie in corso, non si toglie niente.
+     */
+    private void togliCopieAMeta(Sorgente sorgente, String cartella, List<FileSorgente> file, Contatori c) {
+        Map<String, Long> presenti;
+        Set<String> trasferimenti;
+        try {
+            presenti = elencoDestinazione(cartella);
+            trasferimenti = trasferimenti();
+        } catch (RuntimeException e) {
+            log.warn("Telefono, copie a metà non controllate: {}", e.getMessage());
+            return;
+        }
+        // I nomi con il numero, raggruppati per il nome senza: "a (3).jpg" → "a.jpg".
+        Map<String, List<String>> numerati = new HashMap<>();
+        for (String nome : presenti.keySet()) {
+            String senza = senzaNumero(nome);
+            if (senza != null) {
+                numerati.computeIfAbsent(senza, k -> new ArrayList<>()).add(nome);
+            }
+        }
+        // Per ogni file in destinazione: il più piccolo dei file della sorgente che possono aver preso quel nome.
+        Map<String, Long> minimo = new HashMap<>();
+        Map<String, List<String>> origini = new HashMap<>();
+        for (FileSorgente f : file) {
+            String voluto = voluto(cartella, f.relativo());
+            List<String> nomi = new ArrayList<>(numerati.getOrDefault(voluto, List.of()));
+            if (presenti.containsKey(voluto)) {
+                nomi.add(voluto);
+            }
+            for (String nome : nomi) {
+                minimo.merge(nome, f.dimensione(), Math::min);
+                origini.computeIfAbsent(nome, k -> new ArrayList<>()).add(sorgente.dentro(f.relativo()));
+            }
+        }
+        List<String> aMeta = new ArrayList<>();
+        for (var voce : minimo.entrySet()) {
+            String nome = voce.getKey();
+            long dimensione = presenti.get(nome);
+            if (dimensione >= 0 && dimensione < voce.getValue() && !inCopia.contains(nome)
+                    && !trasferimenti.contains(nome)
+                    && origini.get(nome).stream().noneMatch(trasferimenti::contains)) {
+                aMeta.add(nome);
+            }
+        }
+        if (aMeta.isEmpty()) {
+            return;
+        }
+        Set<String> registrate = new HashSet<>();
+        for (CopiaTelefono copia : mongo.find(Query.query(Criteria.where("destinazione").in(aMeta)),
+                CopiaTelefono.class)) {
+            registrate.add(copia.destinazione());
+        }
+        for (String nome : aMeta) {
+            if (registrate.contains(nome)) {
+                continue;
+            }
+            long dimensione = presenti.get(nome);
+            try {
+                Map<?, ?> adesso = stat(cloud.remoto(), nome);
+                if (adesso == null || numero(adesso.get("Size")) != dimensione) {
+                    // Importato o cambiato nel frattempo: non è più quello di prima.
+                    continue;
+                }
+                rclone.chiama("operations/deletefile", Map.of("fs", cloud.remoto(), "remote", nome));
+                c.aMetaTolta();
+                log.info("Telefono, {}: copia a metà ({} byte su {}), tolta", nome, dimensione, minimo.get(nome));
+            } catch (RuntimeException e) {
+                c.errore(nome, e);
+            }
+        }
+    }
+
+    /** I file della cartella automatica, per nome relativo al remote, con la dimensione. */
+    private Map<String, Long> elencoDestinazione(String cartella) {
+        Map<String, Object> risposta = rclone.chiama("operations/list", Map.of(
+                "fs", cloud.remoto(),
+                "remote", cartella,
+                "opt", Map.of("filesOnly", true)));
+        if (!(risposta.get("list") instanceof List<?> lista)) {
+            throw new IllegalStateException("operations/list: risposta di rclone senza elenco");
+        }
+        Map<String, Long> presenti = new HashMap<>();
+        for (Object o : lista) {
+            if (!(o instanceof Map<?, ?> voce) || Boolean.TRUE.equals(voce.get("IsDir"))
+                    || !(voce.get("Path") instanceof String path)) {
+                continue;
+            }
+            String nome = path.startsWith(cartella + "/") ? path.substring(cartella.length() + 1) : path;
+            if (!nome.contains("/")) {
+                presenti.put(cartella + "/" + nome, numero(voce.get("Size")));
+            }
+        }
+        return presenti;
+    }
+
+    /**
+     * I file che rclone sta trasferendo adesso ({@code core/stats}), coi nomi
+     * come li dà: sorgente, destinazione o tutti e due.
+     */
+    private Set<String> trasferimenti() {
+        Set<String> nomi = new HashSet<>();
+        if (rclone.chiama("core/stats", Map.of()).get("transferring") instanceof List<?> lista) {
+            for (Object o : lista) {
+                if (o instanceof Map<?, ?> voce) {
+                    for (String campo : List.of("name", "srcRemote", "dstRemote")) {
+                        if (voce.get(campo) instanceof String nome) {
+                            nomi.add(nome);
+                        }
+                    }
+                }
+            }
+        }
+        return nomi;
+    }
+
+    /** {@code telefono/a (3).jpg} → {@code telefono/a.jpg}, come lo numera {@link #libero}; null senza numero. */
+    static String senzaNumero(String nome) {
+        int punto = nome.lastIndexOf('.');
+        String base = punto > nome.lastIndexOf('/') ? nome.substring(0, punto) : nome;
+        Matcher m = NUMERO.matcher(base);
+        if (!m.matches() || Long.parseLong(m.group(2)) < 2) {
+            return null;
+        }
+        return m.group(1) + nome.substring(base.length());
     }
 
     /** Il nome se è libero, altrimenti "nome (2).ext", "nome (3).ext"...: non si sovrascrive mai. */
@@ -788,6 +962,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         private int copiati;
         private int giaCopiati;
         private int cancellati;
+        private int aMetaTolte;
         private int errori;
         private final List<String> messaggi = new ArrayList<>();
 
@@ -811,6 +986,10 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
             cancellati++;
         }
 
+        synchronized void aMetaTolta() {
+            aMetaTolte++;
+        }
+
         synchronized int errori() {
             return errori;
         }
@@ -824,8 +1003,8 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         }
 
         synchronized Giro giro(Instant inizio, Instant fine, Esito esito, String messaggio) {
-            return new Giro(inizio, fine, esito, messaggio, trovati, copiati, giaCopiati, cancellati, errori,
-                    List.copyOf(messaggi));
+            return new Giro(inizio, fine, esito, messaggio, trovati, copiati, giaCopiati, cancellati, aMetaTolte,
+                    errori, List.copyOf(messaggi));
         }
     }
 }

@@ -132,7 +132,7 @@ class SaluteTest {
     }
 
     private Giro giroOk(Duration fa) {
-        return new Giro(adesso.minus(fa), adesso.minus(fa), Esito.OK, "Fatto", 3, 3, 0, 0, 0, List.of());
+        return new Giro(adesso.minus(fa), adesso.minus(fa), Esito.OK, "Fatto", 3, 3, 0, 0, 0, 0, List.of());
     }
 
     @Test
@@ -222,7 +222,7 @@ class SaluteTest {
     @Test
     void telefonoConIlTokenScadutoERossoELoDice() {
         Giro giro = new Giro(adesso.minus(Duration.ofHours(1)), adesso, Esito.ERRORE,
-                "operations/list: couldn't list files: Invalid 'access_token' (2094)", 0, 0, 0, 0, 0, List.of());
+                "operations/list: couldn't list files: Invalid 'access_token' (2094)", 0, 0, 0, 0, 0, 0, List.of());
         telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
         telefono("anna", "Telefono di Anna", true, "pcloud-anna:Automatic Upload", 6, giro);
         VoceSalute v = voce(salute.controlla(), "telefono");

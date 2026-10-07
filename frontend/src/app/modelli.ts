@@ -267,6 +267,8 @@ export interface GiroTelefono {
   giaCopiati: number;
   /** Tolti da pCloud perché già importati. */
   cancellati: number;
+  /** Copie a metà dei giri vecchi tolte dalla cartella automatica (e ricopiate intere). */
+  aMetaTolte?: number;
   errori: number;
   messaggiErrori: string[];
 }

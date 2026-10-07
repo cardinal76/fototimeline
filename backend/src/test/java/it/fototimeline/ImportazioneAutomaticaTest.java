@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -113,6 +114,34 @@ class ImportazioneAutomaticaTest {
         assertThat(importa(regole(), terzo).importate()).isEqualTo(1);
         assertThat(terzo.lette).containsExactly("IMG_0001.jpg");
         assertThat(rotto).doesNotExist();
+        assertThat(memoria.elenco()).isEmpty();
+    }
+
+    @Test
+    void unaCopiaAMetaRicordataRipassaQuandoArrivaInteraConLaStessaData() throws IOException {
+        // rclone dà alla copia la data del file su pCloud: quella a metà e quella intera hanno la stessa.
+        FileTime suPCloud = FileTime.from(Instant.parse("2026-03-01T20:16:14Z"));
+        Path copia = telefono.resolve("Xiaomi - DCIM - Camera - 20260301_211614_558.jpg");
+        byte[] intero = immagine(Color.GREEN);
+        // Il contenuto non conta: basta che l'importazione non lo sappia leggere.
+        Files.write(copia, "copia a metà".getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(copia, suPCloud);
+        assertThat(importa(regole(), new Registro()).errori()).isEqualTo(1);
+        assertThat(memoria.elenco()).singleElement()
+                .satisfies(f -> assertThat(f.motivo()).startsWith("Immagine illeggibile"));
+        Registro ricordato = new Registro();
+        importa(regole(), ricordato);
+        assertThat(ricordato.giaFallite).isEqualTo(1);
+
+        // La sincronizzazione toglie la copia a metà e la ricopia intera, con lo stesso nome e la stessa data.
+        Files.delete(copia);
+        Files.write(copia, intero);
+        Files.setLastModifiedTime(copia, suPCloud);
+
+        Registro dopo = new Registro();
+        assertThat(importa(regole(), dopo).importate()).isEqualTo(1);
+        assertThat(dopo.lette).containsExactly(copia.getFileName().toString());
+        assertThat(copia).doesNotExist();
         assertThat(memoria.elenco()).isEmpty();
     }
 
