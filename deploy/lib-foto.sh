@@ -87,13 +87,25 @@ impronte() {
     done < <(xargs -0 -r sha256sum -z)
 }
 
+# metti_in_ordinate GIRO [IMPRONTE_DEL_GIRO]: il secondo, se c'è, è l'uscita di
+# impronte_di_cartella GIRO già calcolata (dalla preparazione in parallelo).
 metti_in_ordinate() {
-    local giro="$1" f rel sha base est n
+    local giro="$1" gia="${2:-}" f rel sha base est n riga
     local -a file=()
     DOVE=()
-    while IFS= read -r -d '' f; do file+=("$f"); done < <(find "$giro" -type f -print0 | sort -z)
-    [ "${#file[@]}" -gt 0 ] && impronte < <(printf '%s\0' "${file[@]}")
+    if [ -n "$gia" ]; then
+        SHA=()
+        while IFS= read -r -d '' riga; do
+            f="${riga#*  }"
+            file+=("$f")
+            SHA["$f"]="${riga%%  *}"
+        done < "$gia"
+    else
+        while IFS= read -r -d '' f; do file+=("$f"); done < <(find "$giro" -type f -print0 | sort -z)
+        [ "${#file[@]}" -gt 0 ] && impronte < <(printf '%s\0' "${file[@]}")
+    fi
     for f in "${file[@]}"; do
+        fermato
         sha="${SHA[$f]}"
         if [ -n "${IMPRONTA[$sha]:-}" ]; then
             DOVE[$sha]="${IMPRONTA[$sha]}"
@@ -142,7 +154,12 @@ conta_media() {
 # Il cuore di raccogli: tutte le foto, i video e gli zip di BASE non ancora fatti.
 # Prima: BASE e RADICE impostati, ordinate/ creata, le altre impronte già caricate.
 raccogli_fonti() {
+    [[ "$PARALLELI" =~ ^[1-9][0-9]*$ ]] || errore "PARALLELI dev'essere un numero da 1 in su (è '$PARALLELI')"
     touch "$MANIFEST" "$FONTI" "$IMPRONTE" "$DA_CONTROLLARE"
+    # Quello che un giro interrotto ha lasciato a metà in TMP non serve: si rifà da capo.
+    # (|| true: se un giro ucciso con kill -9 scrive ancora lì, la sua cartella resta, ma
+    # i nomi delle cartelle di questo giro sono diversi.)
+    rm -rf "$TMP" 2>/dev/null || true
     carica_impronte
     carica_nomi_lunghi
     declare -A FATTA
@@ -161,22 +178,120 @@ raccogli_fonti() {
     echo "${#sciolti[@]} foto e video sciolti e ${#zip[@]} zip da fare"
 
     # File sciolti, a blocchi: exiftool si avvia una volta per blocco, non per file.
-    local i blocco=500
-    for ((i = 0; i < ${#sciolti[@]}; i += blocco)); do
-        echo "[file $((i + 1))-$((i + blocco < ${#sciolti[@]} ? i + blocco : ${#sciolti[@]}))/${#sciolti[@]}] $(dirname "${sciolti[$i]#"$BASE"/}")/"
-        raccogli_sciolti "${sciolti[@]:i:blocco}"
-    done
-
-    local n=0
-    for f in "${zip[@]}"; do
-        n=$((n + 1))
-        echo "[zip $n/${#zip[@]}] ${f#"$BASE"/}"
-        raccogli_zip "$f"
-    done
+    local blocco=500
+    in_fila $(( (${#sciolti[@]} + blocco - 1) / blocco )) titolo_sciolti prepara_sciolti applica_sciolti
+    in_fila "${#zip[@]}" titolo_zip prepara_zip applica_zip
     rm -rf "$TMP"
     echo "Fatto: $(wc -l < "$IMPRONTE") foto e video diversi in $ORDINATE ($(du -sh "$ORDINATE" | cut -f1))."
     [ -s "$DA_CONTROLLARE" ] && echo "Da controllare (restano $DOVE_ORIGINE): $(wc -l < "$DA_CONTROLLARE") righe in $DA_CONTROLLARE"
     echo "Prossimo passo: $0 carica"
+}
+
+# --- I lavori di raccogli (blocchi di file sciolti, zip) in parallelo, in due tempi ------
+# Ogni lavoro k (0..N-1) ha tre funzioni:
+#   TITOLO k           la riga "[zip k/N] ..." (o "[file ...]")
+#   PREPARA k CARTELLA la parte lenta: unzip, impronte, exiftool. Scrive solo dentro la
+#                      sua CARTELLA (in TMP): mai ordinate/ né i file di lavoro.
+#   APPLICA k CARTELLA il resto, in questo processo e sempre nell'ordine di k (come prima,
+#                      per avere gli stessi nomi _2, -1 e la stessa uscita): metti_in_ordinate,
+#                      manifest.tsv, fonti.tsv, da-controllare.txt, la riga dell'esito.
+# Con PARALLELI=1 si fa tutto in fila, come sempre. Con PARALLELI=N, N preparazioni girano
+# in sottoshell in background (ognuna con la sua uscita in CARTELLA/.uscita e .errori, che
+# si ristampano col titolo, così l'uscita è identica) mentre questo processo applica i
+# lavori pronti, uno alla volta e in ordine. Una nuova preparazione parte solo quando la
+# precedente in ordine è pronta da applicare: su disco ci sono al massimo N+1 lavori aperti.
+# Sottoshell e non "xargs -P" sullo script: vedono già tutte le variabili e funzioni
+# (impostazioni, elenco degli zip), e l'ordine di applicazione resta semplice.
+# Uno zip è fatto solo quando è in fonti.tsv, scritto da APPLICA: se il giro si interrompe,
+# quello che era solo preparato si rifà al prossimo raccogli.
+# Ctrl+C o kill: la trappola ferma le preparazioni (ognuna ha un suo gruppo di processi,
+# con dentro unzip, exiftool, sha256sum, e si ferma tutto insieme) e il giro si chiude tra un
+# file e l'altro di ordinate/, mai a metà di uno.
+PARALLELI="${PARALLELI:-4}"
+FERMATO=""
+declare -A PREPARAZIONI=()
+fermato() {
+    [ -z "$FERMATO" ] && return 0
+    ferma_preparazioni
+    echo "Interrotto: rilancia $0 raccogli per riprendere." >&2
+    exit "$FERMATO"
+}
+ferma_preparazioni() {
+    local k
+    for k in "${!PREPARAZIONI[@]}"; do kill -TERM -- "-${PREPARAZIONI[$k]}" 2>/dev/null || true; done
+    for k in "${!PREPARAZIONI[@]}"; do wait "${PREPARAZIONI[$k]}" 2>/dev/null || true; done
+    PREPARAZIONI=()
+}
+
+in_fila() {
+    local n="$1" titolo="$2" prepara="$3" applica="$4" k dir prossimo
+    [ "$n" -gt 0 ] || return 0
+    trap 'FERMATO=130; ferma_preparazioni' INT
+    trap 'FERMATO=143; ferma_preparazioni' TERM
+    trap 'ferma_preparazioni' EXIT
+    if [ "$PARALLELI" -le 1 ]; then
+        # In fila: la cartella del lavoro è TMP stessa, come sempre.
+        for ((k = 0; k < n; k++)); do
+            dir="$TMP"
+            mkdir -p "$dir"
+            "$titolo" "$k"
+            "$prepara" "$k" "$dir"
+            fermato
+            "$applica" "$k" "$dir"
+            rm -rf "$dir"
+            fermato
+        done
+    else
+        for ((prossimo = 0; prossimo < n && prossimo < PARALLELI; prossimo++)); do
+            avvia_preparazione "$prossimo" "$prepara"
+        done
+        for ((k = 0; k < n; k++)); do
+            dir="$TMP/$$-$k"
+            wait "${PREPARAZIONI[$k]}" || true
+            unset 'PREPARAZIONI[$k]'
+            fermato
+            "$titolo" "$k"
+            ristampa "$dir" < "$dir/.uscita"
+            ristampa "$dir" < "$dir/.errori" >&2
+            [ -f "$dir/.pronto" ] || errore "la preparazione non è finita bene (vedi sopra): rilancia $0 raccogli"
+            if [ "$prossimo" -lt "$n" ]; then
+                avvia_preparazione "$prossimo" "$prepara"
+                prossimo=$((prossimo + 1))
+            fi
+            "$applica" "$k" "$dir"
+            rm -rf "$dir"
+            fermato
+        done
+    fi
+    trap - INT TERM EXIT
+}
+
+# L'uscita di una preparazione (unzip che si lamenta di uno zip rovinato, ...) con TMP al
+# posto della sua cartella: la stessa che in fila.
+ristampa() {
+    local testo
+    testo="$(cat; echo .)"
+    testo="${testo%.}"
+    printf '%s' "${testo//"$1/"/"$TMP/"}"
+}
+
+# Una preparazione in background, in un gruppo di processi suo (set -m solo per questo
+# avvio): kill -- -PID ferma lei e tutto quello che ha lanciato. Dentro, set -e come qui:
+# se qualcosa va storto non si scrive .pronto.
+avvia_preparazione() {
+    local k="$1" prepara="$2" dir="$TMP/$$-$1"
+    mkdir -p "$dir"
+    set -m
+    ( set +m; trap - INT TERM EXIT
+      "$prepara" "$k" "$dir" > "$dir/.uscita" 2> "$dir/.errori"
+      : > "$dir/.pronto" ) < /dev/null &
+    PREPARAZIONI[$k]=$!
+    set +m
+}
+
+# Le impronte dei file di una cartella in ordine di nome, come le legge metti_in_ordinate.
+impronte_di_cartella() {
+    find "$1" -type f -print0 | sort -z | xargs -0 -r sha256sum -z
 }
 
 # Il percorso sotto RADICE di un file letto da BASE (che può essere la copia locale).
@@ -197,12 +312,19 @@ carica_nomi_lunghi() {
 
 # Un blocco di file sciolti: li collega (o copia, da P:), li ordina, segna da dove vengono.
 # Dalla copia locale sono collegamenti: niente spazio in più, e ordinate/ li tiene.
-raccogli_sciolti() {
-    rm -rf "$TMP"; mkdir -p "$TMP/in" "$TMP/ord"
-    local -A FONTE_DI VISTO
+# Il blocco k sono i file sciolti da k*blocco, al massimo blocco.
+titolo_sciolti() {
+    local i=$(($1 * blocco))
+    echo "[file $((i + 1))-$((i + blocco < ${#sciolti[@]} ? i + blocco : ${#sciolti[@]}))/${#sciolti[@]}] $(dirname "${sciolti[$i]#"$BASE"/}")/"
+}
+prepara_sciolti() {
+    local d="$2"
+    local -a del_blocco=("${sciolti[@]:$(($1 * blocco)):blocco}")
+    mkdir -p "$d/in" "$d/ord"
+    local -A VISTO
     local -a copie=()
     local f nome copia sha k=0
-    for f in "$@"; do
+    for f in "${del_blocco[@]}"; do
         k=$((k + 1))
         nome="${f##*/}"
         # Copie di un download: "IMG_0001 (1).jpg" torna "IMG_0001.jpg", e di più file
@@ -210,25 +332,31 @@ raccogli_sciolti() {
         if [ "$COPIE_SCARICATE" = si ] && [[ "$nome" =~ ^(.+)\ \([0-9]+\)(\.[^.]+)$ ]]; then
             nome="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
         fi
-        copia="$TMP/in/$k/$nome"
-        mkdir -p "$TMP/in/$k"
+        copia="$d/in/$k/$nome"
+        mkdir -p "$d/in/$k"
         ln "$f" "$copia" 2>/dev/null || cp --preserve=timestamps "$f" "$copia"
         copie+=("$copia")
     done
     impronte < <(printf '%s\0' "${copie[@]}")
-    k=0
-    for f in "$@"; do
-        copia="${copie[$k]}"; k=$((k + 1))
+    # L'impronta di ogni file del blocco, nell'ordine del blocco, per applica_sciolti.
+    : > "$d/impronte"
+    for copia in "${copie[@]}"; do
         sha="${SHA[$copia]}"
-        FONTE_DI[$f]="$sha"
+        printf '%s\n' "$sha" >> "$d/impronte"
         [ "$COPIE_SCARICATE" = si ] && [ -n "${VISTO[$sha]:-}" ] && rm -f "$copia"
         VISTO[$sha]=1
     done
-    ordina_cartella "$TMP/in" "$TMP/ord"
-    metti_in_ordinate "$TMP/ord"
-    local fonte
-    for f in "$@"; do
-        sha="${FONTE_DI[$f]}"
+    ordina_cartella "$d/in" "$d/ord"
+    impronte_di_cartella "$d/ord" > "$d/ord.sha"
+}
+applica_sciolti() {
+    local d="$2"
+    local -a del_blocco=("${sciolti[@]:$(($1 * blocco)):blocco}") shas=()
+    mapfile -t shas < "$d/impronte"
+    metti_in_ordinate "$d/ord" "$d/ord.sha"
+    local f fonte sha k=0
+    for f in "${del_blocco[@]}"; do
+        sha="${shas[$k]}"; k=$((k + 1))
         fonte_in "$f"; fonte="$FONTE"
         if [ -n "${DOVE[$sha]:-}" ]; then
             printf '%s\t\t%s\t%s\n' "$fonte" "$sha" "${DOVE[$sha]}" >> "$MANIFEST"
@@ -241,43 +369,58 @@ raccogli_sciolti() {
 }
 
 # Uno zip: lo apre, ne ordina i media; si potrà cancellare solo se dentro non c'era altro.
-raccogli_zip() {
-    local letto="$1" stato=0 z
-    z="$(fonte_di "$letto")"
-    rm -rf "$TMP"; mkdir -p "$TMP/zip" "$TMP/in" "$TMP/ord"
+# Lo zip k è zip[k].
+titolo_zip() {
+    echo "[zip $(($1 + 1))/${#zip[@]}] ${zip[$1]#"$BASE"/}"
+}
+prepara_zip() {
+    local letto="${zip[$1]}" d="$2" stato=0
+    mkdir -p "$d/zip" "$d/in" "$d/ord"
     if [ "$BASE" = "$SPECCHIO" ] || [ "$ZIP_SUL_POSTO" = si ]; then
-        unzip -q -o "$letto" -d "$TMP/in" </dev/null || stato=$?
+        unzip -q -o "$letto" -d "$d/in" </dev/null || stato=$?
     else
-        cp "$letto" "$TMP/zip/a.zip"
-        unzip -q -o "$TMP/zip/a.zip" -d "$TMP/in" </dev/null || stato=$?
-        rm -f "$TMP/zip/a.zip"
+        cp "$letto" "$d/zip/a.zip"
+        unzip -q -o "$d/zip/a.zip" -d "$d/in" </dev/null || stato=$?
+        rm -f "$d/zip/a.zip"
     fi
+    echo "$stato" > "$d/stato"
+    [ "$stato" -gt 1 ] && return 0
+    # Le copie "._nome" dei Mac non sono foto.
+    rm -rf "$d/in/__MACOSX"
+    find "$d/in" -name '._*' -type f -delete
+    local s
+    for s in "${SCARTA_NEI_ZIP[@]}"; do
+        find "$d/in" -iname "$s" -type f -delete
+    done
+    # I media dello zip con la loro impronta (nome NUL impronta NUL), per applica_zip.
+    local m
+    local -a percorsi=()
+    while IFS= read -r -d '' m; do percorsi+=("$m"); done \
+        < <(find "$d/in" -type f \( -false "${estensioni_find[@]}" \) -print0 | sort -z)
+    [ "${#percorsi[@]}" -gt 0 ] && impronte < <(printf '%s\0' "${percorsi[@]}")
+    for m in "${percorsi[@]}"; do
+        printf '%s\0%s\0' "${m#"$d/in"/}" "${SHA[$m]}"
+    done > "$d/membri"
+    ordina_cartella "$d/in" "$d/ord"
+    impronte_di_cartella "$d/ord" > "$d/ord.sha"
+}
+applica_zip() {
+    local d="$2" z stato
+    z="$(fonte_di "${zip[$1]}")"
+    stato="$(cat "$d/stato")"
     if [ "$stato" -gt 1 ]; then
         echo "zip rovinato (unzip $stato): $z" >> "$DA_CONTROLLARE"
         printf 'zip\t%s\tno\n' "$z" >> "$FONTI"
         return
     fi
-    # Le copie "._nome" dei Mac non sono foto.
-    rm -rf "$TMP/in/__MACOSX"
-    find "$TMP/in" -name '._*' -type f -delete
-    local s
-    for s in "${SCARTA_NEI_ZIP[@]}"; do
-        find "$TMP/in" -iname "$s" -type f -delete
-    done
     local -a membri=() shas=()
-    local m
-    local -a percorsi=()
-    while IFS= read -r -d '' m; do percorsi+=("$m"); done \
-        < <(find "$TMP/in" -type f \( -false "${estensioni_find[@]}" \) -print0 | sort -z)
-    [ "${#percorsi[@]}" -gt 0 ] && impronte < <(printf '%s\0' "${percorsi[@]}")
-    for m in "${percorsi[@]}"; do
-        membri+=("${m#"$TMP/in"/}")
-        shas+=("${SHA[$m]}")
-    done
-    ordina_cartella "$TMP/in" "$TMP/ord"
-    metti_in_ordinate "$TMP/ord"
+    local m s
+    while IFS= read -r -d '' m && IFS= read -r -d '' s; do
+        membri+=("$m"); shas+=("$s")
+    done < "$d/membri"
+    metti_in_ordinate "$d/ord" "$d/ord.sha"
     local altri eliminabile=si i
-    altri=$(find "$TMP/in" -type f | wc -l)
+    altri=$(find "$d/in" -type f | wc -l)
     for ((i = 0; i < ${#membri[@]}; i++)); do
         if [ -n "${DOVE[${shas[$i]}]:-}" ]; then
             printf '%s\t%s\t%s\t%s\n' "$z" "${membri[$i]}" "${shas[$i]}" "${DOVE[${shas[$i]}]}" >> "$MANIFEST"
@@ -289,7 +432,7 @@ raccogli_zip() {
         # Quello che exiftool non ha spostato: altri file, o media non letti.
         eliminabile=no
         echo "zip con $altri altri file, resta $DOVE_ORIGINE: $z" >> "$DA_CONTROLLARE"
-        find "$TMP/in" -type f | sed "s|^$TMP/in/|    |" | head -10 >> "$DA_CONTROLLARE"
+        find "$d/in" -type f | sed "s|^$d/in/|    |" | head -10 >> "$DA_CONTROLLARE"
     fi
     printf 'zip\t%s\t%s\n' "$z" "$eliminabile" >> "$FONTI"
     echo "    ${#membri[@]} foto e video$([ "$altri" -gt 0 ] && echo ", $altri altri file: lo zip resta $DOVE_ORIGINE")"

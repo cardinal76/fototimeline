@@ -27,6 +27,12 @@
 # Più radici: un raccogli per radice, prima di carica; i doppioni tra una e
 # l'altra entrano una volta sola.
 #
+# PARALLELI: in raccogli, quanti zip (o blocchi di 500 file sciolti) si preparano insieme,
+# cioè si aprono, si leggono le date e si calcolano le impronte (predefinito 4, come i core
+# del PC; PARALLELI=1 tutto in fila, come prima). Si mettono in ordinate/ comunque uno alla
+# volta e nello stesso ordine: stessi file e stessi nomi con qualsiasi PARALLELI. Su disco
+# restano aperti al massimo PARALLELI+1 zip insieme. Per esempio: PARALLELI=2 foto-da-pcloud.sh raccogli
+#
 # Ogni fase si può rilanciare: riprende da dove era arrivata. Pulisci cancella solo
 # gli originali elencati in LAVORO/fonti.tsv come copiati per intero; gli zip con
 # dentro anche altri file (documenti, ...) e i file non letti restano dove sono,
