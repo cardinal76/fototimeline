@@ -34,6 +34,10 @@
 # restano aperti al massimo PARALLELI+1 zip insieme. Per esempio: PARALLELI=2 foto-da-pcloud.sh raccogli
 # CARICA_PARALLELI: in carica, quanti file si mandano insieme a LifetimeCloud (predefinito
 # 16). Per esempio: CARICA_PARALLELI=8 foto-da-pcloud.sh carica
+# Prima di copiare, carica crea una alla volta le cartelle AAAA/MM/GG che mancano: se due
+# file in parallelo creano insieme la stessa cartella, LifetimeCloud ne fa due con lo stesso
+# nome e i file di una non si vedono più. Se trova cartelle doppie già fatte si ferma: prima
+# deploy/sistema-cartelle-doppie.sh, che le riunisce senza cancellare niente.
 #
 # Ogni fase si può rilanciare: riprende da dove era arrivata. Pulisci cancella solo
 # gli originali elencati in LAVORO/fonti.tsv come copiati per intero; gli zip con

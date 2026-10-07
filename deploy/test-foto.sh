@@ -12,6 +12,9 @@
 # 3. PARALLELI: 1100 file sciolti e 12 zip (foto in comune, nomi uguali con foto diverse, uno
 #    zip rovinato, uno con altri file): con PARALLELI=1, 3 e 4 stessa uscita e stessi file;
 #    con PARALLELI=4 ucciso a metà più volte e rilanciato, stesso risultato del giro intero.
+# 4. Cartelle doppie, con un finto LifetimeCloud che le ha: carica crea le cartelle prima di
+#    copiare (una alla volta) e si ferma se ce ne sono di doppie; sistema-cartelle-doppie.sh
+#    le trova, le riunisce senza perdere né cancellare niente, e rilanciato non fa niente.
 #
 # Serve: exiftool, rclone, zip, unzip (ffmpeg facoltativo, per un video vero).
 set -uo pipefail
@@ -94,7 +97,8 @@ gira_pcloud() {   # gira_pcloud SCRIPT con|senza USCITA [SCRIPT dal secondo racc
         "$s" stato
         echo "--- fase sbagliata"; "$s" boh
     } > "$out.grezza" 2>&1
-    grep -Ev '^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]+ (NOTICE|INFO|ERROR)|Transferred:|Checks:|Elapsed time' "$out.grezza" \
+    # "Creo N cartelle": carica le crea prima di copiare (dopo c34f8b9).
+    grep -Ev '^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]+ (NOTICE|INFO|ERROR)|Transferred:|Checks:|Elapsed time|^Creo [0-9]+ cartelle in ' "$out.grezza" \
         | sed -E 's|[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}|DATA|g' \
         | sed -E 's|^(Da controllare \(restano su pCloud\): )[0-9]+ righe|\1N righe|' > "$out"
     {
@@ -357,6 +361,126 @@ verifica "ripresa: ucciso a metà quattro volte"         [ "$uccisi" -eq 4 ]
 verifica "ripresa: niente processi rimasti dopo il kill" [ "$restati" -eq 0 ]
 verifica "ripresa: stessi file e nomi del giro intero"  cmp -s "$T/molti-1.txt.file" "$T/ripreso.file"
 cmp -s "$T/molti-1.txt.file" "$T/ripreso.file" || diff "$T/molti-1.txt.file" "$T/ripreso.file" | head -30
+
+# --- 4. cartelle create prima della copia; cartelle doppie su LifetimeCloud ---------------
+echo "4. cartelle doppie"
+# Un finto LifetimeCloud sopra rclone: "finto:X" è $FINTO/X, e una cartella "11~2" è una
+# seconda copia di "11" con lo stesso nome, come quelle che fa LifetimeCloud. lsf le elenca
+# col nome vero (con -R rientra ogni volta nella prima copia, come rclone su WebDAV: sotto
+# una cartella tripla tutto compare tre volte), un percorso porta sempre alla prima copia e
+# moveto ne sposta una sola. Il resto lo fa rclone vero. In $FINTO.log ogni comando; prima
+# della copia di carica (quella con --backup-dir), in $FINTO.cartelle le cartelle che la
+# destinazione ha già.
+cat > "$T/bin/rclone-finto" <<'FINE'
+#!/usr/bin/env bash
+set -uo pipefail
+printf '%s\n' "$*" >> "$FINTO.log"
+[[ " $* " == *" finto:"* ]] || exec rclone "$@"
+vero() {
+    local p="$1" c cur prima
+    [[ "$p" == finto:* ]] || { printf '%s' "$p"; return; }
+    p="${p#finto:}"; cur="$FINTO"
+    local IFS=/
+    for c in $p; do
+        [ -n "$c" ] || continue
+        prima="$(compgen -G "$cur/$c~*" | LC_ALL=C sort | sed -n 1p)"
+        if [ -d "$cur/$c" ] || [ -z "$prima" ]; then cur="$cur/$c"; else cur="$prima"; fi
+    done
+    printf '%s' "$cur"
+}
+elenca() {   # elenca CARTELLA PREFISSO PROFONDITA
+    local d nome
+    for d in "$1"/*/; do
+        [ -d "$d" ] || continue
+        nome="${d%/}"; nome="${nome##*/}"; nome="${nome%%~*}"
+        printf '%s%s/\n' "$2" "$nome"
+        if [ "$3" -gt 1 ]; then elenca "$(vero "finto:${1#"$FINTO"}/$nome")" "$2$nome/" $(($3 - 1)); fi
+    done
+}
+case "$1" in
+    lsf)
+        shift; r="" prof="" dove=""
+        while [ $# -gt 0 ]; do
+            case "$1" in -R) r=1 ;; --max-depth) prof="$2"; shift ;; --dirs-only) ;; *) dove="$1" ;; esac
+            shift
+        done
+        d="$(vero "$dove")"
+        [ -d "$d" ] || { echo "ERROR : directory not found" >&2; exit 3; }
+        if [ -z "$r" ]; then prof=1; fi
+        elenca "$d" "" "${prof:-99}" ;;
+    moveto)
+        da="$(vero "$2")" a="$(vero "$3")"
+        [ -d "$da" ] && [ ! -e "$a" ] || { echo "ERROR : non si sposta" >&2; exit 1; }
+        mkdir -p "$(dirname "$a")" && mv "$da" "$a" || exit 1
+        echo "INFO  : $3: Server side directory move succeeded" >&2 ;;
+    *)
+        if [ "$1" = copy ] && [[ " $* " == *" --backup-dir "* ]]; then
+            (cd "$(vero "$3")" && find . -mindepth 1 -type d | LC_ALL=C sort) > "$FINTO.cartelle"
+        fi
+        args=()
+        for x in "$@"; do args+=("$(vero "$x")"); done
+        exec rclone "${args[@]}" ;;
+esac
+FINE
+chmod +x "$T/bin/rclone-finto"
+export FINTO="$T/finto"
+mkdir -p "$FINTO"
+cartelle() { (cd "$1" && find . -mindepth 1 -type d | LC_ALL=C sort); }
+contenuti() { (cd "$1" && find . -type f -exec cat {} \; -exec echo \; | LC_ALL=C sort); }
+sha_di() { (cd "$1" && find . -type f -exec sha256sum {} + | LC_ALL=C sort -k2); }
+
+# carica verso una destinazione che non c'è ancora: prima tutte le cartelle, poi i file.
+FC=(env RCLONE="$T/bin/rclone-finto" "$QUI/foto-da-cartella.sh")
+{
+    DESTINAZIONE=finto:Nuova "${FC[@]}" carica
+    echo "--- di nuovo"; DESTINAZIONE=finto:Nuova "${FC[@]}" carica
+} > "$T/finto-carica.txt" 2>&1
+N="$(cartelle "$A/ordinate" | wc -l)"
+verifica "carica: \"Creo $N cartelle\" la prima volta"     contiene "$T/finto-carica.txt" "Creo $N cartelle in finto:Nuova, una alla volta"
+verifica "carica: rilanciato, nessuna cartella da creare" [ "$(grep -c '^Creo ' "$T/finto-carica.txt")" -eq 1 ]
+verifica "carica: le cartelle c'erano prima della copia"  [ "$(cartelle "$A/ordinate")" = "$(cat "$FINTO.cartelle")" ]
+verifica "carica: cartelle con --transfers 1 --checkers 1" grep -Eq -- '^copy .* finto:Nuova --create-empty-src-dirs --transfers 1 --checkers 1$' "$FINTO.log"
+verifica "carica: tutto copiato e controllato"            [ "$(sha_di "$A/ordinate")" = "$(sha_di "$FINTO/Nuova")" ]
+grep -q '^Caricate e controllate' "$T/finto-carica.txt" || cat "$T/finto-carica.txt"
+
+# Un archivio con tre cartelle doppie, come quello di Marco: 2011/02/03 due volte, 2015/11 e
+# 2015/12 tre volte; in una copia di 2015/11 anche 02 è doppia, in un'altra c'è un a.jpg
+# diverso da quello della prima. Più file dell'app, che non vanno toccati.
+F="$FINTO/FotoTimeline"
+metti() { mkdir -p "$(dirname "$F/$1")"; printf '%s' "$2" > "$F/$1"; }
+metti "2015/11/01/a.jpg" a;         metti "2015/11/03/b.jpg" b
+metti "2015/11~2/01/c.jpg" c;       metti "2015/11~2/02/d.jpg" d;  metti "2015/11~2/01/a.jpg" a-diversa
+metti "2015/11~3/02/e.jpg" e;       metti "2015/11~3/02~2/f.jpg" f
+metti "2015/12/01/g.jpg" g;         metti "2015/12~2/02/h.jpg" h;  metti "2015/12~3/03/i.jpg" i
+metti "2011/02/03/j.jpg" j;         metti "2011/02/03~2/j.jpg" j;  metti "2011/02/03~2/k.jpg" k
+metti "2016/01/01/l.jpg" l;         metti ".backup/fototimeline-1.json.gz" backup
+prima="$(contenuti "$F")"
+SD=(env RCLONE="$T/bin/rclone-finto" DESTINAZIONE=finto:FotoTimeline REGISTRO="$T/doppie.tsv" "$QUI/sistema-cartelle-doppie.sh")
+DESTINAZIONE=finto:FotoTimeline "${FC[@]}" carica > "$T/finto-ferma.txt" 2>&1
+verifica "carica: con cartelle doppie si ferma"            contiene "$T/finto-ferma.txt" "ci sono cartelle doppie"
+verifica "carica: con cartelle doppie non copia niente"    [ "$prima" = "$(contenuti "$F")" ]
+"${SD[@]}" > "$T/doppie-elenco.txt" 2>&1
+verifica "elenca: le tre cartelle doppie, e solo quelle"  [ "$(grep -c ' copie$' "$T/doppie-elenco.txt")" -eq 3 ]
+verifica "elenca: 2015/11 tre volte"                      contiene "$T/doppie-elenco.txt" "2015/11: 3 copie"
+verifica "elenca: 2011/02/03 due volte"                   contiene "$T/doppie-elenco.txt" "2011/02/03: 2 copie"
+verifica "elenca: non tocca niente"                       [ "$prima" = "$(contenuti "$F")" ]
+"${SD[@]}" sistema > "$T/doppie-sistema.txt" 2>&1
+verifica "sistema: finito bene"                           contiene "$T/doppie-sistema.txt" "Fatto."
+verifica "sistema: nessuna copia doppia rimasta"          [ -z "$(find "$F" -name '*~*')" ]
+verifica "sistema: 2015/11 riunita (con 02 doppia dentro)" [ "$(cd "$F/2015/11" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./01/a.jpg ./01/c.jpg ./02/d.jpg ./02/e.jpg ./02/f.jpg ./03/b.jpg " ]
+verifica "sistema: a.jpg diversa non sovrascritta"        [ "$(cat "$F/2015/11/01/a.jpg")" = a ]
+verifica "sistema: a.jpg diversa elencata"                contiene "$T/doppie.tsv.diversi" "/01/a.jpg"
+verifica "sistema: tutto il resto in FotoTimeline"         [ "$(printf '%s\n' "$prima" | grep -vx a-diversa | sort -u)" = "$(contenuti "$F" | sort -u)" ]
+verifica "sistema: niente cancellato (tutto in -doppie)"  [ "$(printf '%s\n' "$prima" | grep -v backup | grep -v '^l$')" = "$(contenuti "$FINTO/FotoTimeline-doppie")" ]
+verifica "sistema: file dell'app intatti"                 c_e "$F/.backup/fototimeline-1.json.gz"
+verifica "sistema: copie una alla volta"                  [ "$(grep -c -- '^copy finto:FotoTimeline-doppie/.* --transfers 1 --checkers 1$' "$FINTO.log")" -eq 10 ]
+"${SD[@]}" sistema > "$T/doppie-ancora.txt" 2>&1
+verifica "sistema rilanciato: niente da fare"             contiene "$T/doppie-ancora.txt" "Nessuna cartella doppia, niente da ricopiare."
+DESTINAZIONE=finto:FotoTimeline "${FC[@]}" carica > "$T/finto-dopo.txt" 2>&1
+verifica "carica dopo sistema: va"                        contiene "$T/finto-dopo.txt" "Caricate e controllate"
+if [ "$KO" -gt 0 ]; then
+    for f in finto-ferma doppie-elenco doppie-sistema doppie-ancora finto-dopo; do echo "--- $f"; cat "$T/$f.txt"; done
+fi
 
 echo
 if [ "$KO" -gt 0 ]; then

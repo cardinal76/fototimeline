@@ -335,6 +335,14 @@ Gli zip con dentro anche altro (documenti, ...) e i file non letti restano su
 pCloud, elencati in `~/foto-da-pcloud/da-controllare.txt`. `stato` dice a che
 punto è. Sul PC serve spazio quanto tutte le foto, finché non si pulisce.
 
+`carica` crea prima, una alla volta, le cartelle che mancano su LifetimeCloud,
+poi copia `CARICA_PARALLELI` file insieme: se due caricamenti creano insieme la
+stessa cartella, LifetimeCloud ne fa due con lo stesso nome (rclone dice
+"Duplicate directory found") e i file di una non si vedono più. Se ne trova di
+già doppie si ferma: `deploy/sistema-cartelle-doppie.sh` le elenca e, con
+`sistema`, le riunisce senza cancellare niente (le copie restano in
+`lifetime:FotoTimeline-doppie`, da buttare a mano dopo un controllo).
+
 ```bash
 sudo apt install -y unzip zip libimage-exiftool-perl rclone   # rclone con il remote lifetime:
 sudo mount -t drvfs P: /mnt/p
