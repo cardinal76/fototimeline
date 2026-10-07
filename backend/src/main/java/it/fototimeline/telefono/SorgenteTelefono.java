@@ -51,9 +51,10 @@ public record SorgenteTelefono(@Id String id, String nome, String proprietario, 
      * @param copiati   copiati in questo giro
      * @param giaCopiati già copiati in un giro precedente (nel registro)
      * @param cancellati tolti dalla sorgente perché importati
+     * @param aMetaTolte copie a metà di giri vecchi tolte dalla cartella automatica (null nei giri salvati prima che ci fosse)
      * @param messaggiErrori i primi errori, file per file
      */
     public record Giro(Instant iniziatoIl, Instant finitoIl, Esito esito, String messaggio, int trovati,
-            int copiati, int giaCopiati, int cancellati, int errori, List<String> messaggiErrori) {
+            int copiati, int giaCopiati, int cancellati, Integer aMetaTolte, int errori, List<String> messaggiErrori) {
     }
 }

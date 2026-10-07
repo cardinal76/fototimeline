@@ -784,6 +784,9 @@
                 <p class="tenue">
                   {{ g.trovati }} su pCloud · {{ g.copiati }} copiati · {{ g.giaCopiati }} già copiati ·
                   {{ g.cancellati }} tolti da pCloud
+                  @if (g.aMetaTolte) {
+                    · {{ g.aMetaTolte }} copie a metà tolte
+                  }
                   @if (g.errori) {
                     · <span class="errore">{{ g.errori }} errori</span>
                   }

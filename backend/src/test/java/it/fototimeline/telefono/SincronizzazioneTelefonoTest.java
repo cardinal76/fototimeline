@@ -34,7 +34,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequest;
 import org.springframework.http.client.ClientHttpResponse;
@@ -132,7 +134,7 @@ class SincronizzazioneTelefonoTest {
         assertThat(giro.esito()).isEqualTo(Esito.OK);
         assertThat(giro.trovati()).isEqualTo(2);
         assertThat(giro.copiati()).isEqualTo(2);
-        assertThat(rclone.chiamate("operations/list")).singleElement().satisfies(p -> {
+        assertThat(rclone.elenchiSorgente()).singleElement().satisfies(p -> {
             assertThat(p).containsEntry("fs", "pcloud:").containsEntry("remote", "Automatic Upload");
             assertThat(p.get("opt")).isEqualTo(Map.of("recurse", true, "filesOnly", true));
         });
@@ -297,6 +299,161 @@ class SincronizzazioneTelefonoTest {
                 .containsExactly("telefono/Pixel 8 - VID_0001.mp4");
     }
 
+    /** Una voce del registro del telefono di Marco, come la scrive un giro riuscito. */
+    private void registrata(String percorso, long dimensione, String destinazione) {
+        mongo.insert(new CopiaTelefono(new org.bson.types.ObjectId().toHexString(), "pcloud:Automatic Upload", marco,
+                "marco", percorso, dimensione, null, destinazione, orologio.instant().minus(Duration.ofDays(1)), null));
+    }
+
+    @Test
+    void leCopieAMetaDeiGiriVecchiSiTolgonoESiRicopianoIntere() {
+        rclone.pcloud.put("Automatic Upload/DCIM/Camera/VID_0001.mp4", 5000L);
+        // Quello che lasciava il timeout della copia sincrona: il file e le sue copie "(N)", tutte a metà.
+        rclone.lifetime.put("telefono/DCIM - Camera - VID_0001.mp4", 1200L);
+        rclone.lifetime.put("telefono/DCIM - Camera - VID_0001 (2).mp4", 3000L);
+        rclone.lifetime.put("telefono/DCIM - Camera - VID_0001 (3).mp4", 0L);
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.aMetaTolte()).isEqualTo(3);
+        assertThat(giro.copiati()).isEqualTo(1);
+        assertThat(rclone.chiamate("operations/deletefile")).extracting(p -> p.get("fs")).containsOnly("lifetime:");
+        // Ricopiato intero col suo nome, che ora è libero; pCloud non si tocca.
+        assertThat(rclone.lifetime).containsOnly(Map.entry("telefono/DCIM - Camera - VID_0001.mp4", 5000L));
+        assertThat(rclone.pcloud).containsEntry("Automatic Upload/DCIM/Camera/VID_0001.mp4", 5000L);
+        assertThat(mongo.findAll(CopiaTelefono.class)).extracting(CopiaTelefono::destinazione)
+                .containsExactly("telefono/DCIM - Camera - VID_0001.mp4");
+        assertThat(sorgente(marco).ultimoGiro().aMetaTolte()).isEqualTo(3);
+
+        // Il giro dopo non trova più niente da togliere.
+        rclone.chiamate.clear();
+        Giro dopo = sincronizzazione.sincronizza(marco);
+        assertThat(dopo.aMetaTolte()).isZero();
+        assertThat(rclone.chiamate("operations/deletefile")).isEmpty();
+        assertThat(rclone.chiamate("operations/copyfile")).isEmpty();
+    }
+
+    @Test
+    void leCopieAMetaInPiuSiTolgonoAncheSeQuellaInteraENelRegistro() {
+        // Dopo la copia asincrona: "(6)" è arrivato intero ed è nel registro, le altre sono rimaste a metà.
+        rclone.pcloud.put("Automatic Upload/VID_0001.mp4", 5000L);
+        rclone.lifetime.put("telefono/VID_0001.mp4", 100L);
+        for (int n = 2; n <= 5; n++) {
+            rclone.lifetime.put("telefono/VID_0001 (" + n + ").mp4", 1000L * n - 1);
+        }
+        rclone.lifetime.put("telefono/VID_0001 (6).mp4", 5000L);
+        registrata("VID_0001.mp4", 5000L, "telefono/VID_0001 (6).mp4");
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.aMetaTolte()).isEqualTo(5);
+        assertThat(giro.giaCopiati()).isEqualTo(1);
+        assertThat(rclone.chiamate("operations/copyfile")).isEmpty();
+        assertThat(rclone.lifetime).containsOnlyKeys("telefono/VID_0001 (6).mp4");
+        assertThat(rclone.pcloud).containsOnlyKeys("Automatic Upload/VID_0001.mp4");
+    }
+
+    @Test
+    void unaCopiaInteraNonSiToccaMai() {
+        rclone.pcloud.put("Automatic Upload/IMG_0001.jpg", 200L);
+        rclone.pcloud.put("Automatic Upload/IMG_0002.jpg", 300L);
+        rclone.pcloud.put("Automatic Upload/IMG_0003.jpg", 400L);
+        rclone.pcloud.put("Automatic Upload/IMG_0004.jpg", 100L);
+        rclone.pcloud.put("Automatic Upload/IMG_0004 (2).jpg", 50L);
+        // Più piccola, ma nel registro: è la copia intera di un altro file con lo stesso nome
+        // (un'altra versione, o lo stesso nome sul telefono di Anna).
+        rclone.lifetime.put("telefono/IMG_0001.jpg", 150L);
+        registrata("IMG_0001.jpg", 150L, "telefono/IMG_0001.jpg");
+        // Della stessa dimensione: arrivata intera in un giro di prima, anche se non nel registro.
+        rclone.lifetime.put("telefono/IMG_0002 (3).jpg", 300L);
+        // Più grande: un altro file.
+        rclone.lifetime.put("telefono/IMG_0003.jpg", 999L);
+        // Un file che sul telefono si chiama già "(2)": è piccolo rispetto a IMG_0004, non rispetto a sé.
+        rclone.lifetime.put("telefono/IMG_0004 (2).jpg", 50L);
+        // Nessun file della sorgente con questo nome: non si sa di chi sia.
+        rclone.lifetime.put("telefono/IMG_20250929_122800.jpg", 10L);
+        rclone.lifetime.put("telefono/IMG_0001 (x).jpg", 10L);
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.aMetaTolte()).isZero();
+        assertThat(rclone.chiamate("operations/deletefile")).isEmpty();
+        assertThat(rclone.lifetime).containsEntry("telefono/IMG_0001.jpg", 150L)
+                .containsEntry("telefono/IMG_0002 (3).jpg", 300L)
+                .containsEntry("telefono/IMG_0003.jpg", 999L)
+                .containsEntry("telefono/IMG_0004 (2).jpg", 50L)
+                .containsEntry("telefono/IMG_20250929_122800.jpg", 10L)
+                .containsEntry("telefono/IMG_0001 (x).jpg", 10L);
+    }
+
+    @Test
+    void unaCopiaCheRcloneStaFacendoNonSiTocca() {
+        rclone.pcloud.put("Automatic Upload/VID_0001.mp4", 5000L);
+        rclone.pcloud.put("Automatic Upload/VID_0002.mp4", 6000L);
+        // Copie partite prima di un riavvio dell'app: rclone le sta ancora scrivendo.
+        rclone.lifetime.put("telefono/VID_0001.mp4", 1200L);
+        rclone.lifetime.put("telefono/VID_0002 (2).mp4", 700L);
+        rclone.trasferimenti.add(Map.of("name", "Automatic Upload/VID_0001.mp4", "size", 5000L, "bytes", 1200L));
+        rclone.trasferimenti.add(Map.of("name", "VID_0002 (2).mp4", "dstRemote", "telefono/VID_0002 (2).mp4",
+                "size", 6000L, "bytes", 700L));
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.aMetaTolte()).isZero();
+        assertThat(rclone.lifetime).containsEntry("telefono/VID_0001.mp4", 1200L)
+                .containsEntry("telefono/VID_0002 (2).mp4", 700L);
+
+        // Finite (o fermate) le copie, il giro dopo le toglie.
+        rclone.trasferimenti.clear();
+        mongo.remove(new Query(), CopiaTelefono.class);
+        rclone.lifetime.keySet().removeIf(k -> !k.equals("telefono/VID_0001.mp4") && !k.equals("telefono/VID_0002 (2).mp4"));
+        assertThat(sincronizzazione.sincronizza(marco).aMetaTolte()).isEqualTo(2);
+        assertThat(rclone.lifetime).containsOnly(Map.entry("telefono/VID_0001.mp4", 5000L),
+                Map.entry("telefono/VID_0002.mp4", 6000L));
+    }
+
+    @Test
+    void senzaSapereCosaStaCopiandoRcloneNonSiToglieNiente() {
+        rclone.pcloud.put("Automatic Upload/VID_0001.mp4", 5000L);
+        rclone.lifetime.put("telefono/VID_0001.mp4", 1200L);
+        rclone.statsGuasto = true;
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.aMetaTolte()).isZero();
+        assertThat(rclone.chiamate("operations/deletefile")).isEmpty();
+        assertThat(rclone.lifetime).containsEntry("telefono/VID_0001.mp4", 1200L);
+        // La copia va avanti come prima, accanto.
+        assertThat(rclone.lifetime).containsEntry("telefono/VID_0001 (2).mp4", 5000L);
+    }
+
+    @Test
+    void ilNumeroDelNomeSiTogliePerTrovareLOriginale() {
+        assertThat(SincronizzazioneTelefono.senzaNumero("telefono/a (3).jpg")).isEqualTo("telefono/a.jpg");
+        assertThat(SincronizzazioneTelefono.senzaNumero("telefono/a (2) (12).mp4")).isEqualTo("telefono/a (2).mp4");
+        assertThat(SincronizzazioneTelefono.senzaNumero("telefono/senza estensione (2)")).isEqualTo("telefono/senza estensione");
+        assertThat(SincronizzazioneTelefono.senzaNumero("telefono/a (1).jpg")).isNull();
+        assertThat(SincronizzazioneTelefono.senzaNumero("telefono/a(2).jpg")).isNull();
+        assertThat(SincronizzazioneTelefono.senzaNumero("telefono/a.jpg")).isNull();
+    }
+
+    @Test
+    void unGiroSalvatoPrimaSiLeggeAncoraSenzaCopieAMeta() {
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(marco)), Update.update("ultimoGiro",
+                new Document("iniziatoIl", java.util.Date.from(orologio.instant()))
+                        .append("esito", "OK").append("messaggio", "Fatto").append("trovati", 3)
+                        .append("copiati", 3).append("giaCopiati", 0).append("cancellati", 0).append("errori", 0)
+                        .append("messaggiErrori", List.of())), SorgenteTelefono.class);
+        assertThat(mongo.getCollection("sorgenti_telefono").find().first().get("ultimoGiro", Document.class))
+                .doesNotContainKey("aMetaTolte");
+
+        assertThat(sorgente(marco).ultimoGiro()).satisfies(g -> {
+            assertThat(g.copiati()).isEqualTo(3);
+            assertThat(g.aMetaTolte()).isNull();
+        });
+    }
+
     @Test
     void cancellaDallaSorgenteSoloQuelloCheLImportazioneHaPreso() {
         rclone.pcloud.put("Automatic Upload/Pixel 8/importata.jpg", 100L);
@@ -352,19 +509,19 @@ class SincronizzazioneTelefonoTest {
         assertThat(sincronizzazione.stato(sorgente(marco)).prossimoGiroIl()).isEqualTo(orologio.instant());
         sincronizzazione.seNecessario();
         aspetta();
-        assertThat(rclone.chiamate("operations/list")).hasSize(1);
+        assertThat(rclone.elenchiSorgente()).hasSize(1);
         assertThat(sincronizzazione.stato(sorgente(marco)).prossimoGiroIl())
                 .isEqualTo(orologio.instant().plus(Duration.ofHours(6)));
 
         orologio.avanti(Duration.ofHours(5));
         sincronizzazione.seNecessario();
         aspetta();
-        assertThat(rclone.chiamate("operations/list")).hasSize(1);
+        assertThat(rclone.elenchiSorgente()).hasSize(1);
 
         orologio.avanti(Duration.ofHours(1));
         sincronizzazione.seNecessario();
         aspetta();
-        assertThat(rclone.chiamate("operations/list")).hasSize(2);
+        assertThat(rclone.elenchiSorgente()).hasSize(2);
     }
 
     @Test
@@ -522,11 +679,12 @@ class SincronizzazioneTelefonoTest {
         sincronizzazione.seNecessario();
         aspetta();
 
-        assertThat(rclone.chiamate("operations/list")).extracting(p -> p.get("fs"))
+        assertThat(rclone.elenchiSorgente()).extracting(p -> p.get("fs"))
                 .containsExactly("pcloud:", "pcloud-anna:");
         // Una alla volta: tutte le copie di Marco prima della lista di Anna.
         List<Object> sequenza = rclone.chiamate.stream()
-                .filter(c -> c.get("comando").equals("operations/copyfile") || c.get("comando").equals("operations/list"))
+                .filter(c -> c.get("comando").equals("operations/copyfile")
+                        || c.get("comando").equals("operations/list") && !"lifetime:".equals(c.get("fs")))
                 .map(c -> c.get("comando").equals("operations/list") ? "list " + c.get("fs") : c.get("srcFs"))
                 .toList();
         assertThat(sequenza.subList(0, 11)).containsOnly("list pcloud:", "pcloud:");
@@ -541,14 +699,14 @@ class SincronizzazioneTelefonoTest {
         rclone.chiamate.clear();
         sincronizzazione.seNecessario();
         aspetta();
-        assertThat(rclone.chiamate("operations/list")).extracting(p -> p.get("fs")).containsExactly("pcloud:");
+        assertThat(rclone.elenchiSorgente()).extracting(p -> p.get("fs")).containsExactly("pcloud:");
     }
 
     @Test
     void migrazioneDalTelefonoUnicoSenzaRicopiare() {
         mongo.remove(new Query(), SorgenteTelefono.class);
         var giroVecchio = new Giro(Instant.parse("2026-04-30T08:00:00Z"), Instant.parse("2026-04-30T08:05:00Z"),
-                Esito.OK, "Fatto", 2, 2, 0, 0, 0, List.of());
+                Esito.OK, "Fatto", 2, 2, 0, 0, 0, 0, List.of());
         // Il documento di prima, senza copieInParallelo (salvato prima che ci fosse).
         mongo.insert(new ImpostazioniTelefono(ImpostazioniTelefono.ID, true, "pcloud:Automatic Upload", 12, 30, null,
                 giroVecchio));
@@ -735,8 +893,12 @@ class SincronizzazioneTelefonoTest {
         final List<String> lenti = new ArrayList<>();
         /** Copie che rclone finisce, ma la risposta si perde (il "Request cancelled" di produzione). */
         final List<String> risposteCadute = new ArrayList<>();
+        /** Se true, core/stats non risponde. */
+        boolean statsGuasto;
         /** Copie che la prima volta falliscono senza copiare niente, la seconda vanno. */
         final List<String> fallisconoUnaVolta = new ArrayList<>();
+        /** Quello che rclone sta trasferendo per conto suo (core/stats), per esempio una copia rimasta da prima di un riavvio. */
+        final List<Map<String, Object>> trasferimenti = new ArrayList<>();
         final List<Map<String, Object>> chiamate = new ArrayList<>();
         /** Chiamato a ogni job/status con la destinazione, mentre la copia "gira". */
         java.util.function.Consumer<String> duranteLaCopia = destinazione -> {
@@ -759,6 +921,11 @@ class SincronizzazioneTelefonoTest {
                         return p;
                     })
                     .toList();
+        }
+
+        /** Gli elenchi delle sorgenti (pCloud), senza quelli della cartella automatica. */
+        synchronized List<Map<String, Object>> elenchiSorgente() {
+            return chiamate("operations/list").stream().filter(p -> !"lifetime:".equals(p.get("fs"))).toList();
         }
 
         synchronized long asincrone(String comando) {
@@ -821,6 +988,13 @@ class SincronizzazioneTelefonoTest {
                     yield Map.of("finished", !lenti.contains(da), "success", true, "error", "");
                 }
                 case "job/stop" -> Map.of();
+                case "core/stats" -> {
+                    if (statsGuasto) {
+                        throw new IOException("connection refused");
+                    }
+                    yield trasferimenti.isEmpty() ? Map.of("transfers", 0)
+                        : Map.of("transfers", 0, "transferring", trasferimenti);
+                }
                 case "operations/deletefile" -> {
                     remoto(p.get("fs")).remove((String) p.get("remote"));
                     yield Map.of();

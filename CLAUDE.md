@@ -260,6 +260,12 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   cartella automatica relativa al punto di montaggio (`/cloud/telefono` →
   `lifetime:telefono`), **piatta per tutti i telefoni** (`/` → ` - `): le
   sottocartelle diventerebbero album.
+- Copie a metà (lasciate dalla copia sincrona di prima della #43): all'inizio
+  di ogni giro `togliCopieAMeta` toglie dalla cartella automatica i file col
+  nome di un file della sorgente (`nome.ext` o `nome (N).ext`) ma più piccoli
+  di lui, che non sono nel registro e che rclone non sta copiando
+  (`core/stats`); poi il giro li ricopia interi. Un file nel registro non si
+  tocca mai: così `cancella` non scambia una copia tolta per una importata.
 - Registro `copie_telefono` (chiave unica sorgente+percorso+dimensione, più
   `idSorgente` e `proprietario`): un file nel registro non si ricopia mai, anche
   se il telefono viene tolto e rimesso con la stessa cartella. Due telefoni non
