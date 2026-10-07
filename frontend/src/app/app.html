@@ -1,14 +1,19 @@
-<header class="barra">
+<!--
+  La barra: sempre a portata la vista, la ricerca, i filtri, Seleziona e Carica;
+  il resto (importazioni, archivio, sistema) sta nel menu Strumenti.
+  Sul telefono (sotto gli 800px) resta una riga sola e il menu ☰ prende anche vista, Seleziona e utente.
+-->
+<header class="barra" #barra>
   <button type="button" class="marchio" (click)="azzera(); inizio()">
-    <span class="logo" aria-hidden="true">◐</span> FotoTimeline
+    <span class="logo" aria-hidden="true">◐</span> <span class="nome-app">FotoTimeline</span>
   </button>
 
-  <div class="viste" role="tablist" aria-label="Vista">
+  <div class="viste solo-desktop" role="tablist" aria-label="Vista">
     <button type="button" role="tab" [attr.aria-selected]="vista() === 'timeline'" (click)="vista.set('timeline')">Timeline</button>
     <button type="button" role="tab" [attr.aria-selected]="vista() === 'mappa'" (click)="vista.set('mappa')">Mappa</button>
   </div>
 
-  <div class="filtri">
+  <div class="ricerca" [class.con-interruttore]="galleria.contenuto()?.attiva">
     <input
       type="search"
       class="cerca"
@@ -25,159 +30,312 @@
         title="Cerca in quello che si vede nelle foto (spiaggia, cane, neve…), non nei titoli e nei tag"
         (click)="commutaContenuto()"
       >
-        Per contenuto
+        <span class="per">Per </span>contenuto
       </button>
-    }
-    <select aria-label="Tag" [ngModel]="galleria.filtro().tag ?? ''" (ngModelChange)="scegliTag($event)">
-      <option value="">Tutti i tag</option>
-      @for (t of galleria.tag(); track t) {
-        <option [value]="t">#{{ t }}</option>
-      }
-    </select>
-    <select aria-label="Album" [ngModel]="galleria.filtro().album ?? ''" (ngModelChange)="scegliAlbum($event)">
-      <option value="">Tutti gli album</option>
-      @for (a of galleria.album(); track a) {
-        <option [value]="a">{{ a }}</option>
-      }
-    </select>
-    @if (galleria.caricateDa().length) {
-      <select aria-label="Caricate da" [ngModel]="galleria.filtro().caricataDa ?? ''" (ngModelChange)="scegliCaricataDa($event)">
-        <option value="">Caricate da tutti</option>
-        @for (c of galleria.caricateDa(); track c.username) {
-          <option [value]="c.username">{{ c.nome }} ({{ c.conteggio }})</option>
-        }
-      </select>
-    }
-    <app-filtro-luogo />
-    <button
-      type="button"
-      class="interruttore"
-      [attr.aria-pressed]="!!galleria.filtro().preferite"
-      (click)="galleria.imposta({ preferite: !galleria.filtro().preferite })"
-    >
-      ★ Preferite
-    </button>
-    @if (galleria.filtro().album) {
-      <button type="button" class="link" title="Un link per chi non ha un account" (click)="apriCondividiAlbum()">Condividi album</button>
-    }
-    @if (filtriAttivi()) {
-      <button type="button" class="link" (click)="azzera()">Azzera filtri</button>
     }
   </div>
 
-  <div class="azioni">
-    @if (galleria.cloud(); as c) {
-      @if (c.gestito) {
-        <span class="cloud" [class.montato]="c.montato" [title]="c.errore ?? ''">
-          <span class="spia" aria-hidden="true"></span>
-          {{ c.montato ? 'Cloud montato' : 'Cloud smontato' }}
-          @if (galleria.io()?.admin) {
-            <button type="button" class="link" [disabled]="galleria.cambioCloud()" (click)="galleria.commutaCloud()">
-              {{ galleria.cambioCloud() ? '…' : c.montato ? 'Smonta' : 'Monta' }}
-            </button>
+  <!-- Filtri: un pannello con tag, album, caricate da, luogo e preferite. -->
+  <div class="ancora" data-menu="filtri" (focusout)="focusFuori($event)">
+    <button
+      type="button"
+      id="apri-filtri"
+      class="apri-menu"
+      [class.attivo]="quantiFiltri() > 0"
+      aria-haspopup="dialog"
+      aria-controls="pannello-filtri"
+      [attr.aria-expanded]="menu() === 'filtri'"
+      (click)="commutaMenu('filtri', $event)"
+    >
+      Filtri
+      @if (quantiFiltri(); as n) {
+        <span class="conta">{{ n }}<span class="nascosto"> attivi</span></span>
+      }
+      <span class="freccia" aria-hidden="true">▾</span>
+    </button>
+    @if (menu() === 'filtri') {
+      <div id="pannello-filtri" class="tendina pannello-filtri" role="dialog" aria-labelledby="apri-filtri">
+        <label class="campo">
+          <span>Tag</span>
+          <select aria-label="Tag" [ngModel]="galleria.filtro().tag ?? ''" (ngModelChange)="scegliTag($event)">
+            <option value="">Tutti i tag</option>
+            @for (t of galleria.tag(); track t) {
+              <option [value]="t">#{{ t }}</option>
+            }
+          </select>
+        </label>
+        <label class="campo">
+          <span>Album</span>
+          <select aria-label="Album" [ngModel]="galleria.filtro().album ?? ''" (ngModelChange)="scegliAlbum($event)">
+            <option value="">Tutti gli album</option>
+            @for (a of galleria.album(); track a) {
+              <option [value]="a">{{ a }}</option>
+            }
+          </select>
+        </label>
+        @if (galleria.filtro().album) {
+          <button type="button" class="link" title="Un link per chi non ha un account" (click)="chiudiMenu(); apriCondividiAlbum()">Condividi album</button>
+        }
+        @if (galleria.caricateDa().length) {
+          <label class="campo">
+            <span>Caricate da</span>
+            <select aria-label="Caricate da" [ngModel]="galleria.filtro().caricataDa ?? ''" (ngModelChange)="scegliCaricataDa($event)">
+              <option value="">Caricate da tutti</option>
+              @for (c of galleria.caricateDa(); track c.username) {
+                <option [value]="c.username">{{ c.nome }} ({{ c.conteggio }})</option>
+              }
+            </select>
+          </label>
+        }
+        <div class="campo">
+          <span>Luogo</span>
+          <app-filtro-luogo />
+        </div>
+        <button
+          type="button"
+          class="interruttore"
+          [attr.aria-pressed]="!!galleria.filtro().preferite"
+          (click)="galleria.imposta({ preferite: !galleria.filtro().preferite })"
+        >
+          ★ Preferite
+        </button>
+        <div class="piede">
+          <span class="tenue">{{ quantiFiltri() ? quantiFiltri() + (quantiFiltri() === 1 ? ' filtro attivo' : ' filtri attivi') : 'Nessun filtro' }}</span>
+          @if (filtriAttivi()) {
+            <button type="button" class="link" (click)="azzera()">Azzera filtri</button>
           }
+        </div>
+      </div>
+    }
+  </div>
+
+  <span class="spazio" aria-hidden="true"></span>
+
+  <!-- L'indicizzazione per contenuto in corso resta in vista, fuori dal menu. -->
+  @if (galleria.io()?.admin) {
+    @if (galleria.contenuto(); as c) {
+      @if (c.attiva && c.lavoro?.stato === 'IN_CORSO') {
+        <span class="lavoro-contenuto" role="status" [title]="titoloContenuto(c)">
+          Contenuto {{ percentualeContenuto() }}%
+          <progress [value]="percentualeContenuto()" max="100"></progress>
+          <button type="button" class="link" (click)="galleria.annullaIndiceContenuto()">Annulla</button>
         </span>
       }
     }
-    @if (galleria.io()?.admin) {
-      <button
-        type="button"
-        class="link"
-        [disabled]="galleria.backupInCorso() || !galleria.archivioDisponibile()"
-        [title]="galleria.ultimoBackup() ? 'Ultimo backup dei metadati: ' + (galleria.ultimoBackup()!.fattoIl | date: 'd MMM y, HH:mm') : 'Nessun backup dei metadati'"
-        (click)="galleria.faiBackup()"
-      >
-        {{ galleria.backupInCorso() ? 'Backup…' : 'Backup' }}
-      </button>
-      @if (galleria.archivioDisponibile()) {
-        <button
-          type="button"
-          class="link"
-          [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
-          title="Aggiunge le foto messe nell'archivio da fuori (per esempio caricate nel cloud)"
-          (click)="indicizza()"
-        >
-          Indicizza archivio
-        </button>
-        <button
-          type="button"
-          class="link"
-          [disabled]="galleria.conversioni()?.inCorso"
-          title="Versione compatibile dei video che non tutti i browser riproducono (HEVC dell'iPhone e simili)"
-          (click)="convertiVideo()"
-        >
-          Converti video
-        </button>
+  }
+
+  <button type="button" class="solo-desktop" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
+    {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
+  </button>
+  <label class="bottone primario carica" [class.spento]="!galleria.archivioDisponibile()">
+    <span class="solo-telefono" aria-hidden="true">＋</span>
+    <span class="etichetta">Carica foto</span>
+    <input #scelta type="file" accept="image/*,video/mp4,video/quicktime,.heic,.heif,.mov,.m4v" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
+  </label>
+
+  <!-- Strumenti (☰ sul telefono): le voci a sezioni, con le stesse condizioni di prima. -->
+  <div class="ancora" data-menu="strumenti" (focusout)="focusFuori($event)">
+    <button
+      type="button"
+      id="apri-strumenti"
+      class="apri-menu"
+      aria-haspopup="menu"
+      aria-controls="menu-strumenti"
+      [attr.aria-expanded]="menu() === 'strumenti'"
+      [title]="avvisoSistema()?.testo ?? 'Strumenti'"
+      (click)="commutaMenu('strumenti', $event)"
+      (keydown)="tastoInnesco('strumenti', $event)"
+    >
+      <span class="solo-desktop">Strumenti</span>
+      <span class="solo-telefono" aria-hidden="true">☰</span>
+      <span class="solo-telefono nascosto">Menu</span>
+      <span class="freccia solo-desktop" aria-hidden="true">▾</span>
+      @if (avvisoSistema(); as a) {
+        <span class="pallino segnale" [attr.data-stato]="a.stato" aria-hidden="true"></span>
+        <span class="nascosto">: {{ a.testo }}</span>
       }
-      @if (galleria.contenuto(); as c) {
-        @if (c.attiva) {
-          @if (c.lavoro?.stato === 'IN_CORSO') {
-            <span class="lavoro-contenuto" role="status" [title]="titoloContenuto(c)">
-              Contenuto {{ percentualeContenuto() }}%
-              <progress [value]="percentualeContenuto()" max="100"></progress>
-              <button type="button" class="link" (click)="galleria.annullaIndiceContenuto()">Annulla</button>
-            </span>
-          } @else {
-            <button
-              type="button"
-              class="link"
-              [class.errore]="c.lavoro?.stato === 'FALLITO'"
-              [title]="titoloContenuto(c)"
-              (click)="indicizzaContenuto(c)"
-            >
-              Indicizza contenuto{{ c.mancanti ? ' (' + c.mancanti + ')' : '' }}
+    </button>
+    @if (menu() === 'strumenti') {
+      <div id="menu-strumenti" class="tendina menu" role="menu" aria-labelledby="apri-strumenti" (keydown)="muoviNelMenu($event)">
+        <!-- Solo sul telefono: quello che sul computer sta nella barra. -->
+        <div class="sezione solo-telefono" role="group" aria-label="Vista">
+          <div class="intestazione" aria-hidden="true">Vista</div>
+          <button type="button" class="voce" role="menuitemradio" [attr.aria-checked]="vista() === 'timeline'" (click)="chiudiMenu(); vista.set('timeline')">Timeline</button>
+          <button type="button" class="voce" role="menuitemradio" [attr.aria-checked]="vista() === 'mappa'" (click)="chiudiMenu(); vista.set('mappa')">Mappa</button>
+          <button type="button" class="voce" role="menuitemcheckbox" [attr.aria-checked]="selezione()" (click)="chiudiMenu(); selezione() ? esciSelezione() : selezione.set(true)">
+            {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
+          </button>
+        </div>
+
+        <div class="sezione" role="group" aria-label="Importa">
+          <div class="intestazione" aria-hidden="true">Importa</div>
+          <button type="button" class="voce" role="menuitem" [disabled]="!galleria.archivioDisponibile()" (click)="chiudiMenu(); apriImporta()">Importa cartella</button>
+          @if (galleria.io()?.admin || galleria.io()?.login) {
+            <button type="button" class="voce" role="menuitem" title="Foto nuove dai telefoni della famiglia, da pCloud" (click)="chiudiMenu(); apriTelefoni()">Telefoni</button>
+          }
+          @if (google()?.configurato || galleria.io()?.admin) {
+            <button type="button" class="voce" role="menuitem" title="Scegli foto da Google Foto; per l'amministratore anche Google Takeout" (click)="chiudiMenu(); apriGoogle()">
+              Google Foto
             </button>
           }
+        </div>
+
+        <div class="sezione" role="group" aria-label="Archivio">
+          <div class="intestazione" aria-hidden="true">Archivio</div>
+          @if (galleria.io()?.admin) {
+            @if (galleria.archivioDisponibile()) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+                title="Aggiunge le foto messe nell'archivio da fuori (per esempio caricate nel cloud)"
+                (click)="chiudiMenu(); indicizza()"
+              >
+                Indicizza archivio
+              </button>
+            }
+            @if (galleria.contenuto(); as c) {
+              @if (c.attiva && c.lavoro?.stato !== 'IN_CORSO') {
+                <button
+                  type="button"
+                  class="voce"
+                  role="menuitem"
+                  [class.errore]="c.lavoro?.stato === 'FALLITO'"
+                  [title]="titoloContenuto(c)"
+                  (click)="chiudiMenu(); indicizzaContenuto(c)"
+                >
+                  Indicizza contenuto{{ c.mancanti ? ' (' + c.mancanti + ')' : '' }}
+                </button>
+              }
+            }
+            @if (galleria.luoghi()?.disponibile) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+                [title]="(galleria.luoghi()?.daCalcolare ?? 0) + ' foto col GPS senza luogo: il nome del luogo dalle coordinate (GeoNames)'"
+                (click)="chiudiMenu(); calcolaLuoghi()"
+              >
+                Calcola luoghi
+              </button>
+            }
+            @if (galleria.archivioDisponibile()) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [disabled]="galleria.conversioni()?.inCorso"
+                title="Versione compatibile dei video che non tutti i browser riproducono (HEVC dell'iPhone e simili)"
+                (click)="chiudiMenu(); convertiVideo()"
+              >
+                Converti video
+              </button>
+            }
+          }
+          <button type="button" class="voce" role="menuitem" title="Raffiche, copie ricompresse o ridimensionate" (click)="chiudiMenu(); dialogoQuasiUguali.set(true)">
+            Quasi uguali
+          </button>
+          @if (galleria.io()?.admin) {
+            <button
+              type="button"
+              class="voce"
+              role="menuitem"
+              [disabled]="galleria.backupInCorso() || !galleria.archivioDisponibile()"
+              [title]="galleria.ultimoBackup() ? 'Ultimo backup dei metadati: ' + (galleria.ultimoBackup()!.fattoIl | date: 'd MMM y, HH:mm') : 'Nessun backup dei metadati'"
+              (click)="chiudiMenu(); galleria.faiBackup()"
+            >
+              {{ galleria.backupInCorso() ? 'Backup…' : 'Backup' }}
+            </button>
+          }
+        </div>
+
+        <div class="sezione" role="group" aria-label="Condividi">
+          <div class="intestazione" aria-hidden="true">Condividi</div>
+          <button type="button" class="voce" role="menuitem" title="Le mie condivisioni: i link mandati" (click)="chiudiMenu(); apriCondivisioni()">Condivisioni</button>
+        </div>
+
+        @if (galleria.io()?.admin || galleria.cloud()?.gestito) {
+          <div class="sezione" role="group" aria-label="Sistema">
+            <div class="intestazione" aria-hidden="true">Sistema</div>
+            @if (galleria.io()?.admin) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [title]="galleria.salute() ? 'Salute: ' + nomeStato(galleria.salute()!.stato) : 'Salute del server'"
+                (click)="chiudiMenu(); apriSalute()"
+              >
+                <span class="pallino" [attr.data-stato]="galleria.salute()?.stato ?? null" aria-hidden="true"></span>
+                Salute
+                @if (galleria.salute(); as s) {
+                  <small class="tenue">{{ nomeStato(s.stato) }}</small>
+                }
+              </button>
+            }
+            @if (galleria.cloud(); as c) {
+              @if (c.gestito) {
+                @if (galleria.io()?.admin) {
+                  <button
+                    type="button"
+                    class="voce cloud"
+                    role="menuitem"
+                    [class.montato]="c.montato"
+                    [title]="c.errore ?? ''"
+                    [disabled]="galleria.cambioCloud()"
+                    (click)="chiudiMenu(); galleria.commutaCloud()"
+                  >
+                    <span class="spia" aria-hidden="true"></span>
+                    {{ c.montato ? 'Cloud montato' : 'Cloud smontato' }}
+                    <b class="azione">{{ galleria.cambioCloud() ? '…' : c.montato ? 'Smonta' : 'Monta' }}</b>
+                  </button>
+                } @else {
+                  <div class="voce cloud" role="menuitem" aria-disabled="true" tabindex="-1" [class.montato]="c.montato" [title]="c.errore ?? ''">
+                    <span class="spia" aria-hidden="true"></span>
+                    {{ c.montato ? 'Cloud montato' : 'Cloud smontato' }}
+                  </div>
+                }
+              }
+            }
+          </div>
         }
-      }
-      @if (galleria.luoghi()?.disponibile) {
-        <button
-          type="button"
-          class="link"
-          [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
-          [title]="(galleria.luoghi()?.daCalcolare ?? 0) + ' foto col GPS senza luogo: il nome del luogo dalle coordinate (GeoNames)'"
-          (click)="calcolaLuoghi()"
-        >
-          Calcola luoghi
-        </button>
-      }
-      <button
-        type="button"
-        class="link"
-        [title]="galleria.salute() ? 'Salute: ' + nomeStato(galleria.salute()!.stato) : 'Salute del server'"
-        (click)="apriSalute()"
-      >
-        <span class="pallino" [attr.data-stato]="galleria.salute()?.stato ?? null" aria-hidden="true"></span>
-        Salute
-      </button>
-    }
-    @if (galleria.io()?.admin || galleria.io()?.login) {
-      <button type="button" class="link" title="Foto nuove dai telefoni della famiglia, da pCloud" (click)="apriTelefoni()">Telefoni</button>
-    }
-    @if (google()?.configurato || galleria.io()?.admin) {
-      <button type="button" class="link" title="Scegli foto da Google Foto; per l'amministratore anche Google Takeout" (click)="apriGoogle()">
-        Google Foto
-      </button>
-    }
-    <button type="button" class="link" title="Le mie condivisioni: i link mandati" (click)="apriCondivisioni()">Condivisioni</button>
-    <button type="button" class="link" title="Raffiche, copie ricompresse o ridimensionate" (click)="dialogoQuasiUguali.set(true)">
-      Quasi uguali
-    </button>
-    <button type="button" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
-      {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
-    </button>
-    <button type="button" [disabled]="!galleria.archivioDisponibile()" (click)="apriImporta()">Importa cartella</button>
-    <label class="bottone primario" [class.spento]="!galleria.archivioDisponibile()">
-      Carica foto
-      <input #scelta type="file" accept="image/*,video/mp4,video/quicktime,.heic,.heif,.mov,.m4v" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
-    </label>
-    @if (galleria.io()?.login) {
-      <span class="utente">
-        {{ galleria.io()?.nome }}
-        <button type="button" class="link" (click)="logout()">Esci</button>
-      </span>
+
+        @if (galleria.io()?.login) {
+          <div class="sezione solo-telefono" role="group" aria-label="Account">
+            <div class="intestazione" aria-hidden="true">{{ galleria.io()?.nome }}</div>
+            <button type="button" class="voce" role="menuitem" (click)="chiudiMenu(); logout()">Esci</button>
+          </div>
+        }
+      </div>
     }
   </div>
+
+  @if (galleria.io()?.login) {
+    <div class="ancora solo-desktop" data-menu="utente" (focusout)="focusFuori($event)">
+      <button
+        type="button"
+        id="apri-utente"
+        class="apri-menu utente"
+        aria-haspopup="menu"
+        aria-controls="menu-utente"
+        [attr.aria-expanded]="menu() === 'utente'"
+        [title]="galleria.io()?.nome ?? ''"
+        (click)="commutaMenu('utente', $event)"
+        (keydown)="tastoInnesco('utente', $event)"
+      >
+        <span class="nome">{{ galleria.io()?.nome }}</span>
+        <span class="iniziali" aria-hidden="true">{{ iniziali() }}</span>
+        <span class="freccia" aria-hidden="true">▾</span>
+      </button>
+      @if (menu() === 'utente') {
+        <div id="menu-utente" class="tendina menu" role="menu" aria-labelledby="apri-utente" (keydown)="muoviNelMenu($event)">
+          <div class="intestazione" aria-hidden="true">{{ galleria.io()?.nome }}</div>
+          <button type="button" class="voce" role="menuitem" (click)="chiudiMenu(); logout()">Esci</button>
+        </div>
+      }
+    </div>
+  }
 </header>
 
 @if (!galleria.archivioDisponibile()) {
