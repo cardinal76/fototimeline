@@ -432,7 +432,6 @@ applica_zip() {
         # Quello che exiftool non ha spostato: altri file, o media non letti.
         eliminabile=no
         echo "zip con $altri altri file, resta $DOVE_ORIGINE: $z" >> "$DA_CONTROLLARE"
-        find "$d/in" -type f | sed "s|^$d/in/|    |" | head -10 >> "$DA_CONTROLLARE"
     fi
     printf 'zip\t%s\t%s\n' "$z" "$eliminabile" >> "$FONTI"
     echo "    ${#membri[@]} foto e video$([ "$altri" -gt 0 ] && echo ", $altri altri file: lo zip resta $DOVE_ORIGINE")"

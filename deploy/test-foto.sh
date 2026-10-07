@@ -95,11 +95,15 @@ gira_pcloud() {   # gira_pcloud SCRIPT con|senza USCITA [SCRIPT dal secondo racc
         echo "--- fase sbagliata"; "$s" boh
     } > "$out.grezza" 2>&1
     grep -Ev '^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]+ (NOTICE|INFO|ERROR)|Transferred:|Checks:|Elapsed time' "$out.grezza" \
-        | sed -E 's|[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}|DATA|g' > "$out"
+        | sed -E 's|[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}|DATA|g' \
+        | sed -E 's|^(Da controllare \(restano su pCloud\): )[0-9]+ righe|\1N righe|' > "$out"
     {
         echo "== file di lavoro"
         (cd "$l" && for f in impostazioni impronte.tsv manifest.tsv fonti.tsv da-controllare.txt archiviati.tsv radici.txt filtri-scarica.txt da-cancellare.txt; do
-            [ -f "$f" ] && { echo "-- $f"; cat "$f"; }
+            # Senza i nomi d'esempio degli zip con altri file (e il loro conto
+            # nell'uscita): dopo c34f8b9 non si scrivono più, con migliaia di file
+            # facevano uscire raccogli (SIGPIPE).
+            [ -f "$f" ] && { echo "-- $f"; grep -v '^    ' "$f" || true; }
         done; ls)
         echo "== ordinate";     (cd "$l/ordinate" && find . -type f -exec sha256sum {} + | sort -k2)
         echo "== destinazione"; (cd "$T/dest" && find . -type f -exec sha256sum {} + | sort -k2)
