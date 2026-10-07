@@ -284,6 +284,27 @@ main {
 .avanzamento .riga {
   display: flex;
   justify-content: space-between;
+  gap: 0.5rem;
+}
+.avanzamento .azioni {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+.avanzamento .riduci {
+  color: var(--testo-tenue);
+}
+.avanzamento p .link {
+  font-size: inherit;
+}
+.avanzamento p .link.errore {
+  color: var(--pericolo);
+  text-decoration: underline;
+}
+.errori.elenco-errori {
+  max-height: 40vh;
+  overflow-wrap: anywhere;
 }
 .avanzamento p {
   margin: 0.4rem 0 0;

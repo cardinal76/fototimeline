@@ -12,7 +12,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +37,8 @@ import it.fototimeline.service.Risultati.Caricamento;
 public class LavoriImportazione {
 
     private static final Logger log = LoggerFactory.getLogger(LavoriImportazione.class);
-    private static final int MAX_MESSAGGI = 50;
+    /** Gli errori che l'app può elencare; oltre si contano soltanto. */
+    private static final int MAX_MESSAGGI = 500;
 
     /**
      * MANUALE e AUTOMATICA importano una cartella; INDICIZZAZIONE cerca
@@ -50,14 +50,20 @@ public class LavoriImportazione {
 
     public enum Stato { IN_CORSO, FINITA, ANNULLATA, FALLITA }
 
-    /** Fotografia dello stato di un lavoro, per l'API. */
+    /**
+     * Fotografia dello stato di un lavoro, per l'API. Solo per la cartella
+     * automatica: {@code saltate} i file già falliti uguali in un giro prima
+     * (non si rileggono), {@code inArrivo} quelli ancora in copia (al giro
+     * dopo); nessuno dei due è in {@code trovate}.
+     */
     public record StatoLavoro(String id, String cartella, Origine origine, Stato stato,
             Instant iniziatoIl, Instant finitoIl, int trovate, int fatte, int importate, int duplicate,
-            int errori, int rimossi, List<String> messaggi, String errore) {
+            int errori, int rimossi, List<String> messaggi, String errore, int saltate, int inArrivo) {
     }
 
     private final ImportazioneCartelle importazione;
     private final ImportazioneAutomaticaProperties automatica;
+    private final MemoriaImportazione memoria;
     private final ArchivioFile archivio;
     private final List<ProvenienzaFile> provenienze;
     private final LuoghiService luoghi;
@@ -70,9 +76,11 @@ public class LavoriImportazione {
     private final AtomicReference<Lavoro> ultimo = new AtomicReference<>();
 
     public LavoriImportazione(ImportazioneCartelle importazione, ImportazioneAutomaticaProperties automatica,
-            ArchivioFile archivio, List<ProvenienzaFile> provenienze, LuoghiService luoghi, Optional<Clock> clock) {
+            MemoriaImportazione memoria, ArchivioFile archivio, List<ProvenienzaFile> provenienze, LuoghiService luoghi,
+            Optional<Clock> clock) {
         this.importazione = importazione;
         this.automatica = automatica;
+        this.memoria = memoria;
         this.archivio = archivio;
         this.provenienze = List.copyOf(provenienze);
         this.luoghi = luoghi;
@@ -86,8 +94,30 @@ public class LavoriImportazione {
      */
     public StatoLavoro avvia(Path cartella, boolean albumDaCartella, boolean sposta, Origine origine,
             String caricataDa) {
+        if (origine == Origine.AUTOMATICA) {
+            return avvia(cartella, origine, lavoro -> importazione.importa(cartella, albumDaCartella, sposta, lavoro,
+                    this::provenienza, regoleAutomatica()));
+        }
         return avvia(cartella, origine, lavoro -> importazione.importa(cartella, albumDaCartella, sposta, lavoro,
-                origine == Origine.AUTOMATICA ? this::provenienza : file -> caricataDa));
+                file -> caricataDa));
+    }
+
+    private ImportazioneCartelle.Automatica regoleAutomatica() {
+        return new ImportazioneCartelle.Automatica(memoria, this::inArrivo, clock.instant(), automatica.attesa());
+    }
+
+    /** True se qualcuno (un telefono) sta ancora copiando il file. */
+    private boolean inArrivo(Path file) {
+        for (ProvenienzaFile p : provenienze) {
+            try {
+                if (p.inArrivo(file)) {
+                    return true;
+                }
+            } catch (RuntimeException e) {
+                log.warn("Non so se {} è ancora in copia: {}", file, e.getMessage());
+            }
+        }
+        return false;
     }
 
     /** Il primo che sa da chi arriva il file (oggi solo i telefoni). */
@@ -163,9 +193,22 @@ public class LavoriImportazione {
         return true;
     }
 
+    /** I file della cartella automatica che non si rileggono finché non cambiano, dal più recente. */
+    public List<FileScartato> scartati() {
+        return memoria.elenco();
+    }
+
+    /** "Riprova": al prossimo giro la cartella automatica rilegge anche i file già falliti. */
+    public long riprovaScartati() {
+        long quanti = memoria.dimenticaTutti();
+        log.info("Importazione automatica: {} file falliti da rileggere al prossimo giro", quanti);
+        return quanti;
+    }
+
     /**
      * Ogni {@code fototimeline.importazione-automatica.intervallo}: se la
-     * cartella automatica ha foto e il cloud è montato, le importa spostandole.
+     * cartella automatica ha foto da leggere (non solo già fallite o ancora
+     * in copia) e il cloud è montato, le importa spostandole.
      */
     @Scheduled(fixedDelayString = "${fototimeline.importazione-automatica.intervallo:PT15M}",
             initialDelayString = "${fototimeline.importazione-automatica.ritardo-iniziale:PT2M}")
@@ -179,7 +222,7 @@ public class LavoriImportazione {
             return;
         }
         try {
-            if (!Files.isDirectory(cartella) || !contieneImmagini(cartella)) {
+            if (!Files.isDirectory(cartella) || !importazione.daImportare(cartella, regoleAutomatica())) {
                 return;
             }
             log.info("Foto nuove in {}: le importo", cartella);
@@ -188,13 +231,6 @@ public class LavoriImportazione {
             log.debug("Importazione automatica rimandata: {}", e.getMessage());
         } catch (Exception e) {
             log.warn("Controllo della cartella automatica non riuscito: {}", e.getMessage());
-        }
-    }
-
-    private boolean contieneImmagini(Path cartella) throws java.io.IOException {
-        try (Stream<Path> s = Files.walk(cartella)) {
-            return s.filter(Files::isRegularFile)
-                    .anyMatch(p -> FotoService.TIPI.containsKey(FotoService.estensione(p.getFileName().toString())));
         }
     }
 
@@ -220,6 +256,10 @@ public class LavoriImportazione {
         log.info("{} {} di {}: {} nuove, {} già presenti, {} errori, {} tolte dall'origine ({} in {})",
                 nome, fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.errori(), fine.rimossi(),
                 fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
+        if (fine.saltate() + fine.inArrivo() > 0) {
+            log.info("{} di {}: {} file saltati perché già falliti uguali, {} lasciati al giro dopo perché in copia",
+                    nome, fine.cartella(), fine.saltate(), fine.inArrivo());
+        }
     }
 
     @PreDestroy
@@ -243,6 +283,8 @@ public class LavoriImportazione {
         private int duplicate;
         private int errori;
         private int rimossi;
+        private int saltate;
+        private int inArrivo;
         private String errore;
         private final List<String> messaggi = new ArrayList<>();
 
@@ -262,6 +304,12 @@ public class LavoriImportazione {
         }
 
         @Override
+        public synchronized void saltate(int giaFallite, int inArrivo) {
+            saltate = giaFallite;
+            this.inArrivo = inArrivo;
+        }
+
+        @Override
         public synchronized void fatta(Path file, Caricamento esito, boolean rimossa) {
             fatte++;
             switch (esito.esito()) {
@@ -277,6 +325,17 @@ public class LavoriImportazione {
             if (rimossa) {
                 rimossi++;
             }
+            if (origine == Origine.AUTOMATICA && fatte % 250 == 0) {
+                log.info("Importazione automatica: {} di {} ({} nuove, {} già presenti, {} errori)", fatte, trovate,
+                        importate, duplicate, errori);
+            }
+        }
+
+        @Override
+        public synchronized void sparita(Path file) {
+            fatte++;
+            rimossi++;
+            log.info("Importazione automatica: {} tolto da altri prima di leggerlo", importazione.relativo(file));
         }
 
         @Override
@@ -299,7 +358,8 @@ public class LavoriImportazione {
 
         synchronized StatoLavoro stato() {
             return new StatoLavoro(id, importazione.relativo(Path.of(cartella)), origine, stato, iniziatoIl, finitoIl,
-                    trovate, fatte, importate, duplicate, errori, rimossi, List.copyOf(messaggi), errore);
+                    trovate, fatte, importate, duplicate, errori, rimossi, List.copyOf(messaggi), errore, saltate,
+                    inArrivo);
         }
     }
 }

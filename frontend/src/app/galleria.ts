@@ -68,6 +68,11 @@ export class Galleria {
   readonly salute = signal<Salute | null>(null);
   /** Importazione da seguire con la barra; null quando non ce n'è una da mostrare. */
   readonly importazione = signal<LavoroImportazione | null>(null);
+  /**
+   * Il riquadro dell'importazione ridotto a un indicatore nella barra: il
+   * lavoro continua. Quella automatica, lunga e in sottofondo, parte così.
+   */
+  readonly importazioneRidotta = signal(false);
   /** Ricerca per contenuto: null finché non si sa, attiva=false se il servizio visione non c'è. */
   readonly contenuto = signal<StatoContenuto | null>(null);
   /** I risultati sono in ordine di somiglianza, non di data: niente giorni né timeline. */
@@ -146,22 +151,30 @@ export class Galleria {
 
   async avviaImportazione(cartella: string, albumDaCartella: boolean, sposta: boolean): Promise<void> {
     const lavoro = await firstValueFrom(this.api.importa(cartella, albumDaCartella, sposta));
-    this.importazione.set(lavoro);
+    this.mostraImportazione(lavoro);
     this.seguiImportazione();
   }
 
   /** Come un'importazione: stessa barra, e alla fine la timeline si ricarica. */
   async avviaIndicizzazione(): Promise<void> {
     const lavoro = await firstValueFrom(this.api.indicizza());
-    this.importazione.set(lavoro);
+    this.mostraImportazione(lavoro);
     this.seguiImportazione();
   }
 
   /** "Calcola luoghi": stessa barra delle importazioni. */
   async avviaLuoghi(tutte: boolean): Promise<void> {
     const lavoro = await firstValueFrom(this.api.calcolaLuoghi(tutte));
-    this.importazione.set(lavoro);
+    this.mostraImportazione(lavoro);
     this.seguiImportazione();
+  }
+
+  /** Un lavoro nuovo parte a tutto riquadro, quello automatico ridotto. */
+  private mostraImportazione(l: LavoroImportazione): void {
+    if (l.id !== this.importazione()?.id) {
+      this.importazioneRidotta.set(l.origine === 'AUTOMATICA');
+    }
+    this.importazione.set(l);
   }
 
   aggiornaLuoghi(): void {
@@ -180,6 +193,14 @@ export class Galleria {
     this.importazione.set(null);
   }
 
+  riduciImportazione(): void {
+    this.importazioneRidotta.set(true);
+  }
+
+  espandiImportazione(): void {
+    this.importazioneRidotta.set(false);
+  }
+
   /**
    * Chiede lo stato: ogni secondo mentre un'importazione è in corso, ogni
    * minuto altrimenti, per accorgersi di quelle partite dalla cartella automatica.
@@ -190,10 +211,14 @@ export class Galleria {
       next: (l) => {
         const prima = this.importazione();
         if (l && (l.stato === 'IN_CORSO' || l.id !== this.importazioneVista)) {
-          this.importazione.set(l);
+          this.mostraImportazione(l);
           if (l.stato !== 'IN_CORSO' && prima?.stato === 'IN_CORSO') {
             this.ricarica();
             this.aggiornaLuoghi();
+          }
+          // Quella automatica finita senza errori non chiede niente: sparisce da sola.
+          if (l.origine === 'AUTOMATICA' && l.stato === 'FINITA' && !l.errori && !l.errore) {
+            this.chiudiImportazione();
           }
         }
         this.importazioneTimer = setTimeout(() => this.seguiImportazione(), l?.stato === 'IN_CORSO' ? 1000 : 60000);

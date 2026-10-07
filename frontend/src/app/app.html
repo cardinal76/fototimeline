@@ -124,6 +124,31 @@
     }
   }
 
+  <!-- L'importazione ridotta: un indicatore che riapre il riquadro. Il lavoro continua. -->
+  @if (galleria.importazione(); as l) {
+    @if (galleria.importazioneRidotta()) {
+      <button
+        type="button"
+        class="lavoro-importazione"
+        [title]="'Mostra ' + nomeLavoro(l).toLowerCase() + (l.stato === 'IN_CORSO' ? ': ' + l.fatte + ' di ' + l.trovate : '')"
+        (click)="galleria.espandiImportazione()"
+      >
+        <span role="status">
+          @if (l.stato === 'IN_CORSO') {
+            <span class="girello" aria-hidden="true"></span>
+            {{ l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
+            {{ percentualeImportazione() }}%
+          } @else {
+            {{ nomeLavoro(l) }} {{ l.stato === 'FALLITA' ? 'non riuscita' : 'finita' }}
+          }
+          @if (l.errori) {
+            · <span class="errore">{{ l.errori }} errori</span>
+          }
+        </span>
+      </button>
+    }
+  }
+
   <button type="button" class="solo-desktop" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
     {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
   </button>
@@ -508,6 +533,7 @@
 }
 
 @if (galleria.importazione(); as l) {
+  @if (!galleria.importazioneRidotta()) {
   <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
     <div class="riga">
       @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : 'Importazione';
@@ -526,11 +552,20 @@
           @case ('FALLITA') { {{ lavoro }} non riuscita }
         }
       </b>
-      @if (l.stato === 'IN_CORSO') {
-        <button type="button" class="link" (click)="galleria.annullaImportazione()">Annulla</button>
-      } @else {
-        <button type="button" class="link" (click)="galleria.chiudiImportazione()">Chiudi</button>
-      }
+      <span class="azioni">
+        @if (l.stato === 'IN_CORSO') {
+          <button type="button" class="link" (click)="galleria.annullaImportazione()">Annulla</button>
+          <button
+            type="button"
+            class="link riduci"
+            title="Nascondi: resta un indicatore nella barra in alto, il lavoro continua"
+            aria-label="Nascondi il riquadro (il lavoro continua)"
+            (click)="galleria.riduciImportazione()"
+          >✕</button>
+        } @else {
+          <button type="button" class="link" (click)="galleria.chiudiImportazione()">Chiudi</button>
+        }
+      </span>
     </div>
     <progress [value]="percentualeImportazione()" max="100"></progress>
     @if (l.origine === 'LUOGHI') {
@@ -542,21 +577,61 @@
           · {{ l.rimossi }} tolte dall'origine
         }
         @if (l.errori) {
-          · <span class="errore">{{ l.errori }} errori</span>
+          ·
+          <button type="button" class="link errore" [attr.aria-expanded]="erroriAperti() === l.id" (click)="commutaErrori(l)">
+            {{ l.errori }} errori
+          </button>
+        }
+        @if (l.saltate) {
+          ·
+          <button
+            type="button"
+            class="link"
+            title="Già falliti uguali in un giro prima: non si rileggono finché il file non cambia"
+            [attr.aria-expanded]="!!scartati()"
+            (click)="commutaScartati()"
+          >
+            {{ l.saltate }} già falliti
+          </button>
+        }
+        @if (l.inArrivo) {
+          · <span title="Ancora in copia dal telefono: entrano al giro dopo">{{ l.inArrivo }} in copia</span>
         }
       </p>
     }
     @if (l.errore) {
       <p class="errore">{{ l.errore }}</p>
     }
-    @if (l.messaggi.length && l.stato !== 'IN_CORSO') {
+    @if (erroriAperti() === l.id) {
+      <ul class="errori elenco-errori" aria-label="Errori">
+        @for (m of l.messaggi; track $index) {
+          <li>{{ m }}</li>
+        }
+      </ul>
+      @if (l.errori > l.messaggi.length) {
+        <p>E altri {{ l.errori - l.messaggi.length }}: tutti nei log del server.</p>
+      }
+    } @else if (l.messaggi.length && l.stato !== 'IN_CORSO') {
       <ul class="errori">
         @for (m of l.messaggi.slice(0, 8); track $index) {
           <li>{{ m }}</li>
         }
       </ul>
     }
+    @if (scartati(); as elenco) {
+      <ul class="errori elenco-errori" aria-label="File già falliti">
+        @for (f of elenco; track f.percorso) {
+          <li [title]="f.percorso">{{ nomeFile(f.percorso) }}: {{ f.motivo }}</li>
+        } @empty {
+          <li>Nessuno</li>
+        }
+      </ul>
+      @if (elenco.length && galleria.io()?.admin) {
+        <p><button type="button" class="link" (click)="riprovaScartati()">Riprova tutti al prossimo giro</button></p>
+      }
+    }
   </div>
+  }
 }
 
 @if (galleria.conversioni(); as s) {

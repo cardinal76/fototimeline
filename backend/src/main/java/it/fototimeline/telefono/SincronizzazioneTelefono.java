@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.function.Predicate;
 
 import org.bson.types.ObjectId;
@@ -36,6 +37,7 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PreDestroy;
 import it.fototimeline.cloud.CloudProperties;
 import it.fototimeline.cloud.Rclone;
+import it.fototimeline.cloud.RcloneNonRiesce;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
 import it.fototimeline.service.ProvenienzaFile;
@@ -67,6 +69,10 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
     static final String ID_MIGRATO = "telefono";
     private static final int MAX_MESSAGGI = 20;
     private static final int MAX_ORE = 168;
+    /** Sopra questa dimensione (i video) una copia alla volta: insieme intasano rclone e la rete. */
+    static final long GRANDE = 100L * 1024 * 1024;
+    /** La velocità più bassa che si aspetta da una copia, per il suo tempo massimo. */
+    private static final long BYTE_AL_SECONDO = 256L * 1024;
 
     private final Rclone rclone;
     private final CloudProperties cloud;
@@ -83,6 +89,12 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
     private final Set<String> prenotati = ConcurrentHashMap.newKeySet();
     /** I giri che stanno girando, per mostrarne i contatori prima che finiscano. */
     private final Map<String, Corrente> correnti = new ConcurrentHashMap<>();
+    /** Le destinazioni (relative al remote) che si stanno copiando: l'importazione non le legge a metà. */
+    private final Set<String> inCopia = ConcurrentHashMap.newKeySet();
+    /** Ogni quanto chiedere a rclone a che punto è una copia. */
+    private Duration attesaCopia = Duration.ofSeconds(2);
+    /** Il tempo massimo di una copia, più quello che vuole la dimensione a {@link #BYTE_AL_SECONDO}. */
+    private Duration limiteCopia = Duration.ofMinutes(15);
 
     private record Corrente(Instant inizio, Contatori contatori) {
     }
@@ -304,15 +316,10 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
      */
     @Override
     public String caricataDa(Path file) {
-        if (!cloud.gestito() || cloud.puntoMontaggio() == null || cloud.puntoMontaggio().isBlank()) {
+        String destinazione = nelMontaggio(file);
+        if (destinazione == null) {
             return null;
         }
-        Path punto = Path.of(cloud.puntoMontaggio()).toAbsolutePath().normalize();
-        Path f = file.toAbsolutePath().normalize();
-        if (!f.startsWith(punto) || f.equals(punto)) {
-            return null;
-        }
-        String destinazione = punto.relativize(f).toString().replace('\\', '/');
         CopiaTelefono copia = mongo.findOne(Query.query(Criteria.where("destinazione").is(destinazione))
                 .with(Sort.by(Sort.Direction.DESC, "copiatoIl")).limit(1), CopiaTelefono.class);
         if (copia == null) {
@@ -321,6 +328,32 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         String proprietario = copia.idSorgente() == null ? null
                 : sorgente(copia.idSorgente()).map(SorgenteTelefono::proprietario).orElse(null);
         return proprietario != null ? proprietario : copia.proprietario();
+    }
+
+    /** True se la sincronizzazione sta copiando proprio questo file nella cartella automatica. */
+    @Override
+    public boolean inArrivo(Path file) {
+        String destinazione = nelMontaggio(file);
+        return destinazione != null && inCopia.contains(destinazione);
+    }
+
+    /** Il file relativo al punto di montaggio ({@code telefono/IMG_1.jpg}), o null se sta fuori. */
+    private String nelMontaggio(Path file) {
+        if (!cloud.gestito() || cloud.puntoMontaggio() == null || cloud.puntoMontaggio().isBlank()) {
+            return null;
+        }
+        Path punto = Path.of(cloud.puntoMontaggio()).toAbsolutePath().normalize();
+        Path f = file.toAbsolutePath().normalize();
+        if (!f.startsWith(punto) || f.equals(punto)) {
+            return null;
+        }
+        return punto.relativize(f).toString().replace('\\', '/');
+    }
+
+    /** Per i test: attese brevi. */
+    void tempiCopia(Duration attesa, Duration limite) {
+        this.attesaCopia = attesa;
+        this.limiteCopia = limite;
     }
 
     // ------------------------------------------------------------ dove
@@ -488,6 +521,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         }
         // I nomi presi in questo giro: due copie in parallelo non devono scegliere lo stesso.
         Set<String> prenotati = ConcurrentHashMap.newKeySet();
+        Semaphore grandi = new Semaphore(1);
         ExecutorService copie = Executors.newFixedThreadPool(inParallelo, r -> {
             Thread t = new Thread(r, "telefono-copia");
             t.setDaemon(true);
@@ -512,8 +546,13 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                     continue;
                 }
                 lavori.add(copie.submit(() -> {
+                    boolean grande = dimensione >= GRANDE;
+                    String destinazione = null;
                     try {
-                        String destinazione = copiaFile(sorgente, relativo, dimensione, cartella, prenotati);
+                        if (grande) {
+                            grandi.acquire();
+                        }
+                        destinazione = copiaFile(sorgente, relativo, dimensione, cartella, prenotati);
                         mongo.insert(new CopiaTelefono(new ObjectId().toHexString(), sorgente.testo(), telefono.id(),
                                 telefono.proprietario(), relativo, dimensione, data(voce.get("ModTime")), destinazione,
                                 adesso, null));
@@ -521,8 +560,17 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                         if (c.copiato() % 100 == 0) {
                             log.info("Sincronizzazione di {}: {} copiati finora", telefono.nome(), c.copiati());
                         }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                     } catch (RuntimeException e) {
                         c.errore(relativo, e);
+                    } finally {
+                        if (destinazione != null) {
+                            inCopia.remove(destinazione);
+                        }
+                        if (grande) {
+                            grandi.release();
+                        }
                     }
                 }));
             }
@@ -543,15 +591,60 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
      * Copia un file e controlla che sia arrivato intero. Niente sottocartelle
      * in destinazione (diventerebbero album coi nomi dei dispositivi):
      * {@code Pixel 8/IMG_1.jpg} → {@code telefono/Pixel 8 - IMG_1.jpg}.
+     * Finché la copia non è nel registro la destinazione è "in arrivo"
+     * ({@link #inArrivo}): chi chiama la toglie da lì dopo averla registrata.
+     *
+     * <p>Se col suo nome c'è già un file della stessa dimensione, è questo
+     * arrivato in un giro di prima che non l'ha visto finire: non si ricopia.
      */
     private String copiaFile(Sorgente sorgente, String relativo, long dimensione, String cartella,
             Set<String> prenotati) {
-        String destinazione = libero(cartella + "/" + relativo.replace("/", " - "), prenotati);
-        rclone.chiama("operations/copyfile", Map.of(
+        String voluto = cartella + "/" + relativo.replace("/", " - ");
+        Map<?, ?> gia = stat(cloud.remoto(), voluto);
+        if (gia != null && numero(gia.get("Size")) == dimensione && prenotati.add(voluto)) {
+            log.info("Telefono, {}: già arrivato intero in {}, non lo ricopio", relativo, voluto);
+            inCopia.add(voluto);
+            return voluto;
+        }
+        String destinazione = libero(voluto, prenotati);
+        inCopia.add(destinazione);
+        try {
+            return copiaEControlla(sorgente, relativo, dimensione, destinazione);
+        } catch (RuntimeException e) {
+            inCopia.remove(destinazione);
+            throw e;
+        }
+    }
+
+    /**
+     * La copia vera, asincrona ({@link Rclone#copiaFile}): un video grande
+     * non deve scadere col timeout di una chiamata HTTP. Se rclone dà errore
+     * o non risponde, prima di arrendersi si guarda se il file è arrivato
+     * intero lo stesso; se no, si riprova una volta.
+     */
+    private String copiaEControlla(Sorgente sorgente, String relativo, long dimensione, String destinazione) {
+        Map<String, Object> parametri = Map.of(
                 "srcFs", sorgente.fs(),
                 "srcRemote", sorgente.dentro(relativo),
                 "dstFs", cloud.remoto(),
-                "dstRemote", destinazione));
+                "dstRemote", destinazione);
+        Duration limite = limiteCopia.plusSeconds(Math.max(0, dimensione) / BYTE_AL_SECONDO);
+        for (int tentativo = 1;; tentativo++) {
+            try {
+                rclone.copiaFile(parametri, attesaCopia, limite);
+                break;
+            } catch (RcloneNonRiesce e) {
+                Map<?, ?> arrivato = statSenzaErrori(cloud.remoto(), destinazione);
+                if (arrivato != null && numero(arrivato.get("Size")) == dimensione) {
+                    log.info("Telefono, {}: {}, ma il file è arrivato intero", relativo, e.getMessage());
+                    break;
+                }
+                if (tentativo >= 2 || Thread.currentThread().isInterrupted()) {
+                    throw e;
+                }
+                log.warn("Telefono, {}: {}; riprovo", relativo, e.getMessage());
+            }
+        }
         Map<?, ?> copiato = stat(cloud.remoto(), destinazione);
         if (copiato == null || numero(copiato.get("Size")) != dimensione) {
             String arrivati = copiato == null ? "nessun file" : numero(copiato.get("Size")) + " byte";
@@ -610,6 +703,15 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
             } catch (RuntimeException e) {
                 c.errore(copia.percorso(), e);
             }
+        }
+    }
+
+    /** Come {@link #stat}, ma null anche se rclone non risponde. */
+    private Map<?, ?> statSenzaErrori(String fs, String remote) {
+        try {
+            return stat(fs, remote);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

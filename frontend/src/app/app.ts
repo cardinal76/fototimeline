@@ -30,6 +30,8 @@ import {
   StatoSalute,
   StatoTelefono,
   Utente,
+  FileScartato,
+  LavoroImportazione,
 } from './modelli';
 import { durata } from './formati';
 import { esci } from './sessione';
@@ -634,6 +636,58 @@ export class App {
   protected percentualeImportazione(): number {
     const l = this.galleria.importazione();
     return l && l.trovate ? Math.round((l.fatte / l.trovate) * 100) : 0;
+  }
+
+  /** L'elenco degli errori del lavoro mostrato, aperto con un clic su "N errori". */
+  protected readonly erroriAperti = signal<string | null>(null);
+  /** I file già falliti che la cartella automatica non rilegge; null finché non si chiedono. */
+  protected readonly scartati = signal<FileScartato[] | null>(null);
+
+  protected commutaErrori(l: LavoroImportazione): void {
+    this.erroriAperti.set(this.erroriAperti() === l.id ? null : l.id);
+  }
+
+  protected commutaScartati(): void {
+    if (this.scartati()) {
+      this.scartati.set(null);
+      return;
+    }
+    this.api.scartati().subscribe({
+      next: (s) => this.scartati.set(s),
+      error: (e: unknown) => this.galleria.avvisa(dettaglio(e) ?? 'Elenco non leggibile'),
+    });
+  }
+
+  protected riprovaScartati(): void {
+    if (!confirm('Al prossimo giro la cartella automatica rilegge anche i file già falliti. Va bene?')) {
+      return;
+    }
+    this.api.riprovaScartati().subscribe({
+      next: (r) => {
+        this.scartati.set(null);
+        this.galleria.avvisa(`${r.dimenticati} file da rileggere al prossimo giro`);
+      },
+      error: (e: unknown) => this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito'),
+    });
+  }
+
+  /** Il nome breve per l'indicatore nella barra. */
+  protected nomeLavoro(l: LavoroImportazione): string {
+    switch (l.origine) {
+      case 'AUTOMATICA':
+        return 'Importazione automatica';
+      case 'INDICIZZAZIONE':
+        return 'Indicizzazione';
+      case 'LUOGHI':
+        return 'Luoghi';
+      default:
+        return 'Importazione';
+    }
+  }
+
+  /** Il nome del file di un percorso, per l'elenco dei già falliti. */
+  protected nomeFile(percorso: string): string {
+    return percorso.substring(percorso.lastIndexOf('/') + 1);
   }
 
   protected chiudiImporta(): void {

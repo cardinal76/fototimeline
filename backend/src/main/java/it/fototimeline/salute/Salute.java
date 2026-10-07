@@ -367,6 +367,12 @@ public class Salute {
         };
         dettagli.add(0, cosa + " di " + l.cartella() + ": " + l.importate() + " nuove · " + l.duplicate()
                 + " già presenti · " + l.errori() + " errori");
+        if (l.saltate() > 0) {
+            dettagli.add(1, l.saltate() + " file non riletti perché già falliti uguali (elenco e \"Riprova\" nell'app)");
+        }
+        if (l.inArrivo() > 0) {
+            dettagli.add(1, l.inArrivo() + " file ancora in copia, lasciati al giro dopo");
+        }
         l.messaggi().stream().limit(5).forEach(dettagli::add);
         return switch (l.stato()) {
             case IN_CORSO -> VoceSalute.ok(chiave, titolo,

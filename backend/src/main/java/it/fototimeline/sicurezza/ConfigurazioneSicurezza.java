@@ -83,7 +83,8 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers(HttpMethod.GET, "/main-*.js", "/chunk-*.js", "/polyfills-*.js", "/styles-*.css")
                     .permitAll();
             a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**",
-                    "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**", "/api/contenuto/**")
+                    "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**", "/api/contenuto/**",
+                    "/api/importazioni/scartati/**")
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
             // Chi è entrato nell'app: email e ruoli, solo per gli admin.
             a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
