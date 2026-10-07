@@ -1,0 +1,406 @@
+/* ---------------------------------------------------------- barra */
+/* Una riga sola: logo, vista, ricerca e Filtri a sinistra, i comandi a destra. */
+.barra {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--bordo);
+}
+.barra .marchio {
+  all: unset;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.barra .marchio:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.logo {
+  color: var(--accento);
+  font-size: 1.4rem;
+}
+.spazio {
+  flex: 1;
+}
+.barra button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Testo per i lettori di schermo, invisibile. */
+.nascosto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------- viste */
+.viste {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.barra .viste button {
+  border: 0;
+  border-radius: 0;
+  padding: 0.45rem 0.8rem;
+  background: var(--superficie-2);
+}
+.barra .viste button[aria-selected='true'] {
+  background: var(--accento);
+  color: #fff;
+}
+
+/* ---------------------------------------------------------- ricerca */
+/* Il campo e l'interruttore "Per contenuto" come un pezzo solo. */
+.ricerca {
+  flex: 1 1 360px;
+  min-width: 140px;
+  max-width: 460px;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.ricerca .cerca {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+.ricerca.con-interruttore .cerca {
+  padding-right: 7.6rem;
+}
+.barra .ricerca .interruttore {
+  position: absolute;
+  right: 4px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+/* ---------------------------------------------------------- pulsanti dei menu */
+.ancora {
+  position: relative;
+  flex-shrink: 0;
+}
+.apri-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.barra .apri-menu[aria-expanded='true'] {
+  border-color: var(--accento);
+}
+.barra .apri-menu.attivo {
+  border-color: var(--accento);
+  color: var(--accento-forte);
+}
+.freccia {
+  font-size: 0.75em;
+  color: var(--testo-tenue);
+}
+.conta {
+  min-width: 1.3em;
+  padding: 0 0.35em;
+  border-radius: 999px;
+  background: var(--accento);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+}
+/* Il pallino del problema sul pulsante Strumenti. */
+.pallino.segnale {
+  margin: 0;
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 2px var(--superficie-2);
+}
+.utente .nome {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.iniziali {
+  display: none;
+  width: 1.7em;
+  height: 1.7em;
+  border-radius: 50%;
+  place-items: center;
+  background: var(--accento-tenue);
+  color: var(--accento-forte);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.carica {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.lavoro-contenuto {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+.lavoro-contenuto progress {
+  width: 56px;
+  margin-top: 0;
+}
+
+/* ---------------------------------------------------------- tendine */
+.tendina {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1000;
+  min-width: 230px;
+  padding: 0.35rem;
+  background: var(--superficie);
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+.menu {
+  max-height: calc(100vh - 5rem);
+  overflow-y: auto;
+}
+.sezione + .sezione {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--bordo);
+}
+/* Sul computer la sezione Vista non c'è: niente riga sopra la prima che si vede. */
+.sezione.solo-telefono + .sezione {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.intestazione {
+  padding: 0.35rem 0.6rem 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--testo-tenue);
+}
+.barra .voce {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.barra .voce:hover:not(:disabled, [aria-disabled='true']),
+.barra .voce:focus-visible {
+  background: var(--superficie-2);
+}
+.barra .voce:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: -2px;
+}
+.barra .voce:disabled,
+.barra .voce[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+}
+.barra .voce.errore {
+  color: var(--pericolo);
+}
+.voce[aria-checked]::before {
+  content: '';
+  width: 1em;
+}
+.voce[aria-checked='true']::before {
+  content: '✓';
+  color: var(--accento);
+}
+.voce .pallino {
+  margin-right: 0;
+}
+.voce small,
+.voce .azione {
+  margin-left: auto;
+  padding-left: 1rem;
+}
+.voce .azione {
+  color: var(--accento);
+  font-weight: 600;
+}
+.cloud {
+  color: var(--testo-tenue);
+}
+.spia {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--pericolo);
+}
+.cloud.montato .spia {
+  background: #3fb950;
+}
+
+/* Il pannello dei filtri si apre sotto il pulsante, verso destra. */
+.pannello-filtri {
+  left: 0;
+  right: auto;
+  width: 300px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.pannello-filtri .campo {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--testo-tenue);
+}
+.campo select {
+  width: 100%;
+  font-size: 0.95rem;
+}
+.pannello-filtri .interruttore {
+  justify-self: start;
+}
+.pannello-filtri > .link {
+  justify-self: start;
+  margin-top: -0.3rem;
+}
+.pannello-filtri .piede {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--bordo);
+  font-size: 0.85rem;
+}
+
+/* ---------------------------------------------------------- computer e telefono */
+.solo-telefono {
+  display: none;
+}
+/* Barra stretta: al posto del nome le iniziali (il nome resta nel menu). */
+@media (max-width: 1500px) {
+  .utente .nome {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .iniziali {
+    display: inline-grid;
+  }
+}
+@media (max-width: 1100px) {
+  .barra .viste button {
+    padding-inline: 0.6rem;
+  }
+  .nome-app {
+    display: none;
+  }
+}
+/* Telefono: logo, ricerca, Filtri, Carica e ☰, il resto è nel menu. */
+@media (max-width: 799.98px) {
+  .solo-desktop {
+    display: none !important;
+  }
+  .solo-telefono {
+    display: inline;
+  }
+  .sezione.solo-telefono {
+    display: block;
+  }
+  .sezione.solo-telefono + .sezione {
+    margin-top: 0.25rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid var(--bordo);
+  }
+  .barra {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.5rem 0.6rem;
+  }
+  .barra .marchio .logo {
+    font-size: 1.6rem;
+  }
+  .barra button,
+  .barra .bottone {
+    padding: 0.45rem 0.6rem;
+  }
+  .spazio {
+    display: none;
+  }
+  .ricerca {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+  /* Col focus la ricerca si allarga: il logo si fa da parte. */
+  .barra:has(.ricerca:focus-within) .marchio {
+    display: none;
+  }
+  .ricerca.con-interruttore .cerca {
+    padding-right: 0.75rem;
+  }
+  .barra .ricerca .interruttore {
+    display: none;
+  }
+  .ricerca.con-interruttore:focus-within .cerca {
+    padding-right: 5.6rem;
+  }
+  .ricerca .per {
+    display: none;
+  }
+  .barra .ricerca:focus-within .interruttore,
+  .barra .ricerca .interruttore[aria-pressed='true'] {
+    display: block;
+  }
+  .carica .etichetta {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  /* Gli avanzamenti restano in vista, su una riga sotto. */
+  .lavoro-contenuto {
+    order: 99;
+    flex-basis: 100%;
+  }
+  .tendina,
+  .pannello-filtri {
+    position: fixed;
+    top: 3.6rem;
+    left: 0.6rem;
+    right: 0.6rem;
+    width: auto;
+    max-height: calc(100vh - 4.5rem);
+    overflow-y: auto;
+  }
+  .barra .voce {
+    padding-block: 0.65rem;
+  }
+}

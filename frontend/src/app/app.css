@@ -4,44 +4,8 @@
   height: 100vh;
 }
 
-/* ---------------------------------------------------------- barra */
-.barra {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 0.6rem 1rem;
-  background: var(--superficie);
-  border-bottom: 1px solid var(--bordo);
-}
-.barra .marchio {
-  all: unset;
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 1.1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.logo {
-  color: var(--accento);
-  font-size: 1.4rem;
-}
-.filtri,
-.azioni {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.filtri {
-  flex: 1;
-}
-.cerca {
-  flex: 1;
-  min-width: 180px;
-  max-width: 360px;
-}
+/* La barra in alto e i suoi menu sono in barra.css. */
+
 input:not([type='checkbox']),
 select,
 .barra button,
@@ -101,22 +65,14 @@ button:focus-visible,
 .link:hover {
   text-decoration: underline;
 }
-.lavoro-contenuto {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.9em;
-}
-.lavoro-contenuto progress {
-  width: 80px;
-  margin-top: 0;
-}
 
 /* ---------------------------------------------------------- corpo */
 .corpo {
   flex: 1;
   display: flex;
   min-height: 0;
+  /* La mappa (Leaflet) tiene i suoi z-index qui dentro: i menu della barra le restano sopra. */
+  isolation: isolate;
 }
 main {
   flex: 1;
@@ -460,25 +416,6 @@ progress {
   }
 }
 
-/* ---------------------------------------------------------- cloud e utente */
-.cloud,
-.utente {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  color: var(--testo-tenue);
-  white-space: nowrap;
-}
-.spia {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--pericolo);
-}
-.cloud.montato .spia {
-  background: #3fb950;
-}
 .smontato {
   margin: 0;
   padding: 0.5rem 1rem;
@@ -492,10 +429,6 @@ progress {
 .bottone.spento {
   opacity: 0.45;
   pointer-events: none;
-}
-.barra button:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 .navigatore {
   border: 1px solid var(--bordo);
@@ -534,22 +467,6 @@ progress {
 }
 
 /* ---------------------------------------------------------- viste */
-.viste {
-  display: inline-flex;
-  border: 1px solid var(--bordo);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.barra .viste button {
-  border: 0;
-  border-radius: 0;
-  padding: 0.45rem 0.8rem;
-  background: var(--superficie-2);
-}
-.barra .viste button[aria-selected='true'] {
-  background: var(--accento);
-  color: #fff;
-}
 .vista-mappa {
   flex: 1;
   min-width: 0;
@@ -577,9 +494,6 @@ main[hidden] {
 /* Con caricamento e importazione insieme, l'importazione sale sopra. */
 .avanzamento.importazione.sopra {
   bottom: 9.5rem;
-}
-.barra .link.errore {
-  color: var(--pericolo);
 }
 
 /* La coda dei video sta a sinistra: può girare per ore insieme a tutto il resto. */

@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  Injector,
   afterNextRender,
   computed,
   inject,
@@ -40,6 +41,9 @@ import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
 
+/** I menu a tendina della barra: uno aperto alla volta. */
+type Menu = 'filtri' | 'strumenti' | 'utente';
+
 /** Altezza di riferimento delle righe della griglia, in pixel. */
 const ALTEZZA_RIGA = 210;
 
@@ -52,9 +56,10 @@ const ALTEZZA_RIGA = 210;
     '(document:dragleave)': 'esci($event)',
     '(document:drop)': 'rilascia($event)',
     '(document:keydown.escape)': 'esc()',
+    '(document:click)': 'fuoriMenu($event)',
   },
   templateUrl: './app.html',
-  styleUrl: './app.css',
+  styleUrls: ['./app.css', './barra.css'],
 })
 export class App {
   protected readonly galleria = inject(Galleria);
@@ -105,6 +110,37 @@ export class App {
   protected readonly google = signal<CollegamentoGoogle | null>(null);
   protected readonly dialogoGoogle = signal(false);
 
+  /** Il menu della barra aperto (Filtri, Strumenti, utente), o null. */
+  protected readonly menu = signal<Menu | null>(null);
+  /** Quanti filtri sono attivi, per il numerino sul pulsante Filtri (la ricerca ha il suo campo). */
+  protected readonly quantiFiltri = computed(() => {
+    const f = this.galleria.filtro();
+    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.luogo, f.preferite].filter(Boolean).length;
+  });
+  /** Un problema da vedere a colpo d'occhio sul pulsante Strumenti: cloud smontato o salute non a posto. */
+  protected readonly avvisoSistema = computed<{ stato: StatoSalute; testo: string } | null>(() => {
+    const c = this.galleria.cloud();
+    const s = this.galleria.io()?.admin ? this.galleria.salute()?.stato : undefined;
+    if (c?.gestito && !c.montato) {
+      return { stato: 'ERRORE', testo: 'Cloud smontato' + (s && s !== 'OK' ? ' · salute: ' + this.nomeStato(s) : '') };
+    }
+    return s && s !== 'OK' ? { stato: s, testo: 'Salute: ' + this.nomeStato(s) } : null;
+  });
+
+  /** "MC" per Marco Cardinali: il menu utente quando la barra è stretta. */
+  protected readonly iniziali = computed(() =>
+    (this.galleria.io()?.nome ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0].toUpperCase())
+      .join(''),
+  );
+
+  private readonly barra = viewChild.required<ElementRef<HTMLElement>>('barra');
+  private readonly injector = inject(Injector);
+  /** Il pulsante che ha aperto il menu: ci torna il focus quando si chiude. */
+  private innesco: HTMLElement | null = null;
   private readonly scorrimento = viewChild.required<ElementRef<HTMLElement>>('scorrimento');
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
   private ricercaTimer?: ReturnType<typeof setTimeout>;
@@ -290,6 +326,10 @@ export class App {
     if (this.aperta()) {
       return;
     }
+    if (this.menu()) {
+      this.chiudiMenu();
+      return;
+    }
     if (this.dialogoDalTelefono()) {
       // Lo gestisce RiceviCondivisi (non durante l'invio).
       return;
@@ -313,6 +353,88 @@ export class App {
     } else if (this.selezione()) {
       this.esciSelezione();
     }
+  }
+
+  // ------------------------------------------------------------ menu della barra
+
+  /** Apre o chiude un menu; aprendolo il focus va sulla prima voce (o sull'ultima con la freccia su). */
+  protected commutaMenu(m: Menu, evento: Event, ultima = false): void {
+    if (this.menu() === m) {
+      this.chiudiMenu();
+      return;
+    }
+    this.innesco = evento.currentTarget as HTMLElement;
+    this.menu.set(m);
+    afterNextRender(
+      () => {
+        const voci = this.vociMenu();
+        (ultima ? voci[voci.length - 1] : voci[0])?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /** Chiude il menu aperto e riporta il focus sul suo pulsante. */
+  protected chiudiMenu(): void {
+    if (!this.menu()) {
+      return;
+    }
+    this.menu.set(null);
+    this.innesco?.focus();
+    this.innesco = null;
+  }
+
+  /** Frecce su e giù sul pulsante di un menu: lo aprono come il clic. */
+  protected tastoInnesco(m: Menu, e: KeyboardEvent): void {
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && this.menu() !== m) {
+      e.preventDefault();
+      this.commutaMenu(m, e, e.key === 'ArrowUp');
+    }
+  }
+
+  /** Dentro un menu: frecce, Home e Fine spostano tra le voci; Tab lo chiude e lascia andare il focus. */
+  protected muoviNelMenu(e: KeyboardEvent): void {
+    const voci = this.vociMenu();
+    const i = voci.indexOf(document.activeElement as HTMLElement);
+    const dove: Record<string, number> = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: voci.length - 1 };
+    if (e.key === 'Tab') {
+      this.menu.set(null);
+      this.innesco = null;
+    } else if (e.key in dove && voci.length) {
+      e.preventDefault();
+      voci[(dove[e.key] + voci.length) % voci.length].focus();
+    }
+  }
+
+  /** Clic fuori dal menu aperto (e dal suo pulsante): si chiude. */
+  protected fuoriMenu(e: Event): void {
+    const m = this.menu();
+    // composedPath e non contains: la voce cliccata può essere già sparita dal DOM.
+    if (m && !e.composedPath().some((n) => n instanceof HTMLElement && n.dataset['menu'] === m)) {
+      this.menu.set(null);
+      this.innesco = null;
+    }
+  }
+
+  /** Il focus esce dal menu (Tab, o un clic altrove): si chiude senza riprendersi il focus. */
+  protected focusFuori(e: FocusEvent): void {
+    const verso = e.relatedTarget as Node | null;
+    if (verso && !(e.currentTarget as HTMLElement).contains(verso)) {
+      this.menu.set(null);
+      this.innesco = null;
+    }
+  }
+
+  /** Le voci raggiungibili del menu aperto: per il pannello Filtri i suoi controlli. */
+  private vociMenu(): HTMLElement[] {
+    const tendina = this.barra().nativeElement.querySelector('.tendina');
+    if (!tendina) {
+      return [];
+    }
+    const selettore = tendina.getAttribute('role') === 'menu'
+      ? '[role^="menuitem"]:not([disabled]):not([aria-disabled="true"])'
+      : 'select, button:not([disabled]), input';
+    return [...tendina.querySelectorAll<HTMLElement>(selettore)].filter((v) => v.offsetParent !== null);
   }
 
   protected esciSelezione(): void {
