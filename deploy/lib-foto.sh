@@ -442,8 +442,12 @@ carica_ordinate() {
     richiede "$RCLONE"
     [ -d "$ORDINATE" ] || errore "prima: $0 raccogli"
     echo "Copio $ORDINATE in $DESTINAZIONE…"
+    # Tanti file piccoli su WebDAV: con 4 alla volta si usava ~1 MB/s di una linea da
+    # 25 MB/s, il tempo se ne va nell'attesa di ogni file. CARICA_PARALLELI per cambiarlo.
+    local paralleli="${CARICA_PARALLELI:-16}"
     rc copy "$ORDINATE" "$DESTINAZIONE" --backup-dir "${DESTINAZIONE}-sovrascritte" \
-        --transfers 4 --stats-one-line --stats 30s --stats-log-level NOTICE
+        --transfers "$paralleli" --checkers $((paralleli + 8)) \
+        --stats-one-line --stats 30s --stats-log-level NOTICE
     echo "Controllo che ci sia tutto…"
     if rc check "$ORDINATE" "$DESTINAZIONE" --one-way --size-only; then
         date +%s > "$LAVORO/fase-carica.ok"
