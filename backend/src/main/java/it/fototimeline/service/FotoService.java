@@ -335,19 +335,20 @@ public class FotoService {
         if (genere == null) {
             throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato"));
         }
-        if (genere == Genere.HEIC && !media.heicDisponibile()) {
-            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server"));
-        }
-        if (genere == Genere.VIDEO && !media.videoDisponibile()) {
-            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server"));
-        }
-
         String hash;
         long dimensione;
         try {
-            // Prima dell'hash: un file cifrato non vale la pena di scaricarlo tutto.
+            // Prima di tutto (anche degli strumenti che mancano): un file cifrato resta
+            // illeggibile comunque, ed è un errore del file, da ricordare; e non vale la
+            // pena di scaricarlo tutto per l'hash.
             if (cifratoLifetime(file)) {
                 throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, CIFRATO_LIFETIME));
+            }
+            if (genere == Genere.HEIC && !media.heicDisponibile()) {
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server"));
+            }
+            if (genere == Genere.VIDEO && !media.videoDisponibile()) {
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server"));
             }
             hash = sha256(file);
             dimensione = Files.size(file);
