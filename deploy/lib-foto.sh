@@ -75,11 +75,26 @@ carica_impronte_di() {
     done < "$file"
 }
 preso() { [ -e "$ORDINATE/$1" ] || [ -n "${PRESO[$1]:-}" ]; }
+
+# Le impronte di molti file con pochi processi (non un sha256sum per file: su WSL
+# ogni processo costa): legge i percorsi separati da NUL e riempie SHA[percorso].
+declare -A SHA=()
+impronte() {
+    local riga
+    SHA=()
+    while IFS= read -r -d '' riga; do
+        SHA["${riga#*  }"]="${riga%%  *}"
+    done < <(xargs -0 -r sha256sum -z)
+}
+
 metti_in_ordinate() {
     local giro="$1" f rel sha base est n
+    local -a file=()
     DOVE=()
-    while IFS= read -r -d '' f; do
-        sha=$(sha256sum "$f" | cut -d' ' -f1)
+    while IFS= read -r -d '' f; do file+=("$f"); done < <(find "$giro" -type f -print0 | sort -z)
+    [ "${#file[@]}" -gt 0 ] && impronte < <(printf '%s\0' "${file[@]}")
+    for f in "${file[@]}"; do
+        sha="${SHA[$f]}"
         if [ -n "${IMPRONTA[$sha]:-}" ]; then
             DOVE[$sha]="${IMPRONTA[$sha]}"
             rm -f "$f"
@@ -96,7 +111,7 @@ metti_in_ordinate() {
         IMPRONTA[$sha]="$rel"
         DOVE[$sha]="$rel"
         printf '%s\t%s\n' "$sha" "$rel" >> "$IMPRONTE"
-    done < <(find "$giro" -type f -print0 | sort -z)
+    done
 }
 
 # Quante foto, video e zip ci sono in ogni cartella in cima a $1 (per anteprima).
@@ -136,7 +151,8 @@ raccogli_fonti() {
     # Le fonti si segnano sempre col percorso sotto RADICE, anche lette dalla copia locale.
     local sciolti=() zip=() f
     while IFS= read -r -d '' f; do
-        [ -n "${FATTA[$(fonte_di "$f")]:-}" ] && continue
+        fonte_in "$f"
+        [ -n "${FATTA[$FONTE]:-}" ] && continue
         case "${f,,}" in
             *.zip) zip+=("$f") ;;
             *) sciolti+=("$f") ;;
@@ -166,10 +182,12 @@ raccogli_fonti() {
 # Il percorso sotto RADICE di un file letto da BASE (che può essere la copia locale).
 # Un nome accorciato da scarica (LAVORO/nomi-lunghi.tsv) torna quello vero di pCloud.
 declare -A NOMI_LUNGHI=()
-fonte_di() {
+fonte_di() { fonte_in "$1"; printf '%s' "$FONTE"; }
+# Come fonte_di, ma in FONTE e senza sottoshell: nei giri su 100 mila file conta.
+fonte_in() {
     local rel="${1#"$BASE"/}"
     if [ "$BASE" = "$SPECCHIO" ] && [ -n "${NOMI_LUNGHI[$rel]:-}" ]; then rel="${NOMI_LUNGHI[$rel]}"; fi
-    printf '%s/%s' "$RADICE" "$rel"
+    FONTE="$RADICE/$rel"
 }
 carica_nomi_lunghi() {
     local corto lungo
@@ -182,19 +200,26 @@ carica_nomi_lunghi() {
 raccogli_sciolti() {
     rm -rf "$TMP"; mkdir -p "$TMP/in" "$TMP/ord"
     local -A FONTE_DI VISTO
+    local -a copie=()
     local f nome copia sha k=0
     for f in "$@"; do
         k=$((k + 1))
-        nome="$(basename "$f")"
+        nome="${f##*/}"
         # Copie di un download: "IMG_0001 (1).jpg" torna "IMG_0001.jpg", e di più file
         # identici si ordina solo il primo (così resta il nome senza " (1)").
         if [ "$COPIE_SCARICATE" = si ] && [[ "$nome" =~ ^(.+)\ \([0-9]+\)(\.[^.]+)$ ]]; then
             nome="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
         fi
         copia="$TMP/in/$k/$nome"
-        mkdir -p "$(dirname "$copia")"
+        mkdir -p "$TMP/in/$k"
         ln "$f" "$copia" 2>/dev/null || cp --preserve=timestamps "$f" "$copia"
-        sha=$(sha256sum "$copia" | cut -d' ' -f1)
+        copie+=("$copia")
+    done
+    impronte < <(printf '%s\0' "${copie[@]}")
+    k=0
+    for f in "$@"; do
+        copia="${copie[$k]}"; k=$((k + 1))
+        sha="${SHA[$copia]}"
         FONTE_DI[$f]="$sha"
         [ "$COPIE_SCARICATE" = si ] && [ -n "${VISTO[$sha]:-}" ] && rm -f "$copia"
         VISTO[$sha]=1
@@ -204,7 +229,7 @@ raccogli_sciolti() {
     local fonte
     for f in "$@"; do
         sha="${FONTE_DI[$f]}"
-        fonte="$(fonte_di "$f")"
+        fonte_in "$f"; fonte="$FONTE"
         if [ -n "${DOVE[$sha]:-}" ]; then
             printf '%s\t\t%s\t%s\n' "$fonte" "$sha" "${DOVE[$sha]}" >> "$MANIFEST"
             printf 'file\t%s\tsi\n' "$fonte" >> "$FONTI"
@@ -241,10 +266,14 @@ raccogli_zip() {
     done
     local -a membri=() shas=()
     local m
-    while IFS= read -r -d '' m; do
+    local -a percorsi=()
+    while IFS= read -r -d '' m; do percorsi+=("$m"); done \
+        < <(find "$TMP/in" -type f \( -false "${estensioni_find[@]}" \) -print0 | sort -z)
+    [ "${#percorsi[@]}" -gt 0 ] && impronte < <(printf '%s\0' "${percorsi[@]}")
+    for m in "${percorsi[@]}"; do
         membri+=("${m#"$TMP/in"/}")
-        shas+=("$(sha256sum "$m" | cut -d' ' -f1)")
-    done < <(find "$TMP/in" -type f \( -false "${estensioni_find[@]}" \) -print0 | sort -z)
+        shas+=("${SHA[$m]}")
+    done
     ordina_cartella "$TMP/in" "$TMP/ord"
     metti_in_ordinate "$TMP/ord"
     local altri eliminabile=si i
