@@ -1,6 +1,8 @@
 package it.fototimeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -12,6 +14,8 @@ import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import javax.imageio.ImageIO;
@@ -23,10 +27,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.repository.FotoRepository;
+import it.fototimeline.service.ArchivioFile;
+import it.fototimeline.service.ArchivioProperties;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneCartelle;
 import it.fototimeline.service.ImportazioneCartelle.Avanzamento;
@@ -34,6 +41,7 @@ import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.Origine;
 import it.fototimeline.service.LavoriImportazione.Stato;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
+import it.fototimeline.service.Risultati;
 import it.fototimeline.service.Risultati.Esito;
 import it.fototimeline.service.Risultati.Importazione;
 
@@ -55,8 +63,15 @@ class IndicizzazioneTest {
     @Autowired
     FotoRepository repository;
 
-    @Autowired
+    /** Spia: nel test dell'annullamento la ricerca si ferma a metà finché il test non ha guardato. */
+    @MockitoSpyBean
     ImportazioneCartelle importazione;
+
+    @Autowired
+    ArchivioFile archivioFile;
+
+    @Autowired
+    ArchivioProperties proprieta;
 
     @Autowired
     LavoriImportazione lavori;
@@ -180,10 +195,75 @@ class IndicizzazioneTest {
         StatoLavoro fine = aspettaFine();
         assertThat(fine.stato()).isEqualTo(Stato.FINITA);
         assertThat(fine.origine()).isEqualTo(Origine.INDICIZZAZIONE);
+        assertThat(fine.ricerca()).isFalse();
         assertThat(fine.trovate()).isEqualTo(2);
         assertThat(fine.importate()).isEqualTo(2);
         assertThat(repository.findAll()).extracting(Foto::getGiorno)
                 .containsExactlyInAnyOrder("2024-05-03", "2024-05-04");
+    }
+
+    @Test
+    void mentreCercaIFileLoStatoLiContaEAnnullaFermaTutto() throws Exception {
+        scrivi("2024/05/03/a.jpg", immagine(Color.RED, "jpg"));
+        scrivi("2024/05/04/b.jpg", immagine(Color.GREEN, "jpg"));
+        scrivi("2024/05/05/c.jpg", immagine(Color.BLUE, "jpg"));
+        // La vera ricerca, che si ferma al secondo file trovato finché il lavoro non è annullato.
+        var vera = new ImportazioneCartelle(service, archivioFile, proprieta);
+        CountDownLatch alSecondo = new CountDownLatch(1);
+        int[] totale = {-1};
+        doAnswer(inv -> {
+            Avanzamento lavoro = inv.getArgument(0);
+            return vera.indicizza(new Avanzamento() {
+                @Override
+                public void cercando(int trovati, Path cartella) {
+                    lavoro.cercando(trovati, cartella);
+                    if (trovati == 2) {
+                        alSecondo.countDown();
+                        Instant limite = Instant.now().plusSeconds(10);
+                        while (!lavoro.annullata() && Instant.now().isBefore(limite)) {
+                            Thread.onSpinWait();
+                        }
+                    }
+                }
+
+                @Override
+                public void inizio(int n) {
+                    totale[0] = n;
+                    lavoro.inizio(n);
+                }
+
+                @Override
+                public void fatta(Path file, Risultati.Caricamento esito, boolean rimossa) {
+                    lavoro.fatta(file, esito, rimossa);
+                }
+
+                @Override
+                public boolean annullata() {
+                    return lavoro.annullata();
+                }
+            });
+        }).when(importazione).indicizza(any());
+
+        StatoLavoro partito = lavori.avviaIndicizzazione();
+        assertThat(partito.ricerca()).isTrue();
+        assertThat(alSecondo.await(10, TimeUnit.SECONDS)).isTrue();
+
+        StatoLavoro cerca = lavori.corrente().orElseThrow();
+        assertThat(cerca.stato()).isEqualTo(Stato.IN_CORSO);
+        assertThat(cerca.ricerca()).isTrue();
+        assertThat(cerca.trovate()).isEqualTo(2);
+        assertThat(cerca.fatte()).isZero();
+        assertThat(cerca.cercaIn()).matches("2024/05/0[345]");
+
+        assertThat(lavori.annulla()).isTrue();
+        StatoLavoro fine = aspettaFine();
+        assertThat(fine.stato()).isEqualTo(Stato.ANNULLATA);
+        assertThat(fine.ricerca()).isFalse();
+        assertThat(fine.cercaIn()).isNull();
+        assertThat(fine.fatte()).isZero();
+        // Il cammino si è fermato lì: il terzo file non l'ha nemmeno trovato.
+        assertThat(totale[0]).isEqualTo(2);
+        assertThat(repository.count()).isZero();
     }
 
     private Importazione indicizza() throws IOException {

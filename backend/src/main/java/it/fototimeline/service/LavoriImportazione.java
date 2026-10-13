@@ -55,10 +55,16 @@ public class LavoriImportazione {
      * automatica: {@code saltate} i file già falliti uguali in un giro prima
      * (non si rileggono), {@code inArrivo} quelli ancora in copia (al giro
      * dopo); nessuno dei due è in {@code trovate}.
+     *
+     * <p>{@code ricerca} è vero finché si cercano i file (tutte le origini
+     * tranne LUOGHI): intanto {@code trovate} conta quelli trovati finora e
+     * {@code cercaIn} è la cartella dove si è arrivati, relativa a
+     * {@code cartella}. Poi {@code trovate} è il totale da fare.
      */
     public record StatoLavoro(String id, String cartella, Origine origine, Stato stato,
             Instant iniziatoIl, Instant finitoIl, int trovate, int fatte, int importate, int duplicate,
-            int errori, int rimossi, List<String> messaggi, String errore, int saltate, int inArrivo) {
+            int errori, int rimossi, List<String> messaggi, String errore, int saltate, int inArrivo,
+            boolean ricerca, String cercaIn) {
     }
 
     private final ImportazioneCartelle importazione;
@@ -183,7 +189,7 @@ public class LavoriImportazione {
         return Optional.ofNullable(ultimo.get()).map(Lavoro::stato);
     }
 
-    /** Ferma l'importazione in corso dopo la foto che sta facendo. */
+    /** Ferma l'importazione in corso dopo la foto che sta facendo, o subito se sta ancora cercando i file. */
     public boolean annulla() {
         Lavoro lavoro = ultimo.get();
         if (lavoro == null || !lavoro.inCorso()) {
@@ -272,9 +278,12 @@ public class LavoriImportazione {
     private final class Lavoro implements Avanzamento, LuoghiService.Avanzamento {
         private final String id = UUID.randomUUID().toString();
         private final String cartella;
+        private final Path base;
         private final Origine origine;
         private final Instant iniziatoIl;
         private volatile boolean annullata;
+        private boolean ricerca;
+        private String cercaIn;
         private Stato stato = Stato.IN_CORSO;
         private Instant finitoIl;
         private int trovate;
@@ -290,8 +299,10 @@ public class LavoriImportazione {
 
         Lavoro(String cartella, Origine origine, Instant iniziatoIl) {
             this.cartella = cartella;
+            this.base = Path.of(cartella).toAbsolutePath().normalize();
             this.origine = origine;
             this.iniziatoIl = iniziatoIl;
+            this.ricerca = origine != Origine.LUOGHI;
         }
 
         synchronized boolean inCorso() {
@@ -299,8 +310,17 @@ public class LavoriImportazione {
         }
 
         @Override
+        public synchronized void cercando(int trovati, Path dove) {
+            trovate = trovati;
+            Path c = dove.toAbsolutePath().normalize();
+            cercaIn = (c.startsWith(base) ? base.relativize(c) : c).toString().replace('\\', '/');
+        }
+
+        @Override
         public synchronized void inizio(int totale) {
             trovate = totale;
+            ricerca = false;
+            cercaIn = null;
         }
 
         @Override
@@ -354,12 +374,14 @@ public class LavoriImportazione {
             stato = fine;
             errore = motivo;
             finitoIl = quando;
+            ricerca = false;
+            cercaIn = null;
         }
 
         synchronized StatoLavoro stato() {
             return new StatoLavoro(id, importazione.relativo(Path.of(cartella)), origine, stato, iniziatoIl, finitoIl,
                     trovate, fatte, importate, duplicate, errori, rimossi, List.copyOf(messaggi), errore, saltate,
-                    inArrivo);
+                    inArrivo, ricerca, cercaIn);
         }
     }
 }

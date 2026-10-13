@@ -130,11 +130,14 @@
       <button
         type="button"
         class="lavoro-importazione"
-        [title]="'Mostra ' + nomeLavoro(l).toLowerCase() + (l.stato === 'IN_CORSO' ? ': ' + l.fatte + ' di ' + l.trovate : '')"
+        [title]="'Mostra ' + nomeLavoro(l).toLowerCase() + (l.stato === 'IN_CORSO' ? (l.ricerca ? ': cerco i file, ' + l.trovate + ' trovati' : ': ' + l.fatte + ' di ' + l.trovate) : '')"
         (click)="galleria.espandiImportazione()"
       >
         <span role="status">
-          @if (l.stato === 'IN_CORSO') {
+          @if (l.stato === 'IN_CORSO' && l.ricerca) {
+            <span class="girello" aria-hidden="true"></span>
+            Cerco i file: {{ l.trovate | number }}
+          } @else if (l.stato === 'IN_CORSO') {
             <span class="girello" aria-hidden="true"></span>
             {{ l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
             {{ percentualeImportazione() }}%
@@ -567,8 +570,17 @@
         }
       </span>
     </div>
-    <progress [value]="percentualeImportazione()" max="100"></progress>
-    @if (l.origine === 'LUOGHI') {
+    @let cerca = l.stato === 'IN_CORSO' && !!l.ricerca;
+    <!-- Mentre cerca i file il totale non si sa: senza valore la barra è indeterminata. -->
+    <progress [attr.value]="cerca ? null : percentualeImportazione()" max="100"></progress>
+    @if (cerca) {
+      <p>
+        Cerco i file… {{ l.trovate | number }} trovati
+        @if (l.cercaIn) {
+          ({{ l.cercaIn }})
+        }
+      </p>
+    } @else if (l.origine === 'LUOGHI') {
       <p>{{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} con un luogo · {{ l.duplicate }} senza (mare aperto)</p>
     } @else {
       <p>
