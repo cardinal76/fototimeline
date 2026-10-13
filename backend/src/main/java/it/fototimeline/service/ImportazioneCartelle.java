@@ -72,6 +72,14 @@ public class ImportazioneCartelle {
     public interface Avanzamento {
         Avanzamento NESSUNO = new Avanzamento() { };
 
+        /**
+         * Mentre si cercano i file, prima di {@link #inizio}: quanti trovati
+         * finora e la cartella dove si è arrivati. Sul cloud l'elenco di un
+         * archivio grande dura anche un'ora: così si vede che va avanti.
+         */
+        default void cercando(int trovati, Path cartella) {
+        }
+
         default void inizio(int totale) {
         }
 
@@ -148,7 +156,11 @@ public class ImportazioneCartelle {
         if (dentroArchivio(base)) {
             throw new IllegalArgumentException("Questa cartella fa già parte dell'archivio");
         }
-        List<Path> file = media(base);
+        List<Path> file = media(base, avanzamento);
+        if (avanzamento.annullata()) {
+            // Elenco a metà: niente scelta, che toglierebbe i ricordi dei file non ancora visti.
+            return new Riepilogo().importazione(file.size());
+        }
         Map<Path, BasicFileAttributes> attributi = Map.of();
         Set<Path> cambiate = Set.of();
         if (automatica != null) {
@@ -217,12 +229,19 @@ public class ImportazioneCartelle {
         return riepilogo.importazione(file.size());
     }
 
-    /** Le foto e i video sotto {@code base}, fuori dall'archivio, in ordine. */
-    private List<Path> media(Path base) throws IOException {
+    /**
+     * Le foto e i video sotto {@code base}, fuori dall'archivio, in ordine.
+     * Riferisce a {@code avanzamento} i file trovati mentre cammina e si
+     * ferma se lo si annulla.
+     */
+    private List<Path> media(Path base, Avanzamento avanzamento) throws IOException {
+        int[] trovati = {0};
         try (Stream<Path> s = Files.walk(base)) {
-            return s.filter(p -> !dentroArchivio(p))
+            return s.takeWhile(p -> !avanzamento.annullata())
+                    .filter(p -> !dentroArchivio(p))
                     .filter(Files::isRegularFile)
                     .filter(p -> FotoService.TIPI.containsKey(FotoService.estensione(p.getFileName().toString())))
+                    .peek(p -> avanzamento.cercando(++trovati[0], p.getParent()))
                     .sorted()
                     .toList();
         }
@@ -283,14 +302,15 @@ public class ImportazioneCartelle {
     public boolean daImportare(Path cartella, Automatica automatica) throws IOException {
         Path base = consentita(cartella);
         return Files.isDirectory(base) && !dentroArchivio(base)
-                && !scegli(base, media(base), automatica).daLeggere().isEmpty();
+                && !scegli(base, media(base, Avanzamento.NESSUNO), automatica).daLeggere().isEmpty();
     }
 
     /**
      * "Indicizza archivio": dà una scheda ai file che stanno già nell'archivio
      * ma che l'app non conosce (caricati nel cloud da fuori), senza copiarli
      * ({@link FotoService#indicizza}). Le cartelle e i file che iniziano col
-     * punto ({@code .backup}, {@code .miniature}) si saltano.
+     * punto ({@code .backup}, {@code .miniature}) si saltano. Mentre cerca i
+     * file li conta ({@link Avanzamento#cercando}); annullata, smette di cercare.
      */
     public Importazione indicizza(Avanzamento avanzamento) throws IOException {
         archivio.verificaDisponibile();
@@ -300,18 +320,27 @@ public class ImportazioneCartelle {
             Files.walkFileTree(base, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path cartella, BasicFileAttributes attributi) {
+                    if (avanzamento.annullata()) {
+                        return FileVisitResult.TERMINATE;
+                    }
                     boolean nascosta = !cartella.equals(base) && cartella.getFileName().toString().startsWith(".");
-                    return nascosta || cartella.equals(archivio.cartellaMiniature())
-                            ? FileVisitResult.SKIP_SUBTREE
-                            : FileVisitResult.CONTINUE;
+                    if (nascosta || cartella.equals(archivio.cartellaMiniature())) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    avanzamento.cercando(file.size(), cartella);
+                    return FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult visitFile(Path p, BasicFileAttributes attributi) {
+                    if (avanzamento.annullata()) {
+                        return FileVisitResult.TERMINATE;
+                    }
                     String nome = p.getFileName().toString();
                     if (attributi.isRegularFile() && !nome.startsWith(".")
                             && FotoService.TIPI.containsKey(FotoService.estensione(nome))) {
                         file.add(p);
+                        avanzamento.cercando(file.size(), p.getParent());
                     }
                     return FileVisitResult.CONTINUE;
                 }

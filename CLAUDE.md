@@ -236,6 +236,10 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   mentre è in corso, ogni minuto altrimenti, per vedere quelle automatiche).
 - `ImportazioneCartelle.importa` resta sincrona e riceve un `Avanzamento`
   (avanzamento e annullamento): i test la usano direttamente.
+- Prima di `inizio` c'è la ricerca dei file (sul cloud anche un'ora):
+  `Avanzamento.cercando` riferisce i trovati e la cartella, lo stato ha
+  `ricerca` e `cercaIn` e il riquadro dice "Cerco i file… N trovati". Annulla
+  ferma anche la ricerca (`TERMINATE`, o `takeWhile` in `importa`).
 - La cartella automatica (`fototimeline.importazione-automatica.cartella`) la
   controlla un `@Scheduled`: solo col cloud montato e nessuna importazione in
   corso; importa spostando, con le sottocartelle come album.

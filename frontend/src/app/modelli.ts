@@ -156,6 +156,10 @@ export interface LavoroImportazione {
   saltate?: number;
   /** Solo cartella automatica: file ancora in copia, lasciati al giro dopo. */
   inArrivo?: number;
+  /** Si stanno ancora cercando i file: `trovate` sono quelli trovati finora. */
+  ricerca?: boolean;
+  /** Durante la ricerca, la cartella dove si è arrivati (relativa a `cartella`). */
+  cercaIn?: string;
 }
 
 /** Un file della cartella automatica fallito per colpa sua: non si rilegge finché non cambia. */
