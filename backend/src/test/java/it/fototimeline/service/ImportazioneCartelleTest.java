@@ -6,8 +6,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.imageio.IIOException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -15,6 +25,8 @@ import org.mockito.Mockito;
 
 import it.fototimeline.cloud.ArchivioNonDisponibile;
 import it.fototimeline.cloud.Cloud;
+import it.fototimeline.service.Risultati.Caricamento;
+import it.fototimeline.service.Risultati.Esito;
 
 class ImportazioneCartelleTest {
 
@@ -137,6 +149,165 @@ class ImportazioneCartelleTest {
         assertThat(annullato.inizio).isEqualTo(-1);
         assertThat(esito.trovate()).isEqualTo(2);
         assertThat(telefono.resolve("album0/a.jpg")).exists();
+    }
+
+    @Test
+    void annullareAMetaNonCominciaFileNuoviEAspettaQuelliInCorso() throws Exception {
+        Path foto = archivioCon(20);
+        FotoService fotoService = Mockito.mock(FotoService.class);
+        CountDownLatch cominciati = new CountDownLatch(3);
+        CountDownLatch via = new CountDownLatch(1);
+        AtomicInteger letti = new AtomicInteger();
+        Mockito.when(fotoService.indicizza(Mockito.any())).thenAnswer(inv -> {
+            letti.incrementAndGet();
+            cominciati.countDown();
+            assertThat(via.await(10, TimeUnit.SECONDS)).isTrue();
+            return new Caricamento(inv.<Path>getArgument(0).getFileName().toString(), Esito.CARICATA, null, null);
+        });
+        var importazione = new ImportazioneCartelle(fotoService, archivio(cloudMontato(true)),
+                new ArchivioProperties(foto, disco.resolve("miniature"), 0, disco.resolve("cloud")),
+                new IndicizzazioneProperties(3, Duration.ofMillis(1)));
+        AtomicBoolean annullata = new AtomicBoolean();
+        AtomicInteger fatte = new AtomicInteger();
+        var avanzamento = new ImportazioneCartelle.Avanzamento() {
+            @Override
+            public void fatta(Path file, Caricamento esito, boolean rimossa) {
+                fatte.incrementAndGet();
+            }
+
+            @Override
+            public boolean annullata() {
+                return annullata.get();
+            }
+        };
+
+        var lavoro = CompletableFuture.supplyAsync(() -> {
+            try {
+                return importazione.indicizza(avanzamento);
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        });
+        // Tre file insieme, fermi dentro la lettura.
+        assertThat(cominciati.await(10, TimeUnit.SECONDS)).isTrue();
+        annullata.set(true);
+        // Annullata, ma i tre in corso non sono finiti: si aspettano.
+        assertThat(lavoro).isNotDone();
+        via.countDown();
+        var esito = lavoro.get(10, TimeUnit.SECONDS);
+
+        assertThat(letti).hasValue(3);
+        assertThat(fatte).hasValue(3);
+        assertThat(esito.trovate()).isEqualTo(20);
+        assertThat(esito.importate()).isEqualTo(3);
+    }
+
+    @Test
+    void inParalleloContaTuttoGiusto() throws Exception {
+        Path foto = archivioCon(300);
+        FotoService fotoService = Mockito.mock(FotoService.class);
+        Map<Path, AtomicInteger> letture = new ConcurrentHashMap<>();
+        AtomicInteger insieme = new AtomicInteger();
+        AtomicInteger massimo = new AtomicInteger();
+        Mockito.when(fotoService.indicizza(Mockito.any())).thenAnswer(inv -> {
+            Path p = inv.getArgument(0);
+            letture.computeIfAbsent(p, k -> new AtomicInteger()).incrementAndGet();
+            massimo.accumulateAndGet(insieme.incrementAndGet(), Math::max);
+            try {
+                int i = Integer.parseInt(p.getFileName().toString().replaceAll("\\D", ""));
+                Esito e = i % 3 == 0 ? Esito.CARICATA : i % 3 == 1 ? Esito.DUPLICATA : Esito.ERRORE;
+                return new Caricamento(p.getFileName().toString(), e, null, e == Esito.ERRORE ? "Formato non supportato" : null);
+            } finally {
+                insieme.decrementAndGet();
+            }
+        });
+        var importazione = new ImportazioneCartelle(fotoService, archivio(cloudMontato(true)),
+                new ArchivioProperties(foto, disco.resolve("miniature"), 0, disco.resolve("cloud")),
+                new IndicizzazioneProperties(3, Duration.ofMillis(1)));
+        AtomicInteger fatte = new AtomicInteger();
+        var avanzamento = new ImportazioneCartelle.Avanzamento() {
+            @Override
+            public void fatta(Path file, Caricamento esito, boolean rimossa) {
+                fatte.incrementAndGet();
+            }
+        };
+
+        var esito = importazione.indicizza(avanzamento);
+
+        assertThat(esito.trovate()).isEqualTo(300);
+        assertThat(esito.importate()).isEqualTo(100);
+        assertThat(esito.duplicate()).isEqualTo(100);
+        assertThat(esito.errori()).isEqualTo(100);
+        assertThat(esito.messaggi()).hasSize(50).isSorted();
+        assertThat(fatte).hasValue(300);
+        // Ogni file letto una volta sola, mai più di tre insieme.
+        assertThat(letture).hasSize(300).allSatisfy((p, n) -> assertThat(n).hasValue(1));
+        assertThat(massimo.get()).isLessThanOrEqualTo(3);
+    }
+
+    @Test
+    void unErroreDiLetturaSiRiprovaUnaVoltaQuelliDelFileNo() throws Exception {
+        Path foto = archivioCon(0);
+        Files.createDirectories(foto.resolve("2015/11/01"));
+        for (String n : List.of("torna.jpg", "rotta.jpg", "sparita.jpg")) {
+            Files.write(foto.resolve("2015/11/01/" + n), new byte[] {1});
+        }
+        FotoService fotoService = Mockito.mock(FotoService.class);
+        Map<String, AtomicInteger> letture = new ConcurrentHashMap<>();
+        Mockito.when(fotoService.indicizza(Mockito.any())).thenAnswer(inv -> {
+            String nome = inv.<Path>getArgument(0).getFileName().toString();
+            int volta = letture.computeIfAbsent(nome, k -> new AtomicInteger()).incrementAndGet();
+            return switch (nome) {
+                // Il cloud non risponde la prima volta, poi sì.
+                case "torna.jpg" -> volta == 1
+                        ? new Caricamento(nome, Esito.ERRORE, null, "File illeggibile (Input/output error)")
+                        : new Caricamento(nome, Esito.CARICATA, null, null);
+                case "rotta.jpg" -> new Caricamento(nome, Esito.ERRORE, null, "Immagine illeggibile (troncata)");
+                default -> new Caricamento(nome, Esito.ERRORE, null, "File illeggibile (Input/output error)");
+            };
+        });
+        var importazione = new ImportazioneCartelle(fotoService, archivio(cloudMontato(true)),
+                new ArchivioProperties(foto, disco.resolve("miniature"), 0, disco.resolve("cloud")),
+                new IndicizzazioneProperties(3, Duration.ofMillis(1)));
+
+        var esito = importazione.indicizza(ImportazioneCartelle.Avanzamento.NESSUNO);
+
+        assertThat(letture.get("torna.jpg")).hasValue(2);
+        assertThat(letture.get("rotta.jpg")).hasValue(1);
+        // Una volta sola: alla seconda resta un errore.
+        assertThat(letture.get("sparita.jpg")).hasValue(2);
+        assertThat(esito.importate()).isEqualTo(1);
+        assertThat(esito.errori()).isEqualTo(2);
+    }
+
+    @Test
+    void gliErroriDiLetturaNonSonoErroriDelFile() {
+        String io = FotoService.illeggibile(new IOException("Input/output error"));
+        assertThat(io).isEqualTo("File illeggibile (Input/output error)");
+        assertThat(FotoService.erroreDiLettura(io)).isTrue();
+        // La cartella automatica non lo ricorda: al giro dopo si rilegge.
+        assertThat(FotoService.erroreDelFile(io)).isFalse();
+        assertThat(FotoService.erroreDiLettura("Immagine illeggibile (troncata)")).isFalse();
+        assertThat(FotoService.erroreDiLettura(FotoService.CIFRATO_LIFETIME)).isFalse();
+
+        // ImageIO avvolge l'errore del mount: è di lettura lo stesso.
+        assertThat(FotoService.letturaNonRiuscita(new IIOException("Error reading", new IOException("Input/output error"))))
+                .isTrue();
+        assertThat(FotoService.letturaNonRiuscita(new java.nio.file.FileSystemException("/cloud/a.jpg"))).isTrue();
+        assertThat(FotoService.letturaNonRiuscita(new IIOException("Unsupported Image Type"))).isFalse();
+        assertThat(FotoService.letturaNonRiuscita(new IOException("Nessun lettore per questa immagine"))).isFalse();
+    }
+
+    /** Un archivio con {@code quanti} file finti in 2015/11/01 (f000.jpg, f001.jpg, ...). */
+    private Path archivioCon(int quanti) throws IOException {
+        Path foto = Files.createDirectories(disco.resolve("cloud/FotoTimeline"));
+        if (quanti > 0) {
+            Path cartella = Files.createDirectories(foto.resolve("2015/11/01"));
+            for (int i = 0; i < quanti; i++) {
+                Files.write(cartella.resolve("f%03d.jpg".formatted(i)), new byte[] {1});
+            }
+        }
+        return foto;
     }
 
     /** Segna quello che riferisce la ricerca; si annulla al file numero {@code annullaA} o a {@code inizio}. */

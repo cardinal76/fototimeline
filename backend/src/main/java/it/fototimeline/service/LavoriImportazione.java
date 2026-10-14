@@ -189,7 +189,11 @@ public class LavoriImportazione {
         return Optional.ofNullable(ultimo.get()).map(Lavoro::stato);
     }
 
-    /** Ferma l'importazione in corso dopo la foto che sta facendo, o subito se sta ancora cercando i file. */
+    /**
+     * Ferma l'importazione in corso: nessun file nuovo, quelli già cominciati
+     * (fino a {@code fototimeline.indicizzazione.paralleli}) finiscono. Se sta
+     * ancora cercando i file, subito.
+     */
     public boolean annulla() {
         Lavoro lavoro = ultimo.get();
         if (lavoro == null || !lavoro.inCorso()) {
@@ -274,7 +278,10 @@ public class LavoriImportazione {
         esecutore.shutdown();
     }
 
-    /** Stato mutabile di un lavoro; lo legge l'API mentre il thread di importazione lo aggiorna. */
+    /**
+     * Stato mutabile di un lavoro; lo legge l'API mentre i thread
+     * dell'importazione (più d'uno: un file ciascuno) lo aggiornano.
+     */
     private final class Lavoro implements Avanzamento, LuoghiService.Avanzamento {
         private final String id = UUID.randomUUID().toString();
         private final String cartella;
@@ -347,6 +354,10 @@ public class LavoriImportazione {
             }
             if (origine == Origine.AUTOMATICA && fatte % 250 == 0) {
                 log.info("Importazione automatica: {} di {} ({} nuove, {} già presenti, {} errori)", fatte, trovate,
+                        importate, duplicate, errori);
+            }
+            if (origine == Origine.INDICIZZAZIONE && fatte % 1000 == 0) {
+                log.info("Indicizzazione: {} di {} ({} nuove, {} già presenti, {} errori)", fatte, trovate,
                         importate, duplicate, errori);
             }
         }

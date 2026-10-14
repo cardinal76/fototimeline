@@ -29,7 +29,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FileScartato;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.ArchivioFile;
+import it.fototimeline.service.ArchivioProperties;
 import it.fototimeline.service.ImportazioneCartelle;
+import it.fototimeline.service.IndicizzazioneProperties;
 import it.fototimeline.service.ImportazioneCartelle.Automatica;
 import it.fototimeline.service.ImportazioneCartelle.Avanzamento;
 import it.fototimeline.service.MemoriaImportazione;
@@ -51,6 +54,12 @@ class ImportazioneAutomaticaTest {
 
     @Autowired
     ImportazioneCartelle importazione;
+
+    @Autowired
+    ArchivioFile archivioFile;
+
+    @Autowired
+    ArchivioProperties proprieta;
 
     @Autowired
     MemoriaImportazione memoria;
@@ -181,7 +190,10 @@ class ImportazioneAutomaticaTest {
             }
         };
 
-        Importazione esito = importa(regole(), registro);
+        // Un file alla volta: il secondo sparisce dopo il primo, prima di leggerlo.
+        Importazione esito = new ImportazioneCartelle(service, archivioFile, proprieta,
+                new IndicizzazioneProperties(1, Duration.ZERO))
+                .importa(telefono, false, true, registro, file -> null, regole());
 
         assertThat(esito.errori()).isZero();
         assertThat(esito.importate()).isEqualTo(1);
@@ -275,13 +287,13 @@ class ImportazioneAutomaticaTest {
         }
 
         @Override
-        public void fatta(Path file, Caricamento esito, boolean rimossa) {
+        public synchronized void fatta(Path file, Caricamento esito, boolean rimossa) {
             lette.add(file.getFileName().toString());
             assertThat(esito.esito()).isIn(Esito.CARICATA, Esito.DUPLICATA, Esito.ERRORE);
         }
 
         @Override
-        public void sparita(Path file) {
+        public synchronized void sparita(Path file) {
             sparite.add(file.getFileName().toString());
         }
     }
