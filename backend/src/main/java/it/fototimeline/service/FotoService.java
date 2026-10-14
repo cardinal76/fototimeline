@@ -3,6 +3,7 @@ package it.fototimeline.service;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
@@ -23,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -96,6 +98,69 @@ public class FotoService {
     public static boolean erroreDelFile(String messaggio) {
         return messaggio != null && (messaggio.equals(CIFRATO_LIFETIME) || messaggio.startsWith("Formato non supportato")
                 || messaggio.startsWith("Immagine illeggibile") || messaggio.startsWith("Video illeggibile"));
+    }
+
+    /**
+     * L'inizio del messaggio quando il file non si riesce a leggere (il cloud
+     * montato che non risponde: "Input/output error"). Non è un errore del
+     * file: chi importa lo riprova ({@link ImportazioneCartelle}) e la
+     * cartella automatica non lo ricorda.
+     */
+    public static final String ILLEGGIBILE = "File illeggibile";
+
+    /** True se l'errore è di lettura ({@link #ILLEGGIBILE}): riprovando può andare. */
+    public static boolean erroreDiLettura(String messaggio) {
+        return messaggio != null && messaggio.startsWith(ILLEGGIBILE + " (");
+    }
+
+    /** Il messaggio di un errore di lettura. */
+    public static String illeggibile(Throwable e) {
+        return ILLEGGIBILE + " (" + e.getMessage() + ")";
+    }
+
+    /**
+     * True se dietro l'eccezione c'è il disco (o il cloud montato) che non ha
+     * dato il file, non il suo contenuto: ImageIO e Thumbnailator avvolgono
+     * l'"Input/output error" del mount in eccezioni loro.
+     */
+    static boolean letturaNonRiuscita(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof FileSystemException
+                    || t instanceof IOException && t.getMessage() != null && t.getMessage().contains("Input/output error")) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /** Il messaggio di un'eccezione dopo la lettura: di lettura se lo è, altrimenti il suo. */
+    private static String messaggio(Exception e) {
+        return letturaNonRiuscita(e) ? illeggibile(e) : e.getMessage();
+    }
+
+    /**
+     * Le parti che prendono molta memoria o CPU, una alla volta anche quando
+     * si importano più file insieme ({@code fototimeline.indicizzazione.paralleli}):
+     * la miniatura decodifica tutta l'immagine (una foto da 48 MP sono quasi
+     * 200 MB di heap, e la JVM sul server ne ha 384), heif-convert e ffmpeg
+     * sono processi grossi. Hash, metadati e attese di rete restano in parallelo.
+     */
+    private final Semaphore pesanti = new Semaphore(1, true);
+
+    private interface Pesante<T> {
+        T fai() throws Exception;
+    }
+
+    private <T> T unaAllaVolta(Pesante<T> lavoro) throws Exception {
+        pesanti.acquireUninterruptibly();
+        try {
+            return lavoro.fai();
+        } finally {
+            pesanti.release();
+        }
     }
 
     /** Come si legge un file: le foto con Java, HEIC e video con programmi esterni (StrumentiMedia). */
@@ -238,7 +303,7 @@ public class FotoService {
         } catch (Exception e) {
             log.warn("Importazione di {} fallita", nome, e);
             archivio.elimina(foto.getId(), foto.getPercorso());
-            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+            return new Caricamento(nome, Esito.ERRORE, null, messaggio(e));
         } finally {
             eliminaSilenzioso(letto.anteprima());
         }
@@ -292,7 +357,7 @@ public class FotoService {
         } catch (Exception e) {
             log.warn("Indicizzazione di {} fallita", percorso, e);
             archivio.elimina(foto.getId(), null);
-            return new Caricamento(nome, Esito.ERRORE, null, e.getMessage());
+            return new Caricamento(nome, Esito.ERRORE, null, messaggio(e));
         } finally {
             eliminaSilenzioso(letto.anteprima());
         }
@@ -354,7 +419,7 @@ public class FotoService {
             dimensione = Files.size(file);
         } catch (IOException e) {
             log.warn("{} illeggibile: {}", nome, e.toString());
-            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "File illeggibile (" + e.getMessage() + ")"));
+            throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, illeggibile(e)));
         }
         Optional<Foto> esistente = repository.findByHash(hash);
         if (esistente.isPresent()) {
@@ -384,7 +449,11 @@ public class FotoService {
                 }
                 case HEIC -> {
                     anteprima = Files.createTempFile("fototimeline-", ".jpg");
-                    media.heicInJpeg(file, anteprima);
+                    Path jpeg = anteprima;
+                    unaAllaVolta(() -> {
+                        media.heicInJpeg(file, jpeg);
+                        return null;
+                    });
                     // heif-convert lo scrive già dritto: le dimensioni sono quelle del JPEG.
                     int[] dimensioni = dimensioni(anteprima);
                     foto.setLarghezza(dimensioni[0]);
@@ -403,7 +472,11 @@ public class FotoService {
                     foto.setLongitudine(info.longitudine());
                     conversione.prepara(foto, info);
                     anteprima = Files.createTempFile("fototimeline-", ".jpg");
-                    media.fotogramma(file, info.durata(), anteprima);
+                    Path jpeg = anteprima;
+                    unaAllaVolta(() -> {
+                        media.fotogramma(file, info.durata(), jpeg);
+                        return null;
+                    });
                     data = info.ripresoIl();
                 }
                 default -> throw new IllegalStateException(genere.name());
@@ -414,6 +487,10 @@ public class FotoService {
         } catch (Exception e) {
             eliminaSilenzioso(anteprima);
             log.warn("{} illeggibile: {}", nome, e.toString());
+            if (letturaNonRiuscita(e)) {
+                // Il cloud che non ha dato il file, non il file rotto: non è un errore del file.
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, illeggibile(e)));
+            }
             throw new Scartato(new Caricamento(nome, Esito.ERRORE, null,
                     (genere == Genere.VIDEO ? "Video illeggibile" : "Immagine illeggibile")
                             + (e.getMessage() != null ? " (" + e.getMessage() + ")" : "")));
@@ -432,7 +509,14 @@ public class FotoService {
     }
 
     /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
-    private void anteprime(Letto letto, Path file) throws IOException {
+    private void anteprime(Letto letto, Path file) throws Exception {
+        unaAllaVolta(() -> {
+            faiAnteprime(letto, file);
+            return null;
+        });
+    }
+
+    private void faiAnteprime(Letto letto, Path file) throws IOException {
         Path anteprima = letto.anteprima();
         archivio.creaMiniatura(letto.foto().getId(), anteprima != null ? anteprima : file, anteprima == null);
         if (letto.genere() == Genere.HEIC) {
@@ -650,6 +734,19 @@ public class FotoService {
     }
 
     private void rifaiAnteprime(Foto foto) {
+        try {
+            unaAllaVolta(() -> {
+                faiDiNuovoAnteprime(foto);
+                return null;
+            });
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void faiDiNuovoAnteprime(Foto foto) {
         Path originale = fileOriginale(foto);
         Path anteprima = null;
         try {

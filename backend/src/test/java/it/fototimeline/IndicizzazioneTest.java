@@ -3,6 +3,7 @@ package it.fototimeline;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.argThat;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -14,7 +15,9 @@ import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -34,6 +37,8 @@ import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.ArchivioProperties;
+import it.fototimeline.service.EstrattoreMetadati;
+import it.fototimeline.service.IndicizzazioneProperties;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneCartelle;
 import it.fototimeline.service.ImportazioneCartelle.Avanzamento;
@@ -69,6 +74,10 @@ class IndicizzazioneTest {
 
     @Autowired
     ArchivioFile archivioFile;
+
+    /** Spia: nel test delle copie identiche le due letture si aspettano prima di salvare. */
+    @MockitoSpyBean
+    EstrattoreMetadati estrattore;
 
     @Autowired
     ArchivioProperties proprieta;
@@ -264,6 +273,138 @@ class IndicizzazioneTest {
         // Il cammino si è fermato lì: il terzo file non l'ha nemmeno trovato.
         assertThat(totale[0]).isEqualTo(2);
         assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void conTreFileInsiemeGliStessiEsitiDiUnoAllaVolta() throws Exception {
+        prepara();
+        Importazione uno = indicizza(1);
+        Risultato primo = risultato();
+        svuota();
+        prepara();
+        Importazione tre = indicizza(3);
+        Risultato secondo = risultato();
+
+        assertThat(uno.trovate()).isEqualTo(48);
+        assertThat(uno.importate()).isEqualTo(45);
+        assertThat(uno.duplicate()).isEqualTo(2);
+        assertThat(uno.errori()).isEqualTo(1);
+        assertThat(tre).usingRecursiveComparison().isEqualTo(uno);
+        assertThat(secondo).isEqualTo(primo);
+        // Tre file diversi con lo stesso nome nello stesso giorno, due arrivati spostandoli: nessuno sovrascritto.
+        assertThat(secondo.percorsi()).contains("2019/03/08/x.png", "2019/03/08/x (2).png", "2019/03/08/x (3).png");
+        assertThat(secondo.percorsi()).contains("2021/07/14/con-exif.jpg");
+        assertThat(archivio.resolve("Da sistemare")).doesNotExist();
+    }
+
+    /** Quello che resta dopo un'indicizzazione, senza dipendere da quale copia identica è arrivata prima. */
+    record Risultato(List<String> percorsi, List<String> hash, long fileSuDisco, long miniature) {
+    }
+
+    /** Le miniature delle schede che ci sono: quelle dei file senza scheda (rotti, perdenti) non devono restare. */
+    private long miniature() throws IOException {
+        try (Stream<Path> s = Files.list(archivio.resolve(".miniature"))) {
+            return s.map(p -> p.getFileName().toString()).filter(n -> n.endsWith(".jpg"))
+                    .filter(n -> repository.existsById(n.substring(0, n.length() - 4))).count();
+        }
+    }
+
+    private long miniatureSuDisco() throws IOException {
+        try (Stream<Path> s = Files.list(archivio.resolve(".miniature"))) {
+            return s.filter(p -> p.getFileName().toString().endsWith(".jpg")).count();
+        }
+    }
+
+    private Risultato risultato() throws IOException {
+        List<Foto> tutte = repository.findAll();
+        for (Foto f : tutte) {
+            assertThat(service.fileOriginale(f)).exists();
+        }
+        // Delle copie identiche resta un percorso qualunque: si confrontano gli altri.
+        List<String> percorsi = tutte.stream().map(Foto::getPercorso).filter(p -> !p.contains("/uguale")).sorted().toList();
+        List<String> hash = tutte.stream().map(Foto::getHash).sorted().toList();
+        assertThat(hash).doesNotHaveDuplicates();
+        long fileSuDisco;
+        try (Stream<Path> s = Files.walk(archivio)) {
+            fileSuDisco = s.filter(Files::isRegularFile).filter(p -> !p.startsWith(archivio.resolve(".miniature"))).count();
+        }
+        return new Risultato(percorsi, hash, fileSuDisco, miniature());
+    }
+
+    /**
+     * 48 file: 40 foto diverse già al loro posto, tre copie identiche, una
+     * rotta, una con l'EXIF di un altro giorno e due "x.png" diverse da
+     * spostare nel giorno dove c'è già una terza "x.png".
+     */
+    private static void prepara() throws IOException {
+        for (int i = 0; i < 40; i++) {
+            scrivi("2024/05/%02d/foto%02d.png".formatted(1 + i % 28, i), immagine(new Color(i * 6, 255 - i * 6, i * 3), "png"));
+        }
+        byte[] uguale = immagine(Color.PINK, "png");
+        scrivi("2023/01/01/uguale.png", uguale);
+        scrivi("2023/01/02/uguale.png", uguale);
+        scrivi("2023/01/03/uguale.png", uguale);
+        scrivi("2023/01/04/rotta.jpg", "non è un JPEG".getBytes());
+        scrivi("2024/01/01/con-exif.jpg", IndicizzazioneTest.class.getResourceAsStream("/con-exif.jpg").readAllBytes());
+        Instant marzo = Instant.parse("2019-03-08T10:00:00Z");
+        scrivi("2019/03/08/x.png", immagine(Color.CYAN, "png"));
+        Files.setLastModifiedTime(scrivi("Da sistemare/a/x.png", immagine(Color.GRAY, "png")), FileTime.from(marzo));
+        Files.setLastModifiedTime(scrivi("Da sistemare/b/x.png", immagine(Color.DARK_GRAY, "png")), FileTime.from(marzo));
+    }
+
+    @Test
+    void dueCopieIdenticheInsiemeDannoUnaSolaScheda() throws Exception {
+        byte[] png = immagine(Color.MAGENTA, "png");
+        Path prima = scrivi("2024/05/03/copia.png", png);
+        Path seconda = scrivi("2024/05/04/copia.png", png);
+        // Le due letture si aspettano dopo il controllo dell'hash e prima di salvare:
+        // nessuna delle due vede l'altra già in archivio, decide l'indice unico.
+        CyclicBarrier insieme = new CyclicBarrier(2);
+        doAnswer(inv -> {
+            insieme.await(10, TimeUnit.SECONDS);
+            return inv.callRealMethod();
+        }).when(estrattore).estrai(argThat((Path p) -> p != null && p.getFileName().toString().equals("copia.png")));
+        long miniaturePrima = miniatureSuDisco();
+
+        Importazione esito = indicizza(3);
+
+        assertThat(esito.importate()).isEqualTo(1);
+        assertThat(esito.duplicate()).isEqualTo(1);
+        assertThat(esito.errori()).isZero();
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(prima).exists();
+        assertThat(seconda).exists();
+        // La miniatura di chi ha perso non resta.
+        assertThat(miniatureSuDisco()).isEqualTo(miniaturePrima + 1);
+        assertThat(archivio.resolve(".miniature/" + repository.findAll().getFirst().getId() + ".jpg")).exists();
+    }
+
+    @Test
+    void ilRilancioNonRileggeIFileGiaIndicizzati() throws IOException {
+        List<Path> file = List.of(
+                scrivi("2024/05/03/a.jpg", immagine(Color.RED, "jpg")),
+                scrivi("2024/05/04/b.png", immagine(Color.GREEN, "png")),
+                scrivi("2024/05/05/c.png", immagine(Color.BLUE, "png")));
+        assertThat(indicizza(3).importate()).isEqualTo(3);
+        // Se si rileggessero, questi non sono più immagini: sarebbero errori o schede nuove.
+        for (Path p : file) {
+            Files.write(p, "non è più una foto".getBytes());
+        }
+        scrivi("2024/05/06/nuova.png", immagine(Color.YELLOW, "png"));
+
+        Importazione ancora = indicizza(3);
+
+        assertThat(ancora.trovate()).isEqualTo(4);
+        assertThat(ancora.duplicate()).isEqualTo(3);
+        assertThat(ancora.importate()).isEqualTo(1);
+        assertThat(ancora.errori()).isZero();
+        assertThat(repository.count()).isEqualTo(4);
+    }
+
+    /** L'indicizzazione vera con {@code paralleli} file insieme. */
+    private Importazione indicizza(int paralleli) throws IOException {
+        return new ImportazioneCartelle(service, archivioFile, proprieta,
+                new IndicizzazioneProperties(paralleli, Duration.ofMillis(1))).indicizza(Avanzamento.NESSUNO);
     }
 
     private Importazione indicizza() throws IOException {

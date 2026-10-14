@@ -310,6 +310,18 @@ un'importazione); alla fine la timeline si ricarica.
   ogni caricamento costa poco. Una copia identica di una foto che sta già in
   un'altra cartella non diventa una seconda scheda (il file resta lì).
 - I file illeggibili finiscono tra gli errori della barra, senza fermare il resto.
+  Un errore di lettura ("File illeggibile (Input/output error)": il mount che
+  per un po' non risponde) si riprova una volta dopo
+  `FOTOTIMELINE_INDICIZZA_ATTESA_RIPROVA` (3 secondi); i file rotti, cifrati o
+  di un formato sconosciuto no. Se il mount è rimasto giù a lungo, basta
+  rilanciare: i file già fatti si saltano.
+- Legge `FOTOTIMELINE_INDICIZZA_PARALLELI` file insieme (predefinito 3), e lo
+  stesso fanno "Importa cartella" e la cartella automatica: dal cloud quasi
+  tutto il tempo di un file è attesa di rete (circa 1,3 s a file uno alla
+  volta), e così le attese si sovrappongono. Miniature, heif-convert e ffmpeg
+  restano uno alla volta, per i 384 MB della JVM. Annulla non comincia file
+  nuovi e aspetta quelli in corso. Più di 4–6 serve a poco: il collo di
+  bottiglia diventa la CPU o il WebDAV di LifetimeCloud.
 
 #### Da pCloud, in quattro passi
 

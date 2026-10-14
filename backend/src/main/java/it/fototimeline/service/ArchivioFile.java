@@ -5,11 +5,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,6 +48,17 @@ public class ArchivioFile {
     private final boolean compatibiliNellArchivio;
 
     private final Cloud cloud;
+
+    /**
+     * I nomi che un thread sta occupando in questo momento (copia o
+     * spostamento in corso). {@code Files.copy} senza REPLACE_EXISTING crea
+     * il file in modo esclusivo, ma {@code Files.move} controlla e poi
+     * rinomina: due spostamenti verso lo stesso nome, insieme, farebbero
+     * sparire un file. Con più file importati insieme
+     * ({@code fototimeline.indicizzazione.paralleli}) ogni nome si prenota
+     * qui prima: chi lo trova preso passa a "nome (2)".
+     */
+    private final Set<Path> prenotati = ConcurrentHashMap.newKeySet();
 
     public ArchivioFile(ArchivioProperties properties, Cloud cloud) {
         this(properties, cloud, null);
@@ -120,12 +134,42 @@ public class ArchivioFile {
         String pulito = nomeSicuro(nome, riserva, estensione);
         for (int n = 1; ; n++) {
             Path destinazione = cartella.resolve(conNumero(pulito, n));
+            if (!prenotati.add(destinazione)) {
+                // Lo sta scrivendo un altro thread proprio adesso.
+                continue;
+            }
             try {
                 // Senza REPLACE_EXISTING: se il nome è preso, eccezione e si prova il numero dopo.
-                Files.copy(sorgente, destinazione);
+                inCartella(cartella, () -> Files.copy(sorgente, destinazione));
                 return relativo(destinazione);
             } catch (FileAlreadyExistsException e) {
                 // Nome già preso da un'altra foto dello stesso giorno: si prova "nome (2).jpg".
+            } finally {
+                prenotati.remove(destinazione);
+            }
+        }
+    }
+
+    private interface Scrittura {
+        Object scrivi() throws IOException;
+    }
+
+    /**
+     * Scrive in una cartella appena creata, che un altro thread può togliere
+     * proprio adesso perché la trova vuota ({@link #pulisciCartelleVuote}):
+     * in quel caso la si ricrea e si riprova. Una volta scritto il file la
+     * cartella non è più vuota e nessuno la toglie.
+     */
+    private static void inCartella(Path cartella, Scrittura scrittura) throws IOException {
+        for (int tentativo = 1; ; tentativo++) {
+            try {
+                scrittura.scrivi();
+                return;
+            } catch (NoSuchFileException e) {
+                if (tentativo >= 3 || Files.isDirectory(cartella)) {
+                    throw e;
+                }
+                Files.createDirectories(cartella);
             }
         }
     }
@@ -143,13 +187,19 @@ public class ArchivioFile {
             if (destinazione.equals(origine)) {
                 return percorso;
             }
+            if (!prenotati.add(destinazione)) {
+                continue;
+            }
             try {
-                Files.move(origine, destinazione);
-                pulisciCartelleVuote(origine.getParent());
-                return relativo(destinazione);
+                inCartella(cartella, () -> Files.move(origine, destinazione));
             } catch (FileAlreadyExistsException e) {
                 // Prossimo numero.
+                continue;
+            } finally {
+                prenotati.remove(destinazione);
             }
+            pulisciCartelleVuote(origine.getParent());
+            return relativo(destinazione);
         }
     }
 

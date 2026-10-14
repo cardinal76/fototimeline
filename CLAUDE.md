@@ -249,6 +249,27 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   punto e `FotoService.indicizza` dà la scheda ai file senza, lasciandoli dove
   sono (o nella cartella del loro giorno). La lettura è la stessa di `importa`
   (`FotoService.leggi`): un cambio ai formati vale per entrambi.
+- Importazione e indicizzazione leggono `fototimeline.indicizzazione.paralleli`
+  file insieme (`FOTOTIMELINE_INDICIZZA_PARALLELI`, predefinito 3):
+  `ImportazioneCartelle.inParallelo`, N thread per lavoro che prendono il
+  file dopo da un contatore comune (annullando non ne parte nessuno nuovo,
+  quelli in corso finiscono). Quello che due file fanno insieme deve restare
+  sicuro: i doppioni li decide l'indice unico su `hash` (`DuplicateKeyException`
+  → DUPLICATA, si toglie la copia del perdente), i nomi in `ArchivioFile` si
+  prenotano (`prenotati`: `Files.move` controlla e poi rinomina, non è
+  esclusivo) e una cartella tolta da un altro thread perché vuota si ricrea
+  (`inCartella`). Miniatura, heif-convert e ffmpeg passano da
+  `FotoService.unaAllaVolta` (memoria). `Riepilogo` e `Lavoro` sono
+  sincronizzati.
+- Gli errori di lettura (`FotoService.ILLEGGIBILE`, "File illeggibile (...)":
+  il mount che non risponde) si riprovano una volta dopo
+  `attesa-riprova` e non sono `erroreDelFile`, quindi la cartella automatica
+  non li ricorda. Un'eccezione con un `FileSystemException` o un
+  "Input/output error" dentro diventa errore di lettura anche se arriva da
+  ImageIO o Thumbnailator (`letturaNonRiuscita`).
+- "Indicizza archivio" salta i file che hanno già una scheda con
+  `existsByPercorso` (indice su `percorso`) prima di aprirli: un rilancio non
+  scarica niente di quello che è già fatto.
 - Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
   entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
 

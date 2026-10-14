@@ -68,6 +68,14 @@ fototimeline:
     intervallo: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:PT15M}
     # I file modificati da meno di così aspettano il giro dopo: forse sono ancora in copia.
     attesa: ${FOTOTIMELINE_ATTESA_AUTOMATICA:PT10M}
+  # "Indicizza archivio", "Importa cartella" e cartella automatica: quanti file
+  # leggere insieme. Dal cloud montato quasi tutto il tempo è attesa di rete;
+  # miniature, heif-convert e ffmpeg restano comunque uno alla volta (memoria).
+  indicizzazione:
+    paralleli: ${FOTOTIMELINE_INDICIZZA_PARALLELI:3}
+    # Un file che non si riesce a leggere (il cloud che non risponde) si
+    # riprova una volta dopo questa attesa.
+    attesa-riprova: ${FOTOTIMELINE_INDICIZZA_ATTESA_RIPROVA:PT3S}
   # Foto nuove dai telefoni (pCloud) nella cartella automatica (i telefoni si
   # aggiungono nell'app, da admin): ogni quanto controllare se è ora di un giro.
   telefono:

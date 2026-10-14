@@ -15,12 +15,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import it.fototimeline.dominio.Foto;
@@ -37,6 +42,13 @@ import it.fototimeline.service.Risultati.Importazione;
  * impostata: sul server l'app è su internet e non deve leggere il resto del
  * disco. L'archivio e le miniature si saltano sempre, anche quando stanno
  * dentro la cartella scelta.
+ *
+ * <p>Importazione e indicizzazione leggono {@code fototimeline.indicizzazione.paralleli}
+ * file insieme ({@link #inParallelo}): dal cloud ogni file è soprattutto attesa
+ * di rete. Quello che due file possono fare nello stesso momento è al sicuro
+ * altrove: i doppioni li ferma l'indice unico su {@code hash}, i nomi dei file
+ * e le cartelle {@link ArchivioFile}, la memoria {@link FotoService} (le parti
+ * pesanti una alla volta).
  */
 @Service
 public class ImportazioneCartelle {
@@ -47,11 +59,19 @@ public class ImportazioneCartelle {
     private final FotoService fotoService;
     private final ArchivioFile archivio;
     private final Path radice;
+    private final IndicizzazioneProperties parallelismo;
 
     public ImportazioneCartelle(FotoService fotoService, ArchivioFile archivio, ArchivioProperties properties) {
+        this(fotoService, archivio, properties, IndicizzazioneProperties.PREDEFINITE);
+    }
+
+    @Autowired
+    public ImportazioneCartelle(FotoService fotoService, ArchivioFile archivio, ArchivioProperties properties,
+            IndicizzazioneProperties parallelismo) {
         this.fotoService = fotoService;
         this.archivio = archivio;
         this.radice = properties.importazione() == null ? null : properties.importazione().toAbsolutePath().normalize();
+        this.parallelismo = parallelismo;
     }
 
     /** La radice consentita, o null se si può leggere ovunque (sul PC). */
@@ -68,7 +88,12 @@ public class ImportazioneCartelle {
         return importa(cartella, albumDaCartella, sposta, Avanzamento.NESSUNO);
     }
 
-    /** Chi segue l'importazione: avanzamento e annullamento (LavoriImportazione). */
+    /**
+     * Chi segue l'importazione: avanzamento e annullamento (LavoriImportazione).
+     * {@link #fatta} e {@link #sparita} arrivano da più thread insieme
+     * ({@code fototimeline.indicizzazione.paralleli}): chi li implementa li
+     * sincronizza.
+     */
     public interface Avanzamento {
         Avanzamento NESSUNO = new Avanzamento() { };
 
@@ -173,40 +198,42 @@ public class ImportazioneCartelle {
 
         Riepilogo riepilogo = new Riepilogo();
         avanzamento.inizio(file.size());
-        for (Path p : file) {
-            if (avanzamento.annullata()) {
-                break;
-            }
-            BasicFileAttributes attr = attributi.get(p);
+        Map<Path, BasicFileAttributes> attributiScelti = attributi;
+        Set<Path> cambiateScelte = cambiate;
+        inParallelo(file, avanzamento, p -> {
+            BasicFileAttributes attr = attributiScelti.get(p);
             if (automatica != null && !Files.exists(p)) {
                 // Tolto da altri mentre si leggevano quelli prima: niente di sbagliato.
-                riepilogo.rimossi++;
+                riepilogo.rimosso();
                 avanzamento.sparita(p);
-                continue;
+                return;
             }
-            Caricamento esito;
-            try {
-                String album = albumDaCartella && !p.getParent().equals(base)
-                        ? p.getParent().getFileName().toString()
-                        : null;
-                Instant modificatoIl = attr != null ? attr.lastModifiedTime().toInstant()
-                        : Files.getLastModifiedTime(p).toInstant();
-                esito = fotoService.importa(p.getFileName().toString(), p, modificatoIl, album, caricataDa.apply(p));
-            } catch (IOException e) {
-                esito = new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, e.getMessage());
-            }
+            String album = albumDaCartella && !p.getParent().equals(base)
+                    ? p.getParent().getFileName().toString()
+                    : null;
+            Caricamento esito = conRiprova(p, avanzamento, () -> {
+                try {
+                    Instant modificatoIl = attr != null ? attr.lastModifiedTime().toInstant()
+                            : Files.getLastModifiedTime(p).toInstant();
+                    return fotoService.importa(p.getFileName().toString(), p, modificatoIl, album,
+                            caricataDa.apply(p));
+                } catch (IOException e) {
+                    return new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, FotoService.illeggibile(e));
+                }
+            });
             if (automatica != null && esito.esito() == Risultati.Esito.ERRORE) {
                 if (!Files.exists(p)) {
                     // Sparito mentre lo si leggeva: l'errore viene da lì.
-                    riepilogo.rimossi++;
+                    riepilogo.rimosso();
                     avanzamento.sparita(p);
-                    continue;
+                    return;
                 }
+                // Solo gli errori del file: uno di lettura (il cloud che non risponde) si riprova al giro dopo.
                 if (attr != null && FotoService.erroreDelFile(esito.messaggio())) {
                     automatica.memoria().ricorda(p, attr.size(), attr.lastModifiedTime().toInstant(),
                             esito.messaggio());
                 }
-            } else if (cambiate.contains(p)) {
+            } else if (cambiateScelte.contains(p)) {
                 // Era fallito, ma è cambiato e stavolta è andato.
                 automatica.memoria().dimentica(p);
             }
@@ -215,14 +242,14 @@ public class ImportazioneCartelle {
             if (sposta && esito.esito() != Risultati.Esito.ERRORE && inArchivio(esito.foto())) {
                 try {
                     Files.delete(p);
-                    riepilogo.rimossi++;
+                    riepilogo.rimosso();
                     rimossa = true;
                 } catch (IOException e) {
                     log.warn("Importata ma non riesco a togliere {}: {}", p, e.getMessage());
                 }
             }
             avanzamento.fatta(p, esito, rimossa);
-        }
+        });
         if (sposta) {
             pulisciSottocartelleVuote(base);
         }
@@ -356,18 +383,111 @@ public class ImportazioneCartelle {
 
         Riepilogo riepilogo = new Riepilogo();
         avanzamento.inizio(file.size());
-        for (Path p : file) {
-            if (avanzamento.annullata()) {
-                break;
-            }
-            Caricamento esito = fotoService.indicizza(p);
+        // Un file che ha già la scheda (stesso percorso) FotoService.indicizza lo salta prima di aprirlo.
+        inParallelo(file, avanzamento, p -> {
+            Caricamento esito = conRiprova(p, avanzamento, () -> fotoService.indicizza(p));
             riepilogo.conta(relativo(p), esito);
             avanzamento.fatta(p, esito, false);
-        }
+        });
         return riepilogo.importazione(file.size());
     }
 
-    /** I conti di un'importazione o di un'indicizzazione, file per file. */
+    /** Il lavoro su un file: gli errori del file finiscono nell'esito, un'eccezione ferma tutto. */
+    @FunctionalInterface
+    interface PerFile {
+        void fai(Path file) throws IOException;
+    }
+
+    /**
+     * Passa i file a {@code lavoro}, {@code paralleli} alla volta: altrettanti
+     * thread prendono il file dopo da un contatore comune, così non c'è coda
+     * e annullando non parte nessun file nuovo. Torna quando quelli in corso
+     * sono finiti. Se il lavoro su un file lancia (per esempio il cloud
+     * smontato a metà), gli altri thread non prendono più file e l'eccezione
+     * arriva a chi ha chiamato, come quando si andava un file alla volta.
+     */
+    void inParallelo(List<Path> file, Avanzamento avanzamento, PerFile lavoro) throws IOException {
+        int n = Math.min(parallelismo.paralleli(), file.size());
+        if (n <= 1) {
+            for (Path p : file) {
+                if (avanzamento.annullata()) {
+                    break;
+                }
+                lavoro.fai(p);
+            }
+            return;
+        }
+        AtomicInteger prossimo = new AtomicInteger();
+        AtomicReference<Throwable> errore = new AtomicReference<>();
+        AtomicBoolean fermati = new AtomicBoolean();
+        Runnable operaio = () -> {
+            while (errore.get() == null && !fermati.get() && !avanzamento.annullata()) {
+                int i = prossimo.getAndIncrement();
+                if (i >= file.size()) {
+                    return;
+                }
+                try {
+                    lavoro.fai(file.get(i));
+                } catch (Throwable t) {
+                    errore.compareAndSet(null, t);
+                    return;
+                }
+            }
+        };
+        String nome = Thread.currentThread().getName();
+        List<Thread> operai = new ArrayList<>();
+        for (int k = 1; k <= n; k++) {
+            operai.add(Thread.ofPlatform().name(nome + "-" + k).daemon().start(operaio));
+        }
+        boolean interrotto = false;
+        for (Thread t : operai) {
+            while (true) {
+                try {
+                    t.join();
+                    break;
+                } catch (InterruptedException e) {
+                    // Si smette di prendere file, ma si aspettano quelli in corso.
+                    interrotto = true;
+                    fermati.set(true);
+                }
+            }
+        }
+        if (interrotto) {
+            Thread.currentThread().interrupt();
+        }
+        switch (errore.get()) {
+            case null -> {
+            }
+            case IOException e -> throw e;
+            case RuntimeException e -> throw e;
+            case Error e -> throw e;
+            case Throwable e -> throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Un errore di lettura (il cloud montato che per un po' non risponde:
+     * "Input/output error") si riprova una volta dopo
+     * {@code fototimeline.indicizzazione.attesa-riprova}. Gli errori del file
+     * (cifrato, formato, immagine rotta) no: darebbero lo stesso errore.
+     */
+    Caricamento conRiprova(Path p, Avanzamento avanzamento, Supplier<Caricamento> lettura) {
+        Caricamento esito = lettura.get();
+        if (esito.esito() != Risultati.Esito.ERRORE || !FotoService.erroreDiLettura(esito.messaggio())
+                || avanzamento.annullata() || !Files.exists(p)) {
+            return esito;
+        }
+        log.info("{}: {}; riprovo tra {}", relativo(p), esito.messaggio(), parallelismo.attesaRiprova());
+        try {
+            Thread.sleep(parallelismo.attesaRiprova());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return esito;
+        }
+        return lettura.get();
+    }
+
+    /** I conti di un'importazione o di un'indicizzazione, file per file, da più thread. */
     private static final class Riepilogo {
         private int importate;
         private int duplicate;
@@ -375,7 +495,11 @@ public class ImportazioneCartelle {
         private int rimossi;
         private final List<String> messaggi = new ArrayList<>();
 
-        void conta(String file, Caricamento esito) {
+        synchronized void rimosso() {
+            rimossi++;
+        }
+
+        synchronized void conta(String file, Caricamento esito) {
             switch (esito.esito()) {
                 case CARICATA -> importate++;
                 case DUPLICATA -> duplicate++;
@@ -388,8 +512,9 @@ public class ImportazioneCartelle {
             }
         }
 
-        Importazione importazione(int trovate) {
-            return new Importazione(trovate, importate, duplicate, errori, rimossi, messaggi);
+        synchronized Importazione importazione(int trovate) {
+            // In ordine di percorso: con più file insieme arrivano in un ordine qualunque.
+            return new Importazione(trovate, importate, duplicate, errori, rimossi, messaggi.stream().sorted().toList());
         }
     }
 
