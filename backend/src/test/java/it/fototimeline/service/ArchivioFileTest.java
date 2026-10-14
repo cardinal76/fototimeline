@@ -113,4 +113,72 @@ class ArchivioFileTest {
         // Le cartelle svuotate dagli spostamenti sono sparite.
         assertThat(radice.resolve("2020")).doesNotExist();
     }
+
+    @Test
+    void sulloStessoDiscoSiSpostaSenzaCopiareEMaiSopraUnAltroFile() throws Exception {
+        Path radice = disco.resolve("cloud/archivio");
+        var archivio = new ArchivioFile(new ArchivioProperties(radice, disco.resolve("miniature"), 0, null), montato());
+        LocalDate giorno = LocalDate.of(2024, 5, 3);
+        Path giaLi = Files.createDirectories(radice.resolve("2024/05/03")).resolve("IMG_1.jpg");
+        Files.writeString(giaLi, "un'altra foto");
+        Path origine = Files.writeString(Files.createDirectories(disco.resolve("cloud/telefono")).resolve("IMG_1.jpg"),
+                "dal telefono");
+        Object inode = Files.getAttribute(origine, "unix:ino");
+
+        var salvato = archivio.salvaOriginale("IMG_1.jpg", "id", "jpg", giorno, origine, true);
+
+        assertThat(salvato.spostato()).isTrue();
+        assertThat(salvato.percorso()).isEqualTo("2024/05/03/IMG_1 (2).jpg");
+        assertThat(origine).doesNotExist();
+        Path destinazione = radice.resolve(salvato.percorso());
+        assertThat(destinazione).hasContent("dal telefono");
+        // Rinominato, non copiato: è lo stesso file.
+        assertThat(Files.getAttribute(destinazione, "unix:ino")).isEqualTo(inode);
+        assertThat(giaLi).hasContent("un'altra foto");
+
+        // La scheda non entra: torna dov'era.
+        archivio.rimetti(salvato.percorso(), origine);
+        assertThat(origine).hasContent("dal telefono");
+        assertThat(destinazione).doesNotExist();
+    }
+
+    @Test
+    void suDischiDiversiSiCopiaELOrigineResta() throws Exception {
+        Path radice = disco.resolve("cloud/archivio");
+        var archivio = new ArchivioFile(new ArchivioProperties(radice, disco.resolve("miniature"), 0, null), montato()) {
+            @Override
+            boolean stessoDisco(Path a, Path b) {
+                return false;
+            }
+        };
+        Path origine = Files.writeString(Files.createDirectories(disco.resolve("altrove")).resolve("IMG_2.jpg"), "foto");
+        Object inode = Files.getAttribute(origine, "unix:ino");
+
+        var salvato = archivio.salvaOriginale("IMG_2.jpg", "id", "jpg", LocalDate.of(2024, 5, 3), origine, true);
+
+        assertThat(salvato.spostato()).isFalse();
+        assertThat(salvato.percorso()).isEqualTo("2024/05/03/IMG_2.jpg");
+        // L'origine la toglie chi chiama, dopo la scheda.
+        assertThat(origine).hasContent("foto");
+        Path destinazione = radice.resolve(salvato.percorso());
+        assertThat(destinazione).hasContent("foto");
+        assertThat(Files.getAttribute(destinazione, "unix:ino")).isNotEqualTo(inode);
+    }
+
+    @Test
+    void stessoDiscoRiconosceLoStessoFileSystem() throws Exception {
+        var archivio = new ArchivioFile(new ArchivioProperties(disco.resolve("a"), disco.resolve("miniature"), 0, null),
+                montato());
+        Path uno = Files.createDirectories(disco.resolve("uno"));
+        Path due = Files.createDirectories(disco.resolve("due"));
+        assertThat(archivio.stessoDisco(uno, due)).isTrue();
+        // /proc è un altro file system.
+        assertThat(archivio.stessoDisco(uno, Path.of("/proc/self"))).isFalse();
+    }
+
+    private static Cloud montato() {
+        Cloud cloud = Mockito.mock(Cloud.class);
+        Mockito.when(cloud.disponibile()).thenReturn(true);
+        return cloud;
+    }
 }

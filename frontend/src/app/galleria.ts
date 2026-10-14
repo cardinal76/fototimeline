@@ -73,6 +73,20 @@ export class Galleria {
    * lavoro continua. Quella automatica, lunga e in sottofondo, parte così.
    */
   readonly importazioneRidotta = signal(false);
+  /**
+   * True se gira un lavoro chiesto da qualcuno (importa, indicizza, luoghi):
+   * gli altri aspettano. L'importazione automatica no: un lavoro nuovo la
+   * annulla e parte appena lei ha finito i file in corso (LavoriImportazione).
+   */
+  readonly lavoroOccupato = computed(() => {
+    const l = this.importazione();
+    return l?.stato === 'IN_CORSO' && l.origine !== 'AUTOMATICA';
+  });
+  /** True se gira l'importazione automatica (non ancora annullata). */
+  readonly automaticaInCorso = computed(() => {
+    const l = this.importazione();
+    return l?.stato === 'IN_CORSO' && l.origine === 'AUTOMATICA' && !l.annullamento;
+  });
   /** Ricerca per contenuto: null finché non si sa, attiva=false se il servizio visione non c'è. */
   readonly contenuto = signal<StatoContenuto | null>(null);
   /** I risultati sono in ordine di somiglianza, non di data: niente giorni né timeline. */

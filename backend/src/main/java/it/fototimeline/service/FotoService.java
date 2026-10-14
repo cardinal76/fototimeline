@@ -1,12 +1,11 @@
 package it.fototimeline.service;
 
 import java.io.IOException;
-import java.io.OutputStream;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -25,6 +24,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -150,16 +151,68 @@ public class FotoService {
      */
     private final Semaphore pesanti = new Semaphore(1, true);
 
-    private interface Pesante<T> {
+    interface Pesante<T> {
         T fai() throws Exception;
     }
 
-    private <T> T unaAllaVolta(Pesante<T> lavoro) throws Exception {
+    <T> T unaAllaVolta(Pesante<T> lavoro) throws Exception {
         pesanti.acquireUninterruptibly();
         try {
             return lavoro.fai();
         } finally {
             pesanti.release();
+        }
+    }
+
+    /**
+     * Come {@link #unaAllaVolta(Pesante)}, per un file di un lavoro che si
+     * può annullare: se lo annullano mentre aspetta il suo turno (gli altri
+     * file del lavoro hanno miniature e ffmpeg in corso) smette di aspettare
+     * e lancia {@link Annullata}. Il lavoro pesante, una volta cominciato, finisce.
+     */
+    private <T> T unaAllaVolta(Pesante<T> lavoro, BooleanSupplier annullata) throws Exception {
+        if (annullata == NON_ANNULLABILE) {
+            return unaAllaVolta(lavoro);
+        }
+        try {
+            while (true) {
+                if (annullata.getAsBoolean()) {
+                    throw new Annullata();
+                }
+                if (pesanti.tryAcquire(ATTESA_TURNO, TimeUnit.MILLISECONDS)) {
+                    break;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new Annullata();
+        }
+        try {
+            return lavoro.fai();
+        } finally {
+            pesanti.release();
+        }
+    }
+
+    /** Per i test: quanti file aspettano il turno per le parti pesanti. */
+    int inAttesaDelTurno() {
+        return pesanti.getQueueLength();
+    }
+
+    /** Ogni quanto chi aspetta il turno per le parti pesanti guarda se il suo lavoro è stato annullato. */
+    private static final long ATTESA_TURNO = 200;
+
+    /** Per chi non si annulla (caricamenti, Takeout): si aspetta il turno senza guardare. */
+    static final BooleanSupplier NON_ANNULLABILE = () -> false;
+
+    /**
+     * Il lavoro (importazione, indicizzazione) è stato annullato mentre il
+     * file aspettava: il file non è stato toccato (niente in archivio, niente
+     * scheda, l'origine dov'era) e non va contato.
+     */
+    public static final class Annullata extends RuntimeException {
+        public Annullata() {
+            super("Annullata", null, false, false);
         }
     }
 
@@ -264,10 +317,32 @@ public class FotoService {
      */
     public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
             MetadatiEsterni esterni) {
+        return importa(nome, file, ultimaModifica, album, caricataDa, esterni, false, NON_ANNULLABILE);
+    }
+
+    /**
+     * Per le cartelle ({@link ImportazioneCartelle}).
+     *
+     * @param sposta    true se l'origine va tolta: se sta sullo stesso disco
+     *                  dell'archivio (sul server lo stesso mount di rclone) il
+     *                  file si sposta, senza ricopiarlo ({@link ArchivioFile#salvaOriginale});
+     *                  altrimenti si copia e, entrata la scheda, si toglie. Un
+     *                  doppione resta dov'è: lo toglie chi chiama.
+     * @param annullata guardata mentre si legge l'hash e mentre si aspetta il
+     *                  turno per le parti pesanti: se diventa vera il file si
+     *                  lascia com'era e si lancia {@link Annullata}
+     */
+    public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
+            boolean sposta, BooleanSupplier annullata) {
+        return importa(nome, file, ultimaModifica, album, caricataDa, null, sposta, annullata);
+    }
+
+    private Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
+            MetadatiEsterni esterni, boolean sposta, BooleanSupplier annullata) {
         archivio.verificaDisponibile();
         Letto letto;
         try {
-            letto = leggi(nome, file);
+            letto = leggi(nome, file, annullata);
         } catch (Scartato s) {
             return s.esito;
         }
@@ -287,25 +362,57 @@ public class FotoService {
             data(foto, letto.data(), LocalDateTime.now(clock), OrigineData.CARICAMENTO);
         }
 
+        ArchivioFile.Salvato salvato = null;
         try {
-            foto.setPercorso(archivio.salvaOriginale(
-                    nome, foto.getId(), letto.estensione(), foto.getScattataIl().toLocalDate(), file));
-            anteprime(letto, file);
+            // Le anteprime prima di mettere il file in archivio, dall'origine: finché
+            // si aspetta il turno (annullabile) l'archivio non è ancora stato toccato.
+            anteprime(letto, file, annullata);
+            salvato = archivio.salvaOriginale(nome, foto.getId(), letto.estensione(),
+                    foto.getScattataIl().toLocalDate(), file, sposta);
+            foto.setPercorso(salvato.percorso());
             Foto inserita = repository.insert(foto);
+            if (sposta && !salvato.spostato()) {
+                togliOrigine(nome, file);
+            }
             segnalaConversione(foto);
             eventi.publishEvent(new FotoAggiunta(inserita.getId()));
             return new Caricamento(nome, Esito.CARICATA, inserita, null);
+        } catch (Annullata a) {
+            archivio.elimina(foto.getId(), null);
+            throw a;
         } catch (DuplicateKeyException e) {
             // Stesso file caricato in parallelo: ha vinto l'altro.
-            archivio.elimina(foto.getId(), foto.getPercorso());
+            annullaSalvataggio(foto, salvato, file);
             return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
                     "Già in archivio");
         } catch (Exception e) {
             log.warn("Importazione di {} fallita", nome, e);
-            archivio.elimina(foto.getId(), foto.getPercorso());
+            annullaSalvataggio(foto, salvato, file);
             return new Caricamento(nome, Esito.ERRORE, null, messaggio(e));
         } finally {
             eliminaSilenzioso(letto.anteprima());
+        }
+    }
+
+    /**
+     * La scheda non è entrata: via miniature e originale. Un originale
+     * spostato torna nell'origine, mai cancellato: era l'unica copia.
+     */
+    private void annullaSalvataggio(Foto foto, ArchivioFile.Salvato salvato, Path origine) {
+        if (salvato != null && salvato.spostato()) {
+            archivio.elimina(foto.getId(), null);
+            archivio.rimetti(salvato.percorso(), origine);
+        } else {
+            archivio.elimina(foto.getId(), salvato != null ? salvato.percorso() : null);
+        }
+    }
+
+    /** Dopo una copia per spostare (dischi diversi): la scheda c'è, l'origine si toglie. */
+    private static void togliOrigine(String nome, Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("Importata ma non riesco a togliere {}: {}", nome, e.getMessage());
         }
     }
 
@@ -318,6 +425,11 @@ public class FotoService {
      * AAAA/MM/GG in cui si trova, altrimenti la data di modifica del file.
      */
     public Caricamento indicizza(Path file) {
+        return indicizza(file, NON_ANNULLABILE);
+    }
+
+    /** Come {@link #indicizza(Path)}; {@code annullata} come in {@link #importa(String, Path, Instant, String, String, boolean, BooleanSupplier)}. */
+    public Caricamento indicizza(Path file, BooleanSupplier annullata) {
         archivio.verificaDisponibile();
         String nome = file.getFileName().toString();
         String percorso;
@@ -332,7 +444,7 @@ public class FotoService {
         }
         Letto letto;
         try {
-            letto = leggi(nome, file);
+            letto = leggi(nome, file, annullata);
         } catch (Scartato s) {
             // Anche una copia identica di una foto che sta altrove: il file resta dov'è, senza scheda.
             return s.esito;
@@ -347,9 +459,12 @@ public class FotoService {
             } else {
                 data(foto, letto.data(), modifica, OrigineData.FILE);
             }
-            anteprime(letto, file);
+            anteprime(letto, file, annullata);
             foto = repository.insert(foto);
             segnalaConversione(foto);
+        } catch (Annullata a) {
+            archivio.elimina(foto.getId(), null);
+            throw a;
         } catch (DuplicateKeyException e) {
             archivio.elimina(foto.getId(), null);
             return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
@@ -394,7 +509,7 @@ public class FotoService {
      * JPEG da cui fare la miniatura (e per gli HEIC la vista), null per le foto
      * normali; {@code data} quella dei metadati, se c'è.
      */
-    private Letto leggi(String nome, Path file) throws Scartato {
+    private Letto leggi(String nome, Path file, BooleanSupplier annullata) throws Scartato {
         String estensione = estensione(nome);
         Genere genere = genere(estensione);
         if (genere == null) {
@@ -402,11 +517,15 @@ public class FotoService {
         }
         String hash;
         long dimensione;
-        try {
+        // Una sola lettura dall'inizio alla fine: i primi byte dicono se è cifrato,
+        // tutto il file dà l'hash. Dal cloud è l'unico scaricamento: quello che
+        // segue (metadati, miniatura) rilegge il file dalla cache di rclone.
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] inizio = in.readNBytes(INTESTAZIONE_LCB2.length);
             // Prima di tutto (anche degli strumenti che mancano): un file cifrato resta
             // illeggibile comunque, ed è un errore del file, da ricordare; e non vale la
             // pena di scaricarlo tutto per l'hash.
-            if (cifratoLifetime(file)) {
+            if (Arrays.equals(inizio, INTESTAZIONE_LCB2)) {
                 throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, CIFRATO_LIFETIME));
             }
             if (genere == Genere.HEIC && !media.heicDisponibile()) {
@@ -415,8 +534,10 @@ public class FotoService {
             if (genere == Genere.VIDEO && !media.videoDisponibile()) {
                 throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per i video servono ffmpeg e ffprobe sul server"));
             }
-            hash = sha256(file);
-            dimensione = Files.size(file);
+            MessageDigest sha = sha256();
+            sha.update(inizio);
+            dimensione = inizio.length + aggiungi(sha, in, annullata);
+            hash = HexFormat.of().formatHex(sha.digest());
         } catch (IOException e) {
             log.warn("{} illeggibile: {}", nome, e.toString());
             throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, illeggibile(e)));
@@ -453,7 +574,7 @@ public class FotoService {
                     unaAllaVolta(() -> {
                         media.heicInJpeg(file, jpeg);
                         return null;
-                    });
+                    }, annullata);
                     // heif-convert lo scrive già dritto: le dimensioni sono quelle del JPEG.
                     int[] dimensioni = dimensioni(anteprima);
                     foto.setLarghezza(dimensioni[0]);
@@ -476,7 +597,7 @@ public class FotoService {
                     unaAllaVolta(() -> {
                         media.fotogramma(file, info.durata(), jpeg);
                         return null;
-                    });
+                    }, annullata);
                     data = info.ripresoIl();
                 }
                 default -> throw new IllegalStateException(genere.name());
@@ -484,6 +605,9 @@ public class FotoService {
             // Dal GPS il nome del luogo: in memoria, niente rete.
             luoghi.applica(foto);
             return new Letto(foto, genere, estensione, anteprima, data);
+        } catch (Annullata a) {
+            eliminaSilenzioso(anteprima);
+            throw a;
         } catch (Exception e) {
             eliminaSilenzioso(anteprima);
             log.warn("{} illeggibile: {}", nome, e.toString());
@@ -509,11 +633,11 @@ public class FotoService {
     }
 
     /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
-    private void anteprime(Letto letto, Path file) throws Exception {
+    private void anteprime(Letto letto, Path file, BooleanSupplier annullata) throws Exception {
         unaAllaVolta(() -> {
             faiAnteprime(letto, file);
             return null;
-        });
+        }, annullata);
     }
 
     private void faiAnteprime(Letto letto, Path file) throws IOException {
@@ -977,19 +1101,29 @@ public class FotoService {
         }
     }
 
-    /** I primi byte sono {@code LCB2}: cifrato da LifetimeCloud. */
-    static boolean cifratoLifetime(Path file) throws IOException {
-        try (var in = Files.newInputStream(file)) {
-            return Arrays.equals(in.readNBytes(INTESTAZIONE_LCB2.length), INTESTAZIONE_LCB2);
-        }
-    }
-
-    private static String sha256(Path file) throws IOException {
-        try (var in = new DigestInputStream(Files.newInputStream(file), MessageDigest.getInstance("SHA-256"))) {
-            in.transferTo(OutputStream.nullOutputStream());
-            return HexFormat.of().formatHex(in.getMessageDigest().digest());
+    private static MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * Passa il resto di {@code in} a {@code sha} e dice quanti byte erano. Un
+     * video dal cloud sono minuti: fra un pezzo e l'altro guarda se il lavoro
+     * è stato annullato ({@link Annullata}; il file non è stato toccato).
+     */
+    private static long aggiungi(MessageDigest sha, InputStream in, BooleanSupplier annullata) throws IOException {
+        byte[] pezzo = new byte[64 * 1024];
+        long letti = 0;
+        for (int n; (n = in.read(pezzo)) >= 0; ) {
+            if (annullata.getAsBoolean()) {
+                throw new Annullata();
+            }
+            sha.update(pezzo, 0, n);
+            letti += n;
+        }
+        return letti;
     }
 }

@@ -142,7 +142,7 @@
             {{ l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
             {{ percentualeImportazione() }}%
           } @else {
-            {{ nomeLavoro(l) }} {{ l.stato === 'FALLITA' ? 'non riuscita' : 'finita' }}
+            {{ nomeLavoro(l) }} {{ l.stato === 'FALLITA' ? 'non riuscita' : l.stato === 'ANNULLATA' ? 'annullata' : 'finita' }}
           }
           @if (l.errori) {
             · <span class="errore">{{ l.errori }} errori</span>
@@ -216,7 +216,7 @@
                 type="button"
                 class="voce"
                 role="menuitem"
-                [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+                [disabled]="galleria.lavoroOccupato()"
                 title="Aggiunge le foto messe nell'archivio da fuori (per esempio caricate nel cloud)"
                 (click)="chiudiMenu(); indicizza()"
               >
@@ -242,7 +242,7 @@
                 type="button"
                 class="voce"
                 role="menuitem"
-                [disabled]="galleria.importazione()?.stato === 'IN_CORSO'"
+                [disabled]="galleria.lavoroOccupato()"
                 [title]="(galleria.luoghi()?.daCalcolare ?? 0) + ' foto col GPS senza luogo: il nome del luogo dalle coordinate (GeoNames)'"
                 (click)="chiudiMenu(); calcolaLuoghi()"
               >
@@ -557,7 +557,11 @@
       </b>
       <span class="azioni">
         @if (l.stato === 'IN_CORSO') {
-          <button type="button" class="link" (click)="galleria.annullaImportazione()">Annulla</button>
+          @if (l.annullamento) {
+            <span class="tenue">Annullo…</span>
+          } @else {
+            <button type="button" class="link" (click)="galleria.annullaImportazione()">Annulla</button>
+          }
           <button
             type="button"
             class="link riduci"
@@ -573,7 +577,9 @@
     @let cerca = l.stato === 'IN_CORSO' && !!l.ricerca;
     <!-- Mentre cerca i file il totale non si sa: senza valore la barra è indeterminata. -->
     <progress [attr.value]="cerca ? null : percentualeImportazione()" max="100"></progress>
-    @if (cerca) {
+    @if (l.stato === 'IN_CORSO' && l.inAttesa) {
+      <p>Aspetto che l'importazione automatica finisca i file già cominciati, poi parto.</p>
+    } @else if (cerca) {
       <p>
         Cerco i file… {{ l.trovate | number }} trovati
         @if (l.cercaIn) {
@@ -610,6 +616,9 @@
           · <span title="Ancora in copia dal telefono: entrano al giro dopo">{{ l.inArrivo }} in copia</span>
         }
       </p>
+    }
+    @if (l.stato === 'IN_CORSO' && l.annullamento) {
+      <p class="tenue">Annullato: finiscono i file già cominciati, poi si ferma. Quelli non fatti restano dove sono.</p>
     }
     @if (l.errore) {
       <p class="errore">{{ l.errore }}</p>
@@ -731,15 +740,17 @@
           quando il cloud è montato.
         </p>
       }
-      @if (galleria.importazione()?.stato === 'IN_CORSO') {
+      @if (galleria.lavoroOccupato()) {
         <p class="errore">C'è già un'importazione in corso: aspetta che finisca.</p>
+      } @else if (galleria.automaticaInCorso()) {
+        <p class="tenue">L'importazione automatica in corso si ferma (finisce i file già cominciati) e riprende al giro dopo.</p>
       }
       <div class="piede">
         <button type="button" (click)="chiudiImporta()">Chiudi</button>
         <button
           type="submit"
           class="primario"
-          [disabled]="importando() || !cartellaAperta() || galleria.importazione()?.stato === 'IN_CORSO'"
+          [disabled]="importando() || !cartellaAperta() || galleria.lavoroOccupato()"
         >
           {{ sposta ? 'Importa e sposta' : 'Importa' }}
         </button>

@@ -9,8 +9,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -60,11 +62,16 @@ public class LavoriImportazione {
      * tranne LUOGHI): intanto {@code trovate} conta quelli trovati finora e
      * {@code cercaIn} è la cartella dove si è arrivati, relativa a
      * {@code cartella}. Poi {@code trovate} è il totale da fare.
+     *
+     * <p>{@code annullamento}: Annulla è stato premuto e il lavoro sta finendo
+     * i file già cominciati (nessuno nuovo). {@code inAttesa}: il lavoro
+     * aspetta che l'importazione automatica, annullata per fargli posto,
+     * finisca i suoi ({@link #avvia(Path, Origine, Compito)}).
      */
     public record StatoLavoro(String id, String cartella, Origine origine, Stato stato,
             Instant iniziatoIl, Instant finitoIl, int trovate, int fatte, int importate, int duplicate,
             int errori, int rimossi, List<String> messaggi, String errore, int saltate, int inArrivo,
-            boolean ricerca, String cercaIn) {
+            boolean ricerca, String cercaIn, boolean annullamento, boolean inAttesa) {
     }
 
     private final ImportazioneCartelle importazione;
@@ -166,19 +173,37 @@ public class LavoriImportazione {
         void esegui(Lavoro lavoro) throws Exception;
     }
 
+    /**
+     * Un lavoro alla volta, sullo stesso thread. Quello chiesto da qualcuno
+     * (importa, indicizza, luoghi) ha la precedenza sull'importazione
+     * automatica, che parte da sola: se gira, la si annulla (finisce i file
+     * già cominciati, i suoi sono al sicuro nella cartella) e il lavoro nuovo
+     * parte appena lei ha finito, in coda sullo stesso thread. L'automatica
+     * riprende al primo giro dopo la fine del lavoro nuovo.
+     */
     private synchronized StatoLavoro avvia(Path cartella, Origine origine, Compito compito) {
         Lavoro attuale = ultimo.get();
+        boolean dopoLAutomatica = false;
         if (attuale != null && attuale.inCorso()) {
-            throw new IllegalStateException(switch (attuale.origine) {
-                case INDICIZZAZIONE -> "C'è un'indicizzazione dell'archivio in corso: aspetta che finisca o annullala";
-                case LUOGHI -> "Il calcolo dei luoghi è in corso: aspetta che finisca o annullalo";
-                default -> "C'è già un'importazione in corso: aspetta che finisca o annullala";
-            });
+            if (attuale.origine != Origine.AUTOMATICA || origine == Origine.AUTOMATICA) {
+                throw new IllegalStateException(switch (attuale.origine) {
+                    case INDICIZZAZIONE -> "C'è un'indicizzazione dell'archivio in corso: aspetta che finisca o annullala";
+                    case LUOGHI -> "Il calcolo dei luoghi è in corso: aspetta che finisca o annullalo";
+                    default -> "C'è già un'importazione in corso: aspetta che finisca o annullala";
+                });
+            }
+            dopoLAutomatica = true;
         }
         if (origine != Origine.LUOGHI) {
             archivio.verificaDisponibile();
         }
         Lavoro lavoro = new Lavoro(cartella.toString(), origine, clock.instant());
+        if (dopoLAutomatica) {
+            log.info("{} chiesta mentre gira l'importazione automatica: la annullo e parte appena ha finito i file in corso",
+                    origine);
+            attuale.annulla();
+            lavoro.inAttesa = true;
+        }
         ultimo.set(lavoro);
         esecutore.submit(() -> esegui(lavoro, compito));
         return lavoro.stato();
@@ -199,7 +224,7 @@ public class LavoriImportazione {
         if (lavoro == null || !lavoro.inCorso()) {
             return false;
         }
-        lavoro.annullata = true;
+        lavoro.annulla();
         return true;
     }
 
@@ -250,6 +275,7 @@ public class LavoriImportazione {
             case LUOGHI -> "Calcolo dei luoghi";
             default -> "Importazione";
         };
+        lavoro.comincia();
         try {
             compito.esegui(lavoro);
             lavoro.finisci(lavoro.annullata ? Stato.ANNULLATA : Stato.FINITA, null, clock.instant());
@@ -289,6 +315,10 @@ public class LavoriImportazione {
         private final Origine origine;
         private final Instant iniziatoIl;
         private volatile boolean annullata;
+        /** Scatta con Annulla: sveglia chi aspetta la riprova. */
+        private final CountDownLatch annullamento = new CountDownLatch(1);
+        /** In coda dietro l'importazione automatica, che sta finendo i suoi file. */
+        private boolean inAttesa;
         private boolean ricerca;
         private String cercaIn;
         private Stato stato = Stato.IN_CORSO;
@@ -314,6 +344,15 @@ public class LavoriImportazione {
 
         synchronized boolean inCorso() {
             return stato == Stato.IN_CORSO;
+        }
+
+        void annulla() {
+            annullata = true;
+            annullamento.countDown();
+        }
+
+        synchronized void comincia() {
+            inAttesa = false;
         }
 
         @Override
@@ -381,6 +420,11 @@ public class LavoriImportazione {
             return annullata;
         }
 
+        @Override
+        public boolean aspetta(Duration quanto) throws InterruptedException {
+            return annullamento.await(quanto.toNanos(), TimeUnit.NANOSECONDS);
+        }
+
         synchronized void finisci(Stato fine, String motivo, Instant quando) {
             stato = fine;
             errore = motivo;
@@ -392,7 +436,7 @@ public class LavoriImportazione {
         synchronized StatoLavoro stato() {
             return new StatoLavoro(id, importazione.relativo(Path.of(cartella)), origine, stato, iniziatoIl, finitoIl,
                     trovate, fatte, importate, duplicate, errori, rimossi, List.copyOf(messaggi), errore, saltate,
-                    inArrivo, ricerca, cercaIn);
+                    inArrivo, ricerca, cercaIn, annullata && stato == Stato.IN_CORSO, inAttesa);
         }
     }
 }

@@ -546,7 +546,7 @@ export class App {
   }
 
   protected async indicizza(): Promise<void> {
-    if (!confirm("Cerca nell'archivio le foto che l'app non conosce e le aggiunge. Può richiedere tempo.")) {
+    if (!confirm("Cerca nell'archivio le foto che l'app non conosce e le aggiunge. Può richiedere tempo." + this.fermaAutomatica())) {
       return;
     }
     try {
@@ -602,7 +602,7 @@ export class App {
   protected async calcolaLuoghi(): Promise<void> {
     const daCalcolare = this.galleria.luoghi()?.daCalcolare ?? 0;
     const tutte = daCalcolare === 0;
-    if (tutte && !confirm('Tutte le foto col GPS hanno già il luogo. Ricalcolarle tutte?')) {
+    if (tutte && !confirm('Tutte le foto col GPS hanno già il luogo. Ricalcolarle tutte?' + this.fermaAutomatica())) {
       return;
     }
     try {
@@ -669,6 +669,13 @@ export class App {
       },
       error: (e: unknown) => this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito'),
     });
+  }
+
+  /** Per le domande prima di un lavoro: se gira l'importazione automatica, che cosa le succede. */
+  protected fermaAutomatica(): string {
+    return this.galleria.automaticaInCorso()
+      ? "\n\nL'importazione automatica in corso si ferma (finisce i file già cominciati) e riprende al giro dopo."
+      : '';
   }
 
   /** Il nome breve per l'indicatore nella barra. */
