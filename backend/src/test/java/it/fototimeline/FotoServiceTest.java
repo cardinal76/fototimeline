@@ -25,6 +25,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FiltroFoto;
@@ -115,6 +116,22 @@ class FotoServiceTest {
 
         var finoAGennaio = service.cerca(new FiltroFoto(null, null, null, null, null, LocalDate.of(2024, 1, 31)), 0, 10);
         assertThat(finoAGennaio.foto()).extracting(f -> f.getGiorno()).containsExactly("2023-12-31");
+    }
+
+    @Test
+    void laTimelineSaltaLeFotoSenzaData() throws IOException {
+        importa(Color.RED, "2024-05-03T10:00:00Z");
+        var senzaData = new Foto();
+        senzaData.setNomeOriginale("senza-data.jpg");
+        senzaData.setHash("senza-data");
+        senzaData.setPercorso("senza-data.jpg");
+        senzaData = repository.save(senzaData);
+        try {
+            assertThat(senzaData.getGiorno()).isNull();
+            assertThat(service.timeline(TUTTO)).containsExactly(new VoceMese(2024, 5, 1));
+        } finally {
+            repository.delete(senzaData);
+        }
     }
 
     @Test

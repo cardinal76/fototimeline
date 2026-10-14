@@ -583,6 +583,8 @@ public class FotoService {
         return new PaginaFoto(foto, totale, pagina, (long) (pagina + 1) * dimensione < totale);
     }
 
+    private static final Pattern MESE = Pattern.compile("\\d{4}-\\d{2}");
+
     /** I mesi che hanno foto, dal più recente, con i filtri ma senza il taglio per date. */
     public List<VoceMese> timeline(FiltroFoto filtro) {
         var aggregazione = Aggregation.newAggregation(
@@ -591,7 +593,9 @@ public class FotoService {
                 Aggregation.group("mese").count().as("conteggio"),
                 Aggregation.sort(Sort.Direction.DESC, "_id"));
         return mongo.aggregate(aggregazione, Foto.class, Document.class).getMappedResults().stream()
-                .filter(d -> d.getString("_id") != null)
+                // Le foto con data sconosciuta non hanno "giorno": $substr dà "" (non null).
+                // Non hanno un mese: restano fuori dalla colonna, senza farla fallire.
+                .filter(d -> d.get("_id") instanceof String mese && MESE.matcher(mese).matches())
                 .map(d -> {
                     String[] am = d.getString("_id").split("-");
                     return new VoceMese(Integer.parseInt(am[0]), Integer.parseInt(am[1]),
