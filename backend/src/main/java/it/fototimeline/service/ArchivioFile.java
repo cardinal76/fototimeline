@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -35,6 +37,8 @@ import net.coobird.thumbnailator.Thumbnails;
  */
 @Component
 public class ArchivioFile {
+
+    private static final Logger log = LoggerFactory.getLogger(ArchivioFile.class);
 
     static final String MINIATURE = ".miniature";
     static final String COMPATIBILI = ".compatibili";
@@ -128,9 +132,32 @@ public class ArchivioFile {
     /** Copia l'originale nella cartella del giorno e restituisce il percorso relativo alla radice. */
     public String salvaOriginale(String nome, String riserva, String estensione, LocalDate giorno, Path sorgente)
             throws IOException {
+        return salvaOriginale(nome, riserva, estensione, giorno, sorgente, false).percorso();
+    }
+
+    /**
+     * Dove è finito un originale e come: {@code spostato} se la sorgente è
+     * stata spostata (non c'è più dov'era), false se è stata copiata.
+     */
+    public record Salvato(String percorso, boolean spostato) {
+    }
+
+    /**
+     * Mette l'originale nella cartella del giorno, col suo nome o con
+     * "nome (2)": mai sopra un file che c'è già.
+     *
+     * @param sposta true se la sorgente non serve più: se sta sullo stesso
+     *               disco dell'archivio ({@link #stessoDisco}) si sposta, che
+     *               sul mount di rclone è un MOVE fatto dal cloud, senza
+     *               scaricare e ricaricare il file; altrimenti si copia
+     *               (e toglie la sorgente chi chiama, dopo la scheda)
+     */
+    public Salvato salvaOriginale(String nome, String riserva, String estensione, LocalDate giorno, Path sorgente,
+            boolean sposta) throws IOException {
         cloud.verifica();
         Path cartella = radice.resolve(cartella(giorno));
         Files.createDirectories(cartella);
+        boolean sposto = sposta && stessoDisco(sorgente, cartella);
         String pulito = nomeSicuro(nome, riserva, estensione);
         for (int n = 1; ; n++) {
             Path destinazione = cartella.resolve(conNumero(pulito, n));
@@ -139,14 +166,57 @@ public class ArchivioFile {
                 continue;
             }
             try {
-                // Senza REPLACE_EXISTING: se il nome è preso, eccezione e si prova il numero dopo.
-                inCartella(cartella, () -> Files.copy(sorgente, destinazione));
-                return relativo(destinazione);
+                if (sposto) {
+                    // Senza REPLACE_EXISTING: nome preso → eccezione, e il controllo e la
+                    // rinomina non si accavallano con gli altri thread grazie a prenotati.
+                    inCartella(cartella, () -> Files.move(sorgente, destinazione));
+                } else {
+                    // Senza REPLACE_EXISTING: crea il file in modo esclusivo (CREATE_NEW).
+                    inCartella(cartella, () -> Files.copy(sorgente, destinazione));
+                }
+                return new Salvato(relativo(destinazione), sposto);
             } catch (FileAlreadyExistsException e) {
                 // Nome già preso da un'altra foto dello stesso giorno: si prova "nome (2).jpg".
             } finally {
                 prenotati.remove(destinazione);
             }
+        }
+    }
+
+    /**
+     * True se {@code a} e la cartella {@code b} stanno sullo stesso file
+     * system, dove uno spostamento è una rinomina. Sul server origine e
+     * archivio sono nello stesso mount di rclone ({@code /cloud}): la rinomina
+     * diventa un MOVE sul cloud, senza trasferire il file.
+     */
+    boolean stessoDisco(Path a, Path b) {
+        try {
+            return Files.getAttribute(a, "unix:dev").equals(Files.getAttribute(b, "unix:dev"));
+        } catch (UnsupportedOperationException | IllegalArgumentException e) {
+            try {
+                return Files.getFileStore(a).equals(Files.getFileStore(b));
+            } catch (IOException ex) {
+                return false;
+            }
+        } catch (IOException e) {
+            // Non si sa: si copia, che va bene sempre.
+            return false;
+        }
+    }
+
+    /**
+     * Rimette nell'origine un originale appena spostato nell'archivio, quando
+     * la sua scheda non è entrata (doppione o errore): mai cancellarlo, era
+     * l'unica copia. Se l'origine nel frattempo è stata presa da un altro file
+     * resta nell'archivio, dove "Indicizza archivio" lo ritrova.
+     */
+    public void rimetti(String percorso, Path origine) {
+        Path file = originale(percorso);
+        try {
+            Files.move(file, origine);
+            pulisciCartelleVuote(file.getParent());
+        } catch (IOException e) {
+            log.warn("Non riesco a rimettere {} in {}: resta nell'archivio ({})", percorso, origine, e.toString());
         }
     }
 

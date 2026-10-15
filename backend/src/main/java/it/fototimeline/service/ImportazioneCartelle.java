@@ -126,6 +126,15 @@ public class ImportazioneCartelle {
         default boolean annullata() {
             return false;
         }
+
+        /**
+         * Aspetta {@code quanto} (la riprova dopo un errore di lettura), ma
+         * smette appena il lavoro viene annullato. True se è stato annullato.
+         */
+        default boolean aspetta(Duration quanto) throws InterruptedException {
+            Thread.sleep(quanto);
+            return annullata();
+        }
     }
 
     public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta, Avanzamento avanzamento)
@@ -211,16 +220,22 @@ public class ImportazioneCartelle {
             String album = albumDaCartella && !p.getParent().equals(base)
                     ? p.getParent().getFileName().toString()
                     : null;
-            Caricamento esito = conRiprova(p, avanzamento, () -> {
-                try {
-                    Instant modificatoIl = attr != null ? attr.lastModifiedTime().toInstant()
-                            : Files.getLastModifiedTime(p).toInstant();
-                    return fotoService.importa(p.getFileName().toString(), p, modificatoIl, album,
-                            caricataDa.apply(p));
-                } catch (IOException e) {
-                    return new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, FotoService.illeggibile(e));
-                }
-            });
+            Caricamento esito;
+            try {
+                esito = conRiprova(p, avanzamento, () -> {
+                    try {
+                        Instant modificatoIl = attr != null ? attr.lastModifiedTime().toInstant()
+                                : Files.getLastModifiedTime(p).toInstant();
+                        return fotoService.importa(p.getFileName().toString(), p, modificatoIl, album,
+                                caricataDa.apply(p), sposta, avanzamento::annullata);
+                    } catch (IOException e) {
+                        return new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, FotoService.illeggibile(e));
+                    }
+                });
+            } catch (FotoService.Annullata a) {
+                // Annullata mentre aspettava: il file è dov'era, intatto, e non si conta.
+                return;
+            }
             if (automatica != null && esito.esito() == Risultati.Esito.ERRORE) {
                 if (!Files.exists(p)) {
                     // Sparito mentre lo si leggeva: l'errore viene da lì.
@@ -239,14 +254,20 @@ public class ImportazioneCartelle {
             }
             riepilogo.conta(relativo(p), esito);
             boolean rimossa = false;
-            if (sposta && esito.esito() != Risultati.Esito.ERRORE && inArchivio(esito.foto())) {
+            if (sposta && esito.esito() == Risultati.Esito.CARICATA) {
+                // Spostata nell'archivio, o copiata e tolta da FotoService dopo la scheda.
+                rimossa = !Files.exists(p);
+            } else if (sposta && esito.esito() == Risultati.Esito.DUPLICATA && inArchivio(esito.foto())) {
+                // Il contenuto c'è già: la copia nell'origine non serve.
                 try {
                     Files.delete(p);
-                    riepilogo.rimosso();
                     rimossa = true;
                 } catch (IOException e) {
-                    log.warn("Importata ma non riesco a togliere {}: {}", p, e.getMessage());
+                    log.warn("Già in archivio ma non riesco a togliere {}: {}", p, e.getMessage());
                 }
+            }
+            if (rimossa) {
+                riepilogo.rimosso();
             }
             avanzamento.fatta(p, esito, rimossa);
         });
@@ -385,7 +406,12 @@ public class ImportazioneCartelle {
         avanzamento.inizio(file.size());
         // Un file che ha già la scheda (stesso percorso) FotoService.indicizza lo salta prima di aprirlo.
         inParallelo(file, avanzamento, p -> {
-            Caricamento esito = conRiprova(p, avanzamento, () -> fotoService.indicizza(p));
+            Caricamento esito;
+            try {
+                esito = conRiprova(p, avanzamento, () -> fotoService.indicizza(p, avanzamento::annullata));
+            } catch (FotoService.Annullata a) {
+                return;
+            }
             riepilogo.conta(relativo(p), esito);
             avanzamento.fatta(p, esito, false);
         });
@@ -469,17 +495,24 @@ public class ImportazioneCartelle {
      * Un errore di lettura (il cloud montato che per un po' non risponde:
      * "Input/output error") si riprova una volta dopo
      * {@code fototimeline.indicizzazione.attesa-riprova}. Gli errori del file
-     * (cifrato, formato, immagine rotta) no: darebbero lo stesso errore.
+     * (cifrato, formato, immagine rotta) no: darebbero lo stesso errore. Se
+     * il lavoro viene annullato durante l'attesa si smette subito
+     * ({@link FotoService.Annullata}: il file non conta).
      */
     Caricamento conRiprova(Path p, Avanzamento avanzamento, Supplier<Caricamento> lettura) {
         Caricamento esito = lettura.get();
         if (esito.esito() != Risultati.Esito.ERRORE || !FotoService.erroreDiLettura(esito.messaggio())
-                || avanzamento.annullata() || !Files.exists(p)) {
+                || !Files.exists(p)) {
             return esito;
+        }
+        if (avanzamento.annullata()) {
+            throw new FotoService.Annullata();
         }
         log.info("{}: {}; riprovo tra {}", relativo(p), esito.messaggio(), parallelismo.attesaRiprova());
         try {
-            Thread.sleep(parallelismo.attesaRiprova());
+            if (avanzamento.aspetta(parallelismo.attesaRiprova())) {
+                throw new FotoService.Annullata();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return esito;

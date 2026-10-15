@@ -243,6 +243,27 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - La cartella automatica (`fototimeline.importazione-automatica.cartella`) la
   controlla un `@Scheduled`: solo col cloud montato e nessuna importazione in
   corso; importa spostando, con le sottocartelle come album.
+- Un lavoro chiesto da qualcuno (importa, indicizza, luoghi) ha la precedenza
+  sull'automatica: `LavoriImportazione.avvia` la annulla e mette il nuovo in
+  coda sullo stesso thread (`inAttesa` finché lei finisce i file in corso);
+  l'automatica riprende al giro dopo. Il frontend disabilita i lavori solo
+  con `lavoroOccupato()` (in corso e non automatico).
+- **Spostare = rinominare.** Con `sposta` `ArchivioFile.salvaOriginale` fa
+  `Files.move` se origine e archivio sono sullo stesso file system
+  (`stessoDisco`, `unix:dev`): sul server `/cloud/telefono` e
+  `/cloud/FotoTimeline` sono lo stesso mount di rclone e la rinomina è un MOVE
+  sul cloud, senza scaricare e ricaricare. Su dischi diversi copia (CREATE_NEW)
+  e `FotoService` toglie l'origine dopo la scheda. Miniature e anteprime si
+  fanno *prima*, dall'origine; se poi la scheda non entra (doppione, errore)
+  il file spostato torna nell'origine (`rimetti`), mai cancellato.
+- Per file si scarica una volta sola: hash e controllo "cifrato" nella stessa
+  lettura (`FotoService.leggi`); metadati e miniatura rileggono dalla cache del
+  VFS. "Già presente" lo decide l'hash.
+- **Annulla**: nessun file nuovo, e i file in corso smettono alle attese:
+  la lettura dell'hash, il turno di `unaAllaVolta` (`tryAcquire` che guarda
+  `annullata`) e la riprova (`Avanzamento.aspetta`, svegliata da Annulla).
+  Lì `FotoService.Annullata`: il file resta com'era e non si conta. Lo stato
+  ha `annullamento` (il riquadro dice "Annullo…").
 - "Indicizza archivio" (`POST /api/archivio/indicizza`, admin) è un lavoro
   dello stesso `LavoriImportazione` (origine `INDICIZZAZIONE`):
   `ImportazioneCartelle.indicizza` percorre l'archivio saltando le cartelle col
@@ -253,7 +274,7 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   file insieme (`FOTOTIMELINE_INDICIZZA_PARALLELI`, predefinito 3):
   `ImportazioneCartelle.inParallelo`, N thread per lavoro che prendono il
   file dopo da un contatore comune (annullando non ne parte nessuno nuovo,
-  quelli in corso finiscono). Quello che due file fanno insieme deve restare
+  quelli in corso finiscono o si fermano alla prima attesa). Quello che due file fanno insieme deve restare
   sicuro: i doppioni li decide l'indice unico su `hash` (`DuplicateKeyException`
   → DUPLICATA, si toglie la copia del perdente), i nomi in `ArchivioFile` si
   prenotano (`prenotati`: `Files.move` controlla e poi rinomina, non è

@@ -158,7 +158,7 @@ class ImportazioneCartelleTest {
         CountDownLatch cominciati = new CountDownLatch(3);
         CountDownLatch via = new CountDownLatch(1);
         AtomicInteger letti = new AtomicInteger();
-        Mockito.when(fotoService.indicizza(Mockito.any())).thenAnswer(inv -> {
+        Mockito.when(fotoService.indicizza(Mockito.any(), Mockito.any())).thenAnswer(inv -> {
             letti.incrementAndGet();
             cominciati.countDown();
             assertThat(via.await(10, TimeUnit.SECONDS)).isTrue();
@@ -209,7 +209,7 @@ class ImportazioneCartelleTest {
         Map<Path, AtomicInteger> letture = new ConcurrentHashMap<>();
         AtomicInteger insieme = new AtomicInteger();
         AtomicInteger massimo = new AtomicInteger();
-        Mockito.when(fotoService.indicizza(Mockito.any())).thenAnswer(inv -> {
+        Mockito.when(fotoService.indicizza(Mockito.any(), Mockito.any())).thenAnswer(inv -> {
             Path p = inv.getArgument(0);
             letture.computeIfAbsent(p, k -> new AtomicInteger()).incrementAndGet();
             massimo.accumulateAndGet(insieme.incrementAndGet(), Math::max);
@@ -254,7 +254,7 @@ class ImportazioneCartelleTest {
         }
         FotoService fotoService = Mockito.mock(FotoService.class);
         Map<String, AtomicInteger> letture = new ConcurrentHashMap<>();
-        Mockito.when(fotoService.indicizza(Mockito.any())).thenAnswer(inv -> {
+        Mockito.when(fotoService.indicizza(Mockito.any(), Mockito.any())).thenAnswer(inv -> {
             String nome = inv.<Path>getArgument(0).getFileName().toString();
             int volta = letture.computeIfAbsent(nome, k -> new AtomicInteger()).incrementAndGet();
             return switch (nome) {
@@ -278,6 +278,57 @@ class ImportazioneCartelleTest {
         assertThat(letture.get("sparita.jpg")).hasValue(2);
         assertThat(esito.importate()).isEqualTo(1);
         assertThat(esito.errori()).isEqualTo(2);
+    }
+
+    @Test
+    void annullareDuranteLAttesaDellaRiprovaNonAspettaLaFine() throws Exception {
+        Path foto = archivioCon(6);
+        FotoService fotoService = Mockito.mock(FotoService.class);
+        CountDownLatch inRiprova = new CountDownLatch(3);
+        AtomicInteger letture = new AtomicInteger();
+        Mockito.when(fotoService.indicizza(Mockito.any(), Mockito.any())).thenAnswer(inv -> {
+            letture.incrementAndGet();
+            return new Caricamento("x", Esito.ERRORE, null, "File illeggibile (Input/output error)");
+        });
+        // Un'ora di attesa: se Annulla non la interrompe il test non finisce.
+        var importazione = new ImportazioneCartelle(fotoService, archivio(cloudMontato(true)),
+                new ArchivioProperties(foto, disco.resolve("miniature"), 0, disco.resolve("cloud")),
+                new IndicizzazioneProperties(3, Duration.ofHours(1)));
+        CountDownLatch annullamento = new CountDownLatch(1);
+        AtomicInteger fatte = new AtomicInteger();
+        var avanzamento = new ImportazioneCartelle.Avanzamento() {
+            @Override
+            public void fatta(Path file, Caricamento esito, boolean rimossa) {
+                fatte.incrementAndGet();
+            }
+
+            @Override
+            public boolean annullata() {
+                return annullamento.getCount() == 0;
+            }
+
+            @Override
+            public boolean aspetta(Duration quanto) throws InterruptedException {
+                inRiprova.countDown();
+                return annullamento.await(quanto.toMillis(), TimeUnit.MILLISECONDS);
+            }
+        };
+
+        var lavoro = CompletableFuture.supplyAsync(() -> {
+            try {
+                return importazione.indicizza(avanzamento);
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        });
+        assertThat(inRiprova.await(10, TimeUnit.SECONDS)).isTrue();
+        annullamento.countDown();
+        var esito = lavoro.get(10, TimeUnit.SECONDS);
+
+        // I tre file in attesa lasciati com'erano: né contati né riletti, e nessuno nuovo.
+        assertThat(letture).hasValue(3);
+        assertThat(fatte).hasValue(0);
+        assertThat(esito.errori()).isZero();
     }
 
     @Test

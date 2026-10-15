@@ -160,6 +160,10 @@ export interface LavoroImportazione {
   ricerca?: boolean;
   /** Durante la ricerca, la cartella dove si è arrivati (relativa a `cartella`). */
   cercaIn?: string;
+  /** Annulla premuto: finiscono i file già cominciati, nessuno nuovo. */
+  annullamento?: boolean;
+  /** Aspetta che l'importazione automatica, annullata per fargli posto, finisca i suoi file. */
+  inAttesa?: boolean;
 }
 
 /** Un file della cartella automatica fallito per colpa sua: non si rilegge finché non cambia. */
