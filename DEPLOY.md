@@ -366,6 +366,13 @@ deploy/foto-da-pcloud.sh archivia
 deploy/foto-da-pcloud.sh pulisci      # dopo 7 giorni
 ```
 
+Per controllare che sia stato preso tutto, `deploy/verifica-tutto.sh` rifà in
+fila e in sottofondo stato, scarica, raccogli, carica, un `rclone check` di
+`ordinate/` contro LifetimeCloud e i conti, scrivendo il passo a cui è arrivato
+(`verifica-tutto.sh dove`); al primo errore si ferma (`verifica-tutto.sh da N`
+per riprendere). L'ultimo passo cancella `specchio/` sul PC, solo se il
+controllo di quel giro è passato. Non archivia e non cancella niente su pCloud.
+
 #### Da Amazon Foto o da una cartella del PC
 
 Amazon Foto non ha API pubbliche: la libreria si scarica con l'app per Windows
