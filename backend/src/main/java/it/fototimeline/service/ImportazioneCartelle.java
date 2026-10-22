@@ -10,13 +10,13 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -135,6 +135,14 @@ public class ImportazioneCartelle {
             Thread.sleep(quanto);
             return annullata();
         }
+
+        /**
+         * Quando cominciano i file: chi li sta lavorando in questo momento,
+         * con fase e tempo, da chiedere quando serve (lo stato del lavoro).
+         * Alla fine dei file arriva {@code null}.
+         */
+        default void sorveglia(Supplier<List<FileInLavorazione.Vista>> inLavorazione) {
+        }
     }
 
     public Importazione importa(Path cartella, boolean albumDaCartella, boolean sposta, Avanzamento avanzamento)
@@ -209,12 +217,14 @@ public class ImportazioneCartelle {
         avanzamento.inizio(file.size());
         Map<Path, BasicFileAttributes> attributiScelti = attributi;
         Set<Path> cambiateScelte = cambiate;
-        inParallelo(file, avanzamento, p -> {
+        inParallelo(file, avanzamento, (p, controllo) -> {
             BasicFileAttributes attr = attributiScelti.get(p);
             if (automatica != null && !Files.exists(p)) {
                 // Tolto da altri mentre si leggevano quelli prima: niente di sbagliato.
-                riepilogo.rimosso();
-                avanzamento.sparita(p);
+                if (controllo.concludi()) {
+                    riepilogo.rimosso();
+                    avanzamento.sparita(p);
+                }
                 return;
             }
             String album = albumDaCartella && !p.getParent().equals(base)
@@ -222,25 +232,32 @@ public class ImportazioneCartelle {
                     : null;
             Caricamento esito;
             try {
-                esito = conRiprova(p, avanzamento, () -> {
+                esito = conRiprova(p, avanzamento, controllo, () -> {
                     try {
                         Instant modificatoIl = attr != null ? attr.lastModifiedTime().toInstant()
                                 : Files.getLastModifiedTime(p).toInstant();
                         return fotoService.importa(p.getFileName().toString(), p, modificatoIl, album,
-                                caricataDa.apply(p), sposta, avanzamento::annullata);
+                                caricataDa.apply(p), sposta, controllo);
                     } catch (IOException e) {
                         return new Caricamento(p.toString(), Risultati.Esito.ERRORE, null, FotoService.illeggibile(e));
                     }
                 });
             } catch (FotoService.Annullata a) {
-                // Annullata mentre aspettava: il file è dov'era, intatto, e non si conta.
+                // Annullata mentre aspettava, o abbandonato: il file è dov'era, intatto, e non si conta qui.
                 return;
             }
+            if (controllo.abbandonato()) {
+                // Tornato dopo il tempo massimo: l'ha già contato chi l'ha abbandonato.
+                return;
+            }
+            controllo.fase(ControlloFile.Fase.FINE);
             if (automatica != null && esito.esito() == Risultati.Esito.ERRORE) {
                 if (!Files.exists(p)) {
                     // Sparito mentre lo si leggeva: l'errore viene da lì.
-                    riepilogo.rimosso();
-                    avanzamento.sparita(p);
+                    if (controllo.concludi()) {
+                        riepilogo.rimosso();
+                        avanzamento.sparita(p);
+                    }
                     return;
                 }
                 // Solo gli errori del file: uno di lettura (il cloud che non risponde) si riprova al giro dopo.
@@ -252,12 +269,12 @@ public class ImportazioneCartelle {
                 // Era fallito, ma è cambiato e stavolta è andato.
                 automatica.memoria().dimentica(p);
             }
-            riepilogo.conta(relativo(p), esito);
             boolean rimossa = false;
             if (sposta && esito.esito() == Risultati.Esito.CARICATA) {
                 // Spostata nell'archivio, o copiata e tolta da FotoService dopo la scheda.
                 rimossa = !Files.exists(p);
-            } else if (sposta && esito.esito() == Risultati.Esito.DUPLICATA && inArchivio(esito.foto())) {
+            } else if (sposta && esito.esito() == Risultati.Esito.DUPLICATA && inArchivio(esito.foto())
+                    && !controllo.abbandonato()) {
                 // Il contenuto c'è già: la copia nell'origine non serve.
                 try {
                     Files.delete(p);
@@ -266,12 +283,20 @@ public class ImportazioneCartelle {
                     log.warn("Già in archivio ma non riesco a togliere {}: {}", p, e.getMessage());
                 }
             }
+            if (!controllo.concludi()) {
+                return;
+            }
+            riepilogo.conta(relativo(p), esito);
             if (rimossa) {
                 riepilogo.rimosso();
             }
             avanzamento.fatta(p, esito, rimossa);
+        }, (p, esito) -> {
+            riepilogo.conta(relativo(p), esito);
+            avanzamento.fatta(p, esito, false);
         });
-        if (sposta) {
+        // Dopo Annulla no: un file abbandonato può essere ancora appeso lì sotto.
+        if (sposta && !avanzamento.annullata()) {
             pulisciSottocartelleVuote(base);
         }
         return riepilogo.importazione(file.size());
@@ -405,78 +430,141 @@ public class ImportazioneCartelle {
         Riepilogo riepilogo = new Riepilogo();
         avanzamento.inizio(file.size());
         // Un file che ha già la scheda (stesso percorso) FotoService.indicizza lo salta prima di aprirlo.
-        inParallelo(file, avanzamento, p -> {
+        PerFile.Abbandono abbandono = (p, esito) -> {
+            riepilogo.conta(relativo(p), esito);
+            avanzamento.fatta(p, esito, false);
+        };
+        inParallelo(file, avanzamento, (p, controllo) -> {
             Caricamento esito;
             try {
-                esito = conRiprova(p, avanzamento, () -> fotoService.indicizza(p, avanzamento::annullata));
+                esito = conRiprova(p, avanzamento, controllo, () -> fotoService.indicizza(p, controllo));
             } catch (FotoService.Annullata a) {
                 return;
             }
-            riepilogo.conta(relativo(p), esito);
-            avanzamento.fatta(p, esito, false);
-        });
+            if (controllo.concludi()) {
+                abbandono.conta(p, esito);
+            }
+        }, abbandono);
         return riepilogo.importazione(file.size());
     }
 
     /** Il lavoro su un file: gli errori del file finiscono nell'esito, un'eccezione ferma tutto. */
     @FunctionalInterface
     interface PerFile {
-        void fai(Path file) throws IOException;
+        /**
+         * Lavora {@code file}. Prima di contarlo chiama {@link FileInLavorazione#concludi}:
+         * se dice false il file è stato abbandonato (già contato) e non si conta né si tocca più.
+         */
+        void fai(Path file, FileInLavorazione controllo) throws IOException;
+
+        /** Come si conta un file: lo usa anche chi lo abbandona, con un errore di lettura. */
+        @FunctionalInterface
+        interface Abbandono {
+            void conta(Path file, Caricamento esito);
+        }
     }
 
+    /** Ogni quanto chi sorveglia i file guarda scadenze e Annulla, se nessuno lo sveglia prima. */
+    private static final long GIRO_SORVEGLIANZA_MS = 250;
+
     /**
-     * Passa i file a {@code lavoro}, {@code paralleli} alla volta: altrettanti
-     * thread prendono il file dopo da un contatore comune, così non c'è coda
-     * e annullando non parte nessun file nuovo. Torna quando quelli in corso
-     * sono finiti. Se il lavoro su un file lancia (per esempio il cloud
-     * smontato a metà), gli altri thread non prendono più file e l'eccezione
-     * arriva a chi ha chiamato, come quando si andava un file alla volta.
+     * Passa i file a {@code lavoro}, {@code paralleli} alla volta, ognuno su
+     * un thread suo (piattaforma, col nome del file: si vede anche in un dump
+     * con {@code kill -3}). Il thread che chiama li sorveglia: ne fa partire
+     * uno nuovo appena uno finisce e abbandona ({@link FileInLavorazione#abbandona})
+     * quelli che superano il tempo massimo
+     * ({@link IndicizzazioneProperties#tempoMassimo}): contati come errore di
+     * lettura (non un errore del file: la cartella automatica non li ricorda),
+     * il lavoro va avanti con gli altri. Un thread appeso in una lettura dal
+     * mount non si può interrompere: resta, ma ha già restituito il turno per
+     * le parti pesanti e, se torna, non scrive né conta niente.
+     *
+     * <p>Annullando non parte nessun file nuovo; quelli in corso si aspettano
+     * al massimo {@link IndicizzazioneProperties#attesaAnnullamento}, poi si
+     * abbandonano anche loro. Se il lavoro su un file lancia (per esempio il
+     * cloud smontato a metà), non partono altri file e l'eccezione arriva a
+     * chi ha chiamato, finiti (o abbandonati) quelli in corso.
      */
-    void inParallelo(List<Path> file, Avanzamento avanzamento, PerFile lavoro) throws IOException {
-        int n = Math.min(parallelismo.paralleli(), file.size());
-        if (n <= 1) {
-            for (Path p : file) {
-                if (avanzamento.annullata()) {
-                    break;
-                }
-                lavoro.fai(p);
-            }
+    void inParallelo(List<Path> file, Avanzamento avanzamento, PerFile lavoro, PerFile.Abbandono abbandono)
+            throws IOException {
+        if (file.isEmpty()) {
             return;
         }
-        AtomicInteger prossimo = new AtomicInteger();
+        int n = Math.min(parallelismo.paralleli(), file.size());
+        Object segnale = new Object();
+        Set<FileInLavorazione> attivi = ConcurrentHashMap.newKeySet();
         AtomicReference<Throwable> errore = new AtomicReference<>();
-        AtomicBoolean fermati = new AtomicBoolean();
-        Runnable operaio = () -> {
-            while (errore.get() == null && !fermati.get() && !avanzamento.annullata()) {
-                int i = prossimo.getAndIncrement();
-                if (i >= file.size()) {
-                    return;
-                }
-                try {
-                    lavoro.fai(file.get(i));
-                } catch (Throwable t) {
-                    errore.compareAndSet(null, t);
-                    return;
-                }
-            }
-        };
         String nome = Thread.currentThread().getName();
-        List<Thread> operai = new ArrayList<>();
-        for (int k = 1; k <= n; k++) {
-            operai.add(Thread.ofPlatform().name(nome + "-" + k).daemon().start(operaio));
-        }
+        avanzamento.sorveglia(() -> attivi.stream()
+                .sorted(Comparator.comparing(FileInLavorazione::iniziatoIl))
+                .map(FileInLavorazione::vista)
+                .toList());
+        int prossimo = 0;
+        long annullatoDal = 0;
+        boolean annullato = false;
         boolean interrotto = false;
-        for (Thread t : operai) {
+        try {
             while (true) {
-                try {
-                    t.join();
-                    break;
-                } catch (InterruptedException e) {
-                    // Si smette di prendere file, ma si aspettano quelli in corso.
-                    interrotto = true;
-                    fermati.set(true);
+                List<FileInLavorazione> scaduti = new ArrayList<>();
+                boolean dopoAnnulla = false;
+                synchronized (segnale) {
+                    long adesso = System.nanoTime();
+                    if (avanzamento.annullata() && !annullato) {
+                        annullato = true;
+                        annullatoDal = adesso;
+                    }
+                    for (FileInLavorazione f : attivi) {
+                        if (f.scaduto(adesso)) {
+                            scaduti.add(f);
+                        }
+                    }
+                    if (annullato && !attivi.isEmpty()
+                            && adesso - annullatoDal >= parallelismo.attesaAnnullamento().toNanos()) {
+                        // Annulla ha aspettato abbastanza: chi è ancora appeso si lascia lì.
+                        dopoAnnulla = true;
+                        for (FileInLavorazione f : attivi) {
+                            if (!scaduti.contains(f)) {
+                                scaduti.add(f);
+                            }
+                        }
+                    }
+                    scaduti.forEach(attivi::remove);
+                    if (scaduti.isEmpty()) {
+                        boolean basta = annullato || errore.get() != null || interrotto;
+                        if (!basta && prossimo < file.size() && attivi.size() < n) {
+                            FileInLavorazione f = new FileInLavorazione(file.get(prossimo++),
+                                    relativo(file.get(prossimo - 1)), avanzamento::annullata, parallelismo);
+                            attivi.add(f);
+                            try {
+                                avvia(f, nome, lavoro, errore, attivi, segnale);
+                            } catch (RuntimeException | Error e) {
+                                // Niente thread (memoria finita?): si ferma tutto, e lo si dice.
+                                attivi.remove(f);
+                                errore.compareAndSet(null, e);
+                            }
+                            continue;
+                        }
+                        if (attivi.isEmpty() && (basta || prossimo >= file.size())) {
+                            break;
+                        }
+                        long attesa = GIRO_SORVEGLIANZA_MS;
+                        for (FileInLavorazione f : attivi) {
+                            attesa = Math.min(attesa, Math.max(1, f.mancano(adesso) / 1_000_000 + 1));
+                        }
+                        try {
+                            segnale.wait(attesa);
+                        } catch (InterruptedException e) {
+                            // Niente file nuovi; quelli in corso finiscono o scadono.
+                            interrotto = true;
+                        }
+                    }
+                }
+                for (FileInLavorazione f : scaduti) {
+                    abbandona(f, dopoAnnulla && !f.scaduto(System.nanoTime()), abbandono);
                 }
             }
+        } finally {
+            avanzamento.sorveglia(null);
         }
         if (interrotto) {
             Thread.currentThread().interrupt();
@@ -491,26 +579,98 @@ public class ImportazioneCartelle {
         }
     }
 
+    /** Il thread di un file: lo lavora, e alla fine sveglia chi sorveglia. */
+    private void avvia(FileInLavorazione f, String nome, PerFile lavoro, AtomicReference<Throwable> errore,
+            Set<FileInLavorazione> attivi, Object segnale) {
+        Thread t = Thread.ofPlatform().name(nome + "-file " + f.nome()).daemon().unstarted(() -> {
+            try {
+                try {
+                    // Per il tempo massimo, che cresce coi GB. Anche questo può restare appeso sul mount.
+                    f.dimensione(Files.size(f.file()));
+                } catch (IOException | RuntimeException e) {
+                    // Lo dirà la lettura.
+                }
+                lavoro.fai(f.file(), f);
+            } catch (FotoService.Annullata a) {
+                // Annullato o abbandonato: niente da contare.
+            } catch (Throwable e) {
+                if (f.abbandonato()) {
+                    log.info("{}, già abbandonato, è finito con {}", f.nome(), e.toString());
+                } else {
+                    log.warn("Errore inatteso su {}: il lavoro si ferma", f.nome(), e);
+                    errore.compareAndSet(null, e);
+                }
+            } finally {
+                // Se non l'ha concluso il lavoro (annullato, errore) nessuno deve più abbandonarlo.
+                f.concludi();
+                synchronized (segnale) {
+                    attivi.remove(f);
+                    segnale.notifyAll();
+                }
+            }
+        });
+        f.thread(t);
+        t.start();
+    }
+
+    /** Il tempo massimo è passato (o Annulla ha aspettato abbastanza): il file si conta come errore di lettura e si va avanti. */
+    private void abbandona(FileInLavorazione f, boolean perAnnulla, PerFile.Abbandono abbandono) {
+        String fase = f.faseCorrente().etichetta();
+        String quanto = durata(f.durata());
+        if (!f.abbandona()) {
+            // Il suo thread l'ha appena concluso: l'ha contato lui.
+            return;
+        }
+        String motivo = perAnnulla
+                ? "fermo da %s in «%s» dopo Annulla: abbandonato".formatted(quanto, fase)
+                : "fermo da %s in «%s», oltre il tempo massimo: abbandonato, si riprova al prossimo giro"
+                        .formatted(quanto, fase);
+        Thread t = f.thread();
+        StringBuilder pila = new StringBuilder();
+        if (t != null) {
+            for (StackTraceElement e : t.getStackTrace()) {
+                pila.append("\n\tat ").append(e);
+            }
+        }
+        log.warn("{}: {}. Il thread {} resta dov'è:{}", f.nome(), motivo, t != null ? t.getName() : "?", pila);
+        abbandono.conta(f.file(),
+                new Caricamento(f.file().getFileName().toString(), Risultati.Esito.ERRORE, null,
+                        FotoService.ILLEGGIBILE + " (" + motivo + ")"));
+    }
+
+    /** "14 min", "35 s", "2 h 5 min". */
+    static String durata(Duration d) {
+        long s = d.toSeconds();
+        if (s < 60) {
+            return s + " s";
+        }
+        if (s < 3600) {
+            return (s / 60) + " min";
+        }
+        return (s / 3600) + " h " + (s % 3600 / 60) + " min";
+    }
+
     /**
      * Un errore di lettura (il cloud montato che per un po' non risponde:
      * "Input/output error") si riprova una volta dopo
      * {@code fototimeline.indicizzazione.attesa-riprova}. Gli errori del file
      * (cifrato, formato, immagine rotta) no: darebbero lo stesso errore. Se
-     * il lavoro viene annullato durante l'attesa si smette subito
-     * ({@link FotoService.Annullata}: il file non conta).
+     * il lavoro viene annullato (o il file abbandonato) durante l'attesa si
+     * smette subito ({@link FotoService.Annullata}: il file non conta).
      */
-    Caricamento conRiprova(Path p, Avanzamento avanzamento, Supplier<Caricamento> lettura) {
+    Caricamento conRiprova(Path p, Avanzamento avanzamento, ControlloFile controllo, Supplier<Caricamento> lettura) {
         Caricamento esito = lettura.get();
         if (esito.esito() != Risultati.Esito.ERRORE || !FotoService.erroreDiLettura(esito.messaggio())
                 || !Files.exists(p)) {
             return esito;
         }
-        if (avanzamento.annullata()) {
+        if (controllo.fermato()) {
             throw new FotoService.Annullata();
         }
         log.info("{}: {}; riprovo tra {}", relativo(p), esito.messaggio(), parallelismo.attesaRiprova());
+        controllo.fase(ControlloFile.Fase.RIPROVA);
         try {
-            if (avanzamento.aspetta(parallelismo.attesaRiprova())) {
+            if (avanzamento.aspetta(parallelismo.attesaRiprova()) || controllo.fermato()) {
                 throw new FotoService.Annullata();
             }
         } catch (InterruptedException e) {

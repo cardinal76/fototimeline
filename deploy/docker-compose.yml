@@ -77,6 +77,11 @@ services:
       FOTOTIMELINE_INTERVALLO_AUTOMATICO: ${FOTOTIMELINE_INTERVALLO_AUTOMATICO:-PT15M}
       # "Indicizza archivio", "Importa cartella" e cartella automatica: file letti insieme dal cloud.
       FOTOTIMELINE_INDICIZZA_PARALLELI: ${FOTOTIMELINE_INDICIZZA_PARALLELI:-3}
+      # Un file che non risponde (lettura dal mount appesa) si abbandona dopo così, più il tempo per GB.
+      FOTOTIMELINE_TEMPO_MASSIMO_FILE: ${FOTOTIMELINE_TEMPO_MASSIMO_FILE:-PT5M}
+      FOTOTIMELINE_TEMPO_MASSIMO_PER_GB: ${FOTOTIMELINE_TEMPO_MASSIMO_PER_GB:-PT5M}
+      # Dopo Annulla, quanto si aspettano i file già cominciati prima di abbandonarli.
+      FOTOTIMELINE_ATTESA_ANNULLAMENTO: ${FOTOTIMELINE_ATTESA_ANNULLAMENTO:-PT1M}
       # Di chi è il telefono di quando era uno solo; vuoto = del primo admin che entra.
       FOTOTIMELINE_TELEFONO_PROPRIETARIO: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:-}
       # Versione compatibile (H.264) dei video HEVC: thread di ffmpeg e lato corto massimo.

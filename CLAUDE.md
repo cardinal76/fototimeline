@@ -272,9 +272,11 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   (`FotoService.leggi`): un cambio ai formati vale per entrambi.
 - Importazione e indicizzazione leggono `fototimeline.indicizzazione.paralleli`
   file insieme (`FOTOTIMELINE_INDICIZZA_PARALLELI`, predefinito 3):
-  `ImportazioneCartelle.inParallelo`, N thread per lavoro che prendono il
-  file dopo da un contatore comune (annullando non ne parte nessuno nuovo,
-  quelli in corso finiscono o si fermano alla prima attesa). Quello che due file fanno insieme deve restare
+  `ImportazioneCartelle.inParallelo` dà a ogni file un thread di piattaforma
+  suo (`importazione-file <percorso>`) e un `FileInLavorazione`, e il thread
+  del lavoro li sorveglia: annullando non ne parte nessuno nuovo, quelli in
+  corso finiscono, si fermano alla prima attesa o, dopo
+  `attesa-annullamento`, si abbandonano. Quello che due file fanno insieme deve restare
   sicuro: i doppioni li decide l'indice unico su `hash` (`DuplicateKeyException`
   → DUPLICATA, si toglie la copia del perdente), i nomi in `ArchivioFile` si
   prenotano (`prenotati`: `Files.move` controlla e poi rinomina, non è
@@ -288,6 +290,29 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   non li ricorda. Un'eccezione con un `FileSystemException` o un
   "Input/output error" dentro diventa errore di lettura anche se arriva da
   ImageIO o Thumbnailator (`letturaNonRiuscita`).
+- **Un file appeso non ferma il lavoro.** Ogni file ha un tempo massimo
+  (`tempo-massimo-file` + `tempo-massimo-per-gb`, `FOTOTIMELINE_TEMPO_MASSIMO_FILE`
+  e `_PER_GB`, 5 min + 5 min/GB): oltre, chi sorveglia lo abbandona
+  (`FileInLavorazione.abbandona`) e lo conta come errore di lettura
+  (`ILLEGGIBILE`, la cartella automatica non lo ricorda). Una read() sul mount
+  FUSE non si interrompe: il thread resta, ma il turno di `unaAllaVolta`
+  torna subito agli altri (`ControlloFile.tieni`, rilascio una volta sola) e
+  il file risulta `fermato`: alla prima occasione `Annullata`, e
+  `primaDiScrivere` impedisce la scheda (un file già spostato torna
+  nell'origine). Esito contato da uno solo: il thread solo se
+  `concludi()` dice true. Un metodo nuovo di `FotoService` che lavora un file
+  di un'importazione riceve il `ControlloFile`, dice la fase e lo guarda prima
+  di scrivere. Le prenotazioni dei nomi di `ArchivioFile` restano al thread
+  appeso: liberarle mentre il suo `Files.move` è in volo permetterebbe a un
+  altro di prendere lo stesso nome e a `rename` di sovrascriverlo; non
+  bloccano nessuno (chi le trova prese passa a "nome (2)").
+- Ogni lavoro gira su un thread suo (`importazione`); quello che parte dopo
+  un'automatica annullata aspetta che lei si chiuda (`chiuso`). `esegui`
+  prende ogni `Throwable`: prima un `OutOfMemoryError` lasciava il lavoro "in
+  corso" per sempre senza thread e senza log. Dopo Annulla il `guardiano`
+  chiude il lavoro ancora appeso fuori dai file. Lo stato ha `inLavorazione`
+  (file, fase, secondi) e il riquadro lo mostra; `GET /api/diagnostica/thread`
+  (admin) dà il dump di tutti i thread, virtuali compresi (DEPLOY.md).
 - "Indicizza archivio" salta i file che hanno già una scheda con
   `existsByPercorso` (indice su `percorso`) prima di aprirli: un rilancio non
   scarica niente di quello che è già fatto.

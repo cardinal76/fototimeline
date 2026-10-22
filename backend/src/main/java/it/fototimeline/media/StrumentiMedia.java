@@ -314,12 +314,21 @@ public class StrumentiMedia {
                 // il processo è morto: lo dice il codice di uscita
             }
         });
-        uscita.append(new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+        // Anche l'uscita su un thread suo: letta qui, prima di waitFor, il tempo massimo non
+        // valeva (un ffprobe appeso sul mount di rclone teneva fermo il file per sempre).
+        Thread lettoreUscita = Thread.ofVirtual().start(() -> {
+            try {
+                uscita.append(new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                // il processo è morto: lo dice il codice di uscita
+            }
+        });
         try {
             if (!p.waitFor(TIMEOUT_SECONDI, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 throw new IOException(comando.getFirst() + " non ha finito in " + TIMEOUT_SECONDI + " secondi");
             }
+            lettoreUscita.join(10_000);
             lettore.join(1000);
         } catch (InterruptedException e) {
             p.destroyForcibly();

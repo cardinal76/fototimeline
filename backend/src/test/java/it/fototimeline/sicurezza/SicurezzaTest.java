@@ -137,6 +137,31 @@ class SicurezzaTest {
     }
 
     @Test
+    void ilDumpDeiThreadLoVedeSoloLAmministratore() throws Exception {
+        mvc.perform(get("/api/diagnostica/thread")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/diagnostica/thread").with(oidcLogin())).andExpect(status().isForbidden());
+        // Un thread virtuale fermo: kill -3 non lo elenca, il dump sì.
+        var fermo = new java.util.concurrent.CountDownLatch(1);
+        Thread virtuale = Thread.ofVirtual().name("virtuale-di-prova").start(() -> {
+            try {
+                fermo.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        try {
+            var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+            String dump = mvc.perform(get("/api/diagnostica/thread").with(admin)).andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                    .andReturn().getResponse().getContentAsString();
+            assertThat(dump).contains("dump dei thread").contains("DiagnosticaController").contains("virtuale-di-prova");
+        } finally {
+            fermo.countDown();
+            virtuale.join();
+        }
+    }
+
+    @Test
     void lAmministratoreVedeLaSaluteMaNonIlToken() throws Exception {
         var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
         String corpo = mvc.perform(get("/api/salute").with(admin)).andExpect(status().isOk())

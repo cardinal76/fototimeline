@@ -164,6 +164,20 @@ export interface LavoroImportazione {
   annullamento?: boolean;
   /** Aspetta che l'importazione automatica, annullata per fargli posto, finisca i suoi file. */
   inAttesa?: boolean;
+  /** I file che si stanno leggendo adesso, con la fase e da quanto (vuoto se non è in corso). */
+  inLavorazione?: FileInLavorazione[];
+}
+
+/** Un file che un lavoro di importazione sta leggendo: oltre il tempo massimo si abbandona. */
+export interface FileInLavorazione {
+  /** Percorso relativo alla radice delle importazioni, per esempio `telefono/VID_1.mp4`. */
+  file: string;
+  /** "lettura e impronta", "metadati", "miniatura", "spostamento o copia", ... */
+  fase: string;
+  /** Da quanti secondi lo si lavora. */
+  secondi: number;
+  /** Da quanti secondi è in questa fase. */
+  secondiFase: number;
 }
 
 /** Un file della cartella automatica fallito per colpa sua: non si rilegge finché non cambia. */

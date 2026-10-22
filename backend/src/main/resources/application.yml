@@ -76,6 +76,13 @@ fototimeline:
     # Un file che non si riesce a leggere (il cloud che non risponde) si
     # riprova una volta dopo questa attesa.
     attesa-riprova: ${FOTOTIMELINE_INDICIZZA_ATTESA_RIPROVA:PT3S}
+    # Quanto può durare un file (più tempo-massimo-per-gb per ogni GB): oltre si
+    # abbandona come errore di lettura (si riprova al giro dopo) e il lavoro va
+    # avanti. Una lettura dal mount che non torna più non ferma tutto.
+    tempo-massimo-file: ${FOTOTIMELINE_TEMPO_MASSIMO_FILE:PT5M}
+    tempo-massimo-per-gb: ${FOTOTIMELINE_TEMPO_MASSIMO_PER_GB:PT5M}
+    # Dopo Annulla, quanto si aspettano i file già cominciati prima di abbandonarli.
+    attesa-annullamento: ${FOTOTIMELINE_ATTESA_ANNULLAMENTO:PT1M}
   # Foto nuove dai telefoni (pCloud) nella cartella automatica (i telefoni si
   # aggiungono nell'app, da admin): ogni quanto controllare se è ora di un giro.
   telefono:

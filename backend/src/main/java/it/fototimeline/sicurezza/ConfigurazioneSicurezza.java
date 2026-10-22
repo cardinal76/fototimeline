@@ -90,6 +90,8 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // La pagina "Salute" e la prova di Telegram (/salute, l'healthcheck, resta pubblico qui sopra).
             a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
+            // Il dump dei thread (DiagnosticaController): nomi dei file e pile del codice, solo per gli admin.
+            a.requestMatchers("/api/diagnostica", "/api/diagnostica/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // "Ricordi su Telegram": impostazioni e prova.
             a.requestMatchers("/api/ricordi-telegram", "/api/ricordi-telegram/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // "Importa da Google Takeout": tutta la libreria di Google Foto nell'archivio, solo l'admin.

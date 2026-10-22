@@ -33,7 +33,7 @@ import {
   FileScartato,
   LavoroImportazione,
 } from './modelli';
-import { durata } from './formati';
+import { daQuanto, durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { QuasiUguali } from './quasi-uguali';
@@ -690,6 +690,11 @@ export class App {
       default:
         return 'Importazione';
     }
+  }
+
+  /** "14 min", "35 s": da quanto si lavora un file dell'importazione. */
+  protected daQuanto(secondi: number): string {
+    return daQuanto(secondi);
   }
 
   /** Il nome del file di un percorso, per l'elenco dei già falliti. */
