@@ -186,6 +186,46 @@ class AnnullaImportazioneAutomaticaTest {
         assertThat(disco.resolve("archivio").resolve(ArchivioFile.MINIATURE).resolve(scheda.getId() + ".jpg")).exists();
     }
 
+    @Test
+    void unFileAbbandonatoRestituisceIlTurnoAncheSeIlSuoThreadEAncoraAppeso() throws Exception {
+        FileInLavorazione file = new FileInLavorazione(disco.resolve("telefono/appeso.jpg"), "telefono/appeso.jpg",
+                () -> false, IndicizzazioneProperties.PREDEFINITE);
+        CountDownLatch preso = new CountDownLatch(1);
+        // La miniatura di un file che legge dal mount e non torna (qui finché il test non lascia).
+        turno = CompletableFuture.runAsync(() -> {
+            try {
+                service.unaAllaVolta(() -> {
+                    preso.countDown();
+                    return lascia.await(60, TimeUnit.SECONDS);
+                }, ControlloFile.Fase.MINIATURA, file);
+            } catch (FotoService.Annullata a) {
+                // Tornato da abbandonato: niente da fare.
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        assertThat(preso.await(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(file.vista().fase()).isEqualTo("miniatura");
+        assertThat(service.turniLiberi()).isZero();
+
+        assertThat(file.abbandona()).isTrue();
+
+        // Il turno è già tornato: un altro file lo prende subito, mentre quello è ancora dentro.
+        var altro = CompletableFuture.supplyAsync(() -> {
+            try {
+                return service.unaAllaVolta(() -> true);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        assertThat(altro.get(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(turno).isNotDone();
+        lascia.countDown();
+        turno.get(10, TimeUnit.SECONDS);
+        // Restituito una volta sola: resta un turno, non due.
+        assertThat(service.turniLiberi()).isEqualTo(1);
+    }
+
     /** Cinque foto diverse nella cartella automatica. */
     private Path cinqueFoto() throws IOException {
         Path telefono = disco.resolve("telefono");

@@ -10,10 +10,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,11 +69,16 @@ public class LavoriImportazione {
      * i file già cominciati (nessuno nuovo). {@code inAttesa}: il lavoro
      * aspetta che l'importazione automatica, annullata per fargli posto,
      * finisca i suoi ({@link #avvia(Path, Origine, Compito)}).
+     *
+     * <p>{@code inLavorazione}: i file che si stanno leggendo adesso, con la
+     * fase e da quanti secondi ({@link FileInLavorazione.Vista}); vuoto
+     * quando il lavoro non è in corso.
      */
     public record StatoLavoro(String id, String cartella, Origine origine, Stato stato,
             Instant iniziatoIl, Instant finitoIl, int trovate, int fatte, int importate, int duplicate,
             int errori, int rimossi, List<String> messaggi, String errore, int saltate, int inArrivo,
-            boolean ricerca, String cercaIn, boolean annullamento, boolean inAttesa) {
+            boolean ricerca, String cercaIn, boolean annullamento, boolean inAttesa,
+            List<FileInLavorazione.Vista> inLavorazione) {
     }
 
     private final ImportazioneCartelle importazione;
@@ -80,9 +87,15 @@ public class LavoriImportazione {
     private final ArchivioFile archivio;
     private final List<ProvenienzaFile> provenienze;
     private final LuoghiService luoghi;
+    private final IndicizzazioneProperties tempi;
     private final Clock clock;
-    private final ExecutorService esecutore = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "importazione");
+    /**
+     * Dopo Annulla controlla che il lavoro si sia chiuso davvero: se il suo
+     * thread è appeso fuori dai file (l'elenco di una cartella del mount che
+     * non torna), lo chiude lui ({@link #chiudiSeAppeso}).
+     */
+    private final ScheduledExecutorService guardiano = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "importazione-guardiano");
         t.setDaemon(true);
         return t;
     });
@@ -90,13 +103,14 @@ public class LavoriImportazione {
 
     public LavoriImportazione(ImportazioneCartelle importazione, ImportazioneAutomaticaProperties automatica,
             MemoriaImportazione memoria, ArchivioFile archivio, List<ProvenienzaFile> provenienze, LuoghiService luoghi,
-            Optional<Clock> clock) {
+            IndicizzazioneProperties tempi, Optional<Clock> clock) {
         this.importazione = importazione;
         this.automatica = automatica;
         this.memoria = memoria;
         this.archivio = archivio;
         this.provenienze = List.copyOf(provenienze);
         this.luoghi = luoghi;
+        this.tempi = tempi;
         this.clock = clock.orElse(Clock.systemUTC());
     }
 
@@ -174,12 +188,15 @@ public class LavoriImportazione {
     }
 
     /**
-     * Un lavoro alla volta, sullo stesso thread. Quello chiesto da qualcuno
-     * (importa, indicizza, luoghi) ha la precedenza sull'importazione
-     * automatica, che parte da sola: se gira, la si annulla (finisce i file
-     * già cominciati, i suoi sono al sicuro nella cartella) e il lavoro nuovo
-     * parte appena lei ha finito, in coda sullo stesso thread. L'automatica
-     * riprende al primo giro dopo la fine del lavoro nuovo.
+     * Un lavoro alla volta, ognuno su un thread suo ("importazione"). Quello
+     * chiesto da qualcuno (importa, indicizza, luoghi) ha la precedenza
+     * sull'importazione automatica, che parte da sola: se gira, la si annulla
+     * (finisce i file già cominciati, i suoi sono al sicuro nella cartella) e
+     * il lavoro nuovo parte appena lei si è chiusa: il suo thread aspetta
+     * quello di prima. L'attesa ha una fine: un lavoro annullato si chiude al
+     * più tardi dopo {@link IndicizzazioneProperties#attesaAnnullamento}, e
+     * se resta appeso lo chiude il {@link #guardiano}. L'automatica riprende
+     * al primo giro dopo la fine del lavoro nuovo.
      */
     private synchronized StatoLavoro avvia(Path cartella, Origine origine, Compito compito) {
         Lavoro attuale = ultimo.get();
@@ -198,20 +215,32 @@ public class LavoriImportazione {
             archivio.verificaDisponibile();
         }
         Lavoro lavoro = new Lavoro(cartella.toString(), origine, clock.instant());
+        Lavoro prima = attuale;
         if (dopoLAutomatica) {
             log.info("{} chiesta mentre gira l'importazione automatica: la annullo e parte appena ha finito i file in corso",
                     origine);
-            attuale.annulla();
+            annulla(attuale);
             lavoro.inAttesa = true;
         }
         ultimo.set(lavoro);
-        esecutore.submit(() -> esegui(lavoro, compito));
+        Thread t = Thread.ofPlatform().name("importazione").daemon().unstarted(() -> {
+            if (prima != null) {
+                prima.aspettaChiusura();
+            }
+            esegui(lavoro, compito);
+        });
+        lavoro.thread = t;
+        t.start();
         return lavoro.stato();
     }
 
     /** L'importazione in corso o l'ultima finita, se c'è. */
     public Optional<StatoLavoro> corrente() {
-        return Optional.ofNullable(ultimo.get()).map(Lavoro::stato);
+        Lavoro lavoro = ultimo.get();
+        if (lavoro != null) {
+            lavoro.controllaThread(clock.instant());
+        }
+        return Optional.ofNullable(lavoro).map(Lavoro::stato);
     }
 
     /**
@@ -224,8 +253,46 @@ public class LavoriImportazione {
         if (lavoro == null || !lavoro.inCorso()) {
             return false;
         }
-        lavoro.annulla();
+        annulla(lavoro);
         return true;
+    }
+
+    /** Annulla e, se dopo l'attesa dei file il lavoro non si è chiuso, lo chiude il guardiano. */
+    private void annulla(Lavoro lavoro) {
+        if (lavoro.annulla()) {
+            // Il doppio: i file appesi si abbandonano già dopo un'attesa, qui si guarda solo chi è appeso fuori.
+            long ms = tempi.attesaAnnullamento().multipliedBy(2).plusSeconds(1).toMillis();
+            try {
+                guardiano.schedule(() -> chiudiSeAppeso(lavoro), ms, TimeUnit.MILLISECONDS);
+            } catch (RejectedExecutionException e) {
+                // In chiusura.
+            }
+        }
+    }
+
+    /**
+     * Il lavoro annullato non si è chiuso: il suo thread è appeso fuori dai
+     * file (per esempio l'elenco di una cartella del cloud che non torna). Si
+     * chiude lo stato, così il posto si libera, e si scrive nel log dove era
+     * fermo. Se il thread poi torna trova il lavoro annullato e non comincia
+     * file nuovi.
+     */
+    private void chiudiSeAppeso(Lavoro lavoro) {
+        if (!lavoro.inCorso()) {
+            return;
+        }
+        Thread t = lavoro.thread;
+        StringBuilder pila = new StringBuilder();
+        if (t != null) {
+            for (StackTraceElement e : t.getStackTrace()) {
+                pila.append("\n\tat ").append(e);
+            }
+        }
+        log.warn("Lavoro {} di {} annullato ma ancora appeso dopo {}: lo chiudo. Il thread {} era fermo qui:{}",
+                lavoro.origine, lavoro.cartella, tempi.attesaAnnullamento().multipliedBy(2), t != null ? t.getName() : "?",
+                pila);
+        lavoro.finisci(Stato.ANNULLATA, "Annullato: il lavoro non rispondeva più ("
+                + (lavoro.ricerca ? "ricerca dei file" : "fuori dai file") + "), chiuso senza aspettarlo", clock.instant());
     }
 
     /** I file della cartella automatica che non si rileggono finché non cambiano, dal più recente. */
@@ -275,13 +342,22 @@ public class LavoriImportazione {
             case LUOGHI -> "Calcolo dei luoghi";
             default -> "Importazione";
         };
+        if (!lavoro.inCorso()) {
+            // Chiuso dal guardiano mentre aspettava quello di prima.
+            return;
+        }
         lavoro.comincia();
         try {
             compito.esegui(lavoro);
             lavoro.finisci(lavoro.annullata ? Stato.ANNULLATA : Stato.FINITA, null, clock.instant());
         } catch (Exception e) {
             log.warn("{} di {} fallita", nome, lavoro.cartella, e);
-            lavoro.finisci(Stato.FALLITA, e.getMessage(), clock.instant());
+            lavoro.finisci(Stato.FALLITA, e.getMessage() != null ? e.getMessage() : e.toString(), clock.instant());
+        } catch (Throwable e) {
+            // Prima solo Exception: un OutOfMemoryError (la JVM ha 384 MB) lasciava il lavoro
+            // "in corso" per sempre, senza thread e senza una riga nel log.
+            log.error("{} di {} fermata da un errore inatteso", nome, lavoro.cartella, e);
+            lavoro.finisci(Stato.FALLITA, "Errore inatteso: " + e, clock.instant());
         }
         StatoLavoro fine = lavoro.stato();
         if (lavoro.origine == Origine.LUOGHI) {
@@ -301,7 +377,7 @@ public class LavoriImportazione {
     @PreDestroy
     void chiudi() {
         annulla();
-        esecutore.shutdown();
+        guardiano.shutdownNow();
     }
 
     /**
@@ -317,6 +393,12 @@ public class LavoriImportazione {
         private volatile boolean annullata;
         /** Scatta con Annulla: sveglia chi aspetta la riprova. */
         private final CountDownLatch annullamento = new CountDownLatch(1);
+        /** Scatta quando lo stato non è più IN_CORSO: lo aspetta il lavoro dopo. */
+        private final CountDownLatch chiuso = new CountDownLatch(1);
+        /** Il thread del lavoro, per il log del guardiano e per accorgersi se muore. */
+        private volatile Thread thread;
+        /** I file in lavorazione adesso ({@link ImportazioneCartelle.Avanzamento#sorveglia}). */
+        private volatile Supplier<List<FileInLavorazione.Vista>> inLavorazione;
         /** In coda dietro l'importazione automatica, che sta finendo i suoi file. */
         private boolean inAttesa;
         private boolean ricerca;
@@ -346,9 +428,40 @@ public class LavoriImportazione {
             return stato == Stato.IN_CORSO;
         }
 
-        void annulla() {
+        /** True se l'ha annullato adesso (non lo era già). */
+        synchronized boolean annulla() {
+            if (annullata || stato != Stato.IN_CORSO) {
+                return false;
+            }
             annullata = true;
             annullamento.countDown();
+            return true;
+        }
+
+        /** Aspetta che si chiuda: annullato, si chiude da sé o lo chiude il guardiano. */
+        void aspettaChiusura() {
+            try {
+                chiuso.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        /**
+         * Stato "in corso" ma il thread non c'è più: non dovrebbe succedere
+         * (esegui chiude sempre), ma se succede il lavoro non resta appeso.
+         */
+        void controllaThread(Instant adesso) {
+            Thread t = thread;
+            if (t != null && !t.isAlive() && inCorso()) {
+                log.error("Lavoro {} di {} ancora in corso ma senza thread: lo chiudo come fallito", origine, cartella);
+                finisci(Stato.FALLITA, "Il lavoro si è fermato senza dire perché: guarda i log del server", adesso);
+            }
+        }
+
+        @Override
+        public void sorveglia(Supplier<List<FileInLavorazione.Vista>> elenco) {
+            inLavorazione = elenco;
         }
 
         synchronized void comincia() {
@@ -425,18 +538,26 @@ public class LavoriImportazione {
             return annullamento.await(quanto.toNanos(), TimeUnit.NANOSECONDS);
         }
 
+        /** Solo la prima volta: chi chiude dopo (il thread tornato dopo il guardiano) non cambia niente. */
         synchronized void finisci(Stato fine, String motivo, Instant quando) {
+            if (stato != Stato.IN_CORSO) {
+                return;
+            }
             stato = fine;
             errore = motivo;
             finitoIl = quando;
             ricerca = false;
             cercaIn = null;
+            inAttesa = false;
+            chiuso.countDown();
         }
 
         synchronized StatoLavoro stato() {
+            Supplier<List<FileInLavorazione.Vista>> elenco = inLavorazione;
+            List<FileInLavorazione.Vista> file = stato == Stato.IN_CORSO && elenco != null ? elenco.get() : List.of();
             return new StatoLavoro(id, importazione.relativo(Path.of(cartella)), origine, stato, iniziatoIl, finitoIl,
                     trovate, fatte, importate, duplicate, errori, rimossi, List.copyOf(messaggi), errore, saltate,
-                    inArrivo, ricerca, cercaIn, annullata && stato == Stato.IN_CORSO, inAttesa);
+                    inArrivo, ricerca, cercaIn, annullata && stato == Stato.IN_CORSO, inAttesa, file);
         }
     }
 }

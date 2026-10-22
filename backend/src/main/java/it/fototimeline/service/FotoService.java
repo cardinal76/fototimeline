@@ -25,7 +25,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -166,17 +166,22 @@ public class FotoService {
 
     /**
      * Come {@link #unaAllaVolta(Pesante)}, per un file di un lavoro che si
-     * può annullare: se lo annullano mentre aspetta il suo turno (gli altri
+     * può annullare: se lo fermano mentre aspetta il suo turno (gli altri
      * file del lavoro hanno miniature e ffmpeg in corso) smette di aspettare
-     * e lancia {@link Annullata}. Il lavoro pesante, una volta cominciato, finisce.
+     * e lancia {@link Annullata}. Il lavoro pesante, una volta cominciato,
+     * finisce; ma se il file viene abbandonato perché appeso (una lettura dal
+     * mount che non torna, {@link FileInLavorazione#abbandona}) il turno torna
+     * subito agli altri, senza aspettare il suo thread: un file appeso non
+     * deve fermare le miniature di tutti.
      */
-    private <T> T unaAllaVolta(Pesante<T> lavoro, BooleanSupplier annullata) throws Exception {
-        if (annullata == NON_ANNULLABILE) {
+    <T> T unaAllaVolta(Pesante<T> lavoro, ControlloFile.Fase fase, ControlloFile controllo) throws Exception {
+        if (controllo == NON_ANNULLABILE) {
             return unaAllaVolta(lavoro);
         }
+        controllo.fase(ControlloFile.Fase.ATTESA_TURNO);
         try {
             while (true) {
-                if (annullata.getAsBoolean()) {
+                if (controllo.fermato()) {
                     throw new Annullata();
                 }
                 if (pesanti.tryAcquire(ATTESA_TURNO, TimeUnit.MILLISECONDS)) {
@@ -187,10 +192,24 @@ public class FotoService {
             Thread.currentThread().interrupt();
             throw new Annullata();
         }
+        // Una volta sola: lo può restituire chi abbandona il file o, alla fine, questo thread.
+        AtomicBoolean restituito = new AtomicBoolean();
+        Runnable rilascio = () -> {
+            if (restituito.compareAndSet(false, true)) {
+                pesanti.release();
+            }
+        };
+        if (!controllo.tieni(rilascio)) {
+            // Abbandonato proprio adesso: il turno torna subito.
+            rilascio.run();
+            throw new Annullata();
+        }
         try {
+            controllo.fase(fase);
             return lavoro.fai();
         } finally {
-            pesanti.release();
+            controllo.lascia(rilascio);
+            rilascio.run();
         }
     }
 
@@ -199,11 +218,16 @@ public class FotoService {
         return pesanti.getQueueLength();
     }
 
+    /** Per i test: i turni liberi per le parti pesanti (1 quando nessuno lavora). */
+    int turniLiberi() {
+        return pesanti.availablePermits();
+    }
+
     /** Ogni quanto chi aspetta il turno per le parti pesanti guarda se il suo lavoro è stato annullato. */
     private static final long ATTESA_TURNO = 200;
 
     /** Per chi non si annulla (caricamenti, Takeout): si aspetta il turno senza guardare. */
-    static final BooleanSupplier NON_ANNULLABILE = () -> false;
+    static final ControlloFile NON_ANNULLABILE = ControlloFile.NESSUNO;
 
     /**
      * Il lavoro (importazione, indicizzazione) è stato annullato mentre il
@@ -328,21 +352,23 @@ public class FotoService {
      *                  file si sposta, senza ricopiarlo ({@link ArchivioFile#salvaOriginale});
      *                  altrimenti si copia e, entrata la scheda, si toglie. Un
      *                  doppione resta dov'è: lo toglie chi chiama.
-     * @param annullata guardata mentre si legge l'hash e mentre si aspetta il
-     *                  turno per le parti pesanti: se diventa vera il file si
-     *                  lascia com'era e si lancia {@link Annullata}
+     * @param controllo guardato mentre si legge l'hash, mentre si aspetta il
+     *                  turno per le parti pesanti e prima di ogni scrittura: se
+     *                  dice {@link ControlloFile#fermato fermato} (annullato, o
+     *                  abbandonato perché appeso) il file si lascia com'era e si
+     *                  lancia {@link Annullata}. Riceve anche la fase.
      */
     public Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
-            boolean sposta, BooleanSupplier annullata) {
-        return importa(nome, file, ultimaModifica, album, caricataDa, null, sposta, annullata);
+            boolean sposta, ControlloFile controllo) {
+        return importa(nome, file, ultimaModifica, album, caricataDa, null, sposta, controllo);
     }
 
     private Caricamento importa(String nome, Path file, Instant ultimaModifica, String album, String caricataDa,
-            MetadatiEsterni esterni, boolean sposta, BooleanSupplier annullata) {
+            MetadatiEsterni esterni, boolean sposta, ControlloFile controllo) {
         archivio.verificaDisponibile();
         Letto letto;
         try {
-            letto = leggi(nome, file, annullata);
+            letto = leggi(nome, file, controllo);
         } catch (Scartato s) {
             return s.esito;
         }
@@ -366,10 +392,17 @@ public class FotoService {
         try {
             // Le anteprime prima di mettere il file in archivio, dall'origine: finché
             // si aspetta il turno (annullabile) l'archivio non è ancora stato toccato.
-            anteprime(letto, file, annullata);
+            anteprime(letto, file, controllo);
+            if (controllo.fermato()) {
+                throw new Annullata();
+            }
+            controllo.fase(ControlloFile.Fase.SPOSTAMENTO);
             salvato = archivio.salvaOriginale(nome, foto.getId(), letto.estensione(),
                     foto.getScattataIl().toLocalDate(), file, sposta);
             foto.setPercorso(salvato.percorso());
+            controllo.fase(ControlloFile.Fase.SALVATAGGIO);
+            // Abbandonato mentre spostava (il MOVE sul cloud che non tornava): niente scheda, il file torna indietro.
+            controllo.primaDiScrivere();
             Foto inserita = repository.insert(foto);
             if (sposta && !salvato.spostato()) {
                 togliOrigine(nome, file);
@@ -378,7 +411,8 @@ public class FotoService {
             eventi.publishEvent(new FotoAggiunta(inserita.getId()));
             return new Caricamento(nome, Esito.CARICATA, inserita, null);
         } catch (Annullata a) {
-            archivio.elimina(foto.getId(), null);
+            // Prima dell'archivio: via le miniature. Dopo: l'originale torna nell'origine, o la copia si toglie.
+            annullaSalvataggio(foto, salvato, file);
             throw a;
         } catch (DuplicateKeyException e) {
             // Stesso file caricato in parallelo: ha vinto l'altro.
@@ -428,8 +462,8 @@ public class FotoService {
         return indicizza(file, NON_ANNULLABILE);
     }
 
-    /** Come {@link #indicizza(Path)}; {@code annullata} come in {@link #importa(String, Path, Instant, String, String, boolean, BooleanSupplier)}. */
-    public Caricamento indicizza(Path file, BooleanSupplier annullata) {
+    /** Come {@link #indicizza(Path)}; {@code controllo} come in {@link #importa(String, Path, Instant, String, String, boolean, ControlloFile)}. */
+    public Caricamento indicizza(Path file, ControlloFile controllo) {
         archivio.verificaDisponibile();
         String nome = file.getFileName().toString();
         String percorso;
@@ -444,7 +478,7 @@ public class FotoService {
         }
         Letto letto;
         try {
-            letto = leggi(nome, file, annullata);
+            letto = leggi(nome, file, controllo);
         } catch (Scartato s) {
             // Anche una copia identica di una foto che sta altrove: il file resta dov'è, senza scheda.
             return s.esito;
@@ -459,7 +493,9 @@ public class FotoService {
             } else {
                 data(foto, letto.data(), modifica, OrigineData.FILE);
             }
-            anteprime(letto, file, annullata);
+            anteprime(letto, file, controllo);
+            controllo.fase(ControlloFile.Fase.SALVATAGGIO);
+            controllo.primaDiScrivere();
             foto = repository.insert(foto);
             segnalaConversione(foto);
         } catch (Annullata a) {
@@ -478,7 +514,9 @@ public class FotoService {
         }
         // Dopo l'inserimento: se lo spostamento non riesce la scheda è giusta lo stesso, e il riordino ci riprova.
         try {
-            if (mettiAlSuoPosto(foto)) {
+            controllo.fase(ControlloFile.Fase.SPOSTAMENTO);
+            // Abbandonato intanto: la scheda è giusta lo stesso, lo spostamento lo rifà il riordino.
+            if (!controllo.fermato() && mettiAlSuoPosto(foto)) {
                 foto = repository.save(foto);
             }
         } catch (RuntimeException e) {
@@ -509,7 +547,7 @@ public class FotoService {
      * JPEG da cui fare la miniatura (e per gli HEIC la vista), null per le foto
      * normali; {@code data} quella dei metadati, se c'è.
      */
-    private Letto leggi(String nome, Path file, BooleanSupplier annullata) throws Scartato {
+    private Letto leggi(String nome, Path file, ControlloFile controllo) throws Scartato {
         String estensione = estensione(nome);
         Genere genere = genere(estensione);
         if (genere == null) {
@@ -520,6 +558,7 @@ public class FotoService {
         // Una sola lettura dall'inizio alla fine: i primi byte dicono se è cifrato,
         // tutto il file dà l'hash. Dal cloud è l'unico scaricamento: quello che
         // segue (metadati, miniatura) rilegge il file dalla cache di rclone.
+        controllo.fase(ControlloFile.Fase.LETTURA);
         try (InputStream in = Files.newInputStream(file)) {
             byte[] inizio = in.readNBytes(INTESTAZIONE_LCB2.length);
             // Prima di tutto (anche degli strumenti che mancano): un file cifrato resta
@@ -536,12 +575,17 @@ public class FotoService {
             }
             MessageDigest sha = sha256();
             sha.update(inizio);
-            dimensione = inizio.length + aggiungi(sha, in, annullata);
+            dimensione = inizio.length + aggiungi(sha, in, controllo);
             hash = HexFormat.of().formatHex(sha.digest());
         } catch (IOException e) {
             log.warn("{} illeggibile: {}", nome, e.toString());
             throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, illeggibile(e)));
         }
+        if (controllo.fermato()) {
+            // La lettura appesa è tornata, ma il file è stato abbandonato (o il lavoro annullato).
+            throw new Annullata();
+        }
+        controllo.fase(ControlloFile.Fase.METADATI);
         Optional<Foto> esistente = repository.findByHash(hash);
         if (esistente.isPresent()) {
             throw new Scartato(new Caricamento(nome, Esito.DUPLICATA, esistente.get(), "Già in archivio"));
@@ -574,7 +618,8 @@ public class FotoService {
                     unaAllaVolta(() -> {
                         media.heicInJpeg(file, jpeg);
                         return null;
-                    }, annullata);
+                    }, ControlloFile.Fase.CONVERSIONE_HEIC, controllo);
+                    controllo.fase(ControlloFile.Fase.METADATI);
                     // heif-convert lo scrive già dritto: le dimensioni sono quelle del JPEG.
                     int[] dimensioni = dimensioni(anteprima);
                     foto.setLarghezza(dimensioni[0]);
@@ -597,7 +642,7 @@ public class FotoService {
                     unaAllaVolta(() -> {
                         media.fotogramma(file, info.durata(), jpeg);
                         return null;
-                    }, annullata);
+                    }, ControlloFile.Fase.FOTOGRAMMA, controllo);
                     data = info.ripresoIl();
                 }
                 default -> throw new IllegalStateException(genere.name());
@@ -633,11 +678,11 @@ public class FotoService {
     }
 
     /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
-    private void anteprime(Letto letto, Path file, BooleanSupplier annullata) throws Exception {
+    private void anteprime(Letto letto, Path file, ControlloFile controllo) throws Exception {
         unaAllaVolta(() -> {
             faiAnteprime(letto, file);
             return null;
-        }, annullata);
+        }, ControlloFile.Fase.MINIATURA, controllo);
     }
 
     private void faiAnteprime(Letto letto, Path file) throws IOException {
@@ -1118,11 +1163,11 @@ public class FotoService {
      * video dal cloud sono minuti: fra un pezzo e l'altro guarda se il lavoro
      * è stato annullato ({@link Annullata}; il file non è stato toccato).
      */
-    private static long aggiungi(MessageDigest sha, InputStream in, BooleanSupplier annullata) throws IOException {
+    private static long aggiungi(MessageDigest sha, InputStream in, ControlloFile controllo) throws IOException {
         byte[] pezzo = new byte[64 * 1024];
         long letti = 0;
         for (int n; (n = in.read(pezzo)) >= 0; ) {
-            if (annullata.getAsBoolean()) {
+            if (controllo.fermato()) {
                 throw new Annullata();
             }
             sha.update(pezzo, 0, n);

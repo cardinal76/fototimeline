@@ -320,8 +320,12 @@ un'importazione); alla fine la timeline si ricarica.
   tutto il tempo di un file è attesa di rete (circa 1,3 s a file uno alla
   volta), e così le attese si sovrappongono. Miniature, heif-convert e ffmpeg
   restano uno alla volta, per i 384 MB della JVM. Annulla non comincia file
-  nuovi e aspetta quelli in corso. Più di 4–6 serve a poco: il collo di
-  bottiglia diventa la CPU o il WebDAV di LifetimeCloud.
+  nuovi e aspetta quelli in corso (al massimo `FOTOTIMELINE_ATTESA_ANNULLAMENTO`,
+  poi li abbandona). Più di 4–6 serve a poco: il collo di bottiglia diventa la
+  CPU o il WebDAV di LifetimeCloud.
+- Un file che non risponde (una lettura dal mount che non torna) non ferma il
+  lavoro: oltre il tempo massimo si abbandona e conta come errore di lettura,
+  da riprovare al giro dopo. Vedi "Un lavoro fermo" più sotto.
 
 #### Da pCloud, in quattro passi
 
@@ -713,6 +717,60 @@ mountpoint ~/fototimeline/cloud        # montato o no, visto dall'host
 Se rclone viene fermato male, il montaggio può restare appeso
 (`Transport endpoint is not connected`): `fusermount3 -uz ~/fototimeline/cloud`.
 Il workflow di rilascio lo fa da solo.
+
+### Un lavoro fermo: cosa sta facendo
+
+Il riquadro dell'importazione (o dell'indicizzazione) mostra, mentre gira, una
+riga per ogni file in lavorazione: `In lavorazione: telefono/VID_1.mp4 ·
+lettura e impronta · 14 min`. Le fasi: in partenza, lettura e impronta (hash,
+cioè il download dal cloud), metadati, in attesa del turno per la miniatura,
+conversione HEIC, fotogramma del video, miniatura, spostamento o copia,
+salvataggio della scheda, attesa prima di riprovare, ultimi controlli.
+
+Un file non può tenere fermo il lavoro:
+
+| Variabile | Predefinito | Cosa fa |
+| --- | --- | --- |
+| `FOTOTIMELINE_TEMPO_MASSIMO_FILE` | `PT5M` | tempo massimo di un file, più quello per GB |
+| `FOTOTIMELINE_TEMPO_MASSIMO_PER_GB` | `PT5M` | in più per ogni GB del file (un video da 2 GB: 15 minuti) |
+| `FOTOTIMELINE_ATTESA_ANNULLAMENTO` | `PT1M` | dopo Annulla, quanto si aspettano i file già cominciati |
+
+Si cambiano nel `.env` (le passa `deploy/docker-compose.yml`) e valgono al riavvio.
+
+Oltre il tempo il file si **abbandona**: tra gli errori della barra come
+`File illeggibile (fermo da 5 min in «lettura e impronta», oltre il tempo
+massimo: abbandonato, si riprova al prossimo giro)`. È un errore di lettura,
+non del file: la cartella automatica non lo mette tra i "già falliti" e lo
+rilegge al giro dopo. Il thread di quel file, se è dentro una lettura del mount
+FUSE, non si può interrompere e resta lì, ma ha già lasciato il turno delle
+miniature agli altri; se la lettura poi torna, smette senza scrivere niente
+(né scheda né spostamento: un file già spostato torna nell'origine). Nel log
+dell'app c'è una riga `abbandonato` con la pila del thread, cioè dove era
+fermo. Dopo Annulla il lavoro si chiude al più tardi dopo
+`FOTOTIMELINE_ATTESA_ANNULLAMENTO`; se è appeso fuori dai file (l'elenco di
+una cartella del cloud) lo chiude un guardiano dopo il doppio, scrivendo nel
+log dove era fermo. Un errore inatteso (anche un `OutOfMemoryError`) chiude il
+lavoro come "non riuscita", con il messaggio nel riquadro: non resta più "in
+corso" senza nessuno che lo faccia.
+
+**Dump dei thread.** `GET /api/diagnostica/thread` (solo admin) risponde in
+testo con lo stato del lavoro, i file in lavorazione e il dump di **tutti** i
+thread della JVM, virtuali compresi (`HotSpotDiagnosticMXBean.dumpThreads`):
+nel container non c'è `jcmd`, e `kill -3 1` non elenca i thread virtuali. Il
+modo più semplice: da admin, aprire nel browser
+`https://<dominio>/api/diagnostica/thread`. Con curl serve la sessione del
+browser, come per ogni altra API (login con cookie, niente token): dagli
+strumenti per sviluppatori, *Application → Cookies*, copiare `JSESSIONID`, poi
+
+```bash
+curl -sf -b "JSESSIONID=<valore>" https://<dominio>/api/diagnostica/thread > thread-$(date +%F-%H%M).txt
+grep -A30 'importazione' thread-*.txt     # il lavoro e i thread dei file, col percorso nel nome
+```
+
+I thread di un lavoro si chiamano `importazione` (il lavoro) e
+`importazione-file <percorso>` (uno per file in corso, anche quelli
+abbandonati e ancora appesi): sono thread normali, quindi li mostra anche
+`docker kill -s QUIT fototimeline-app-1` (`kill -3`), nel log del container.
 
 ## Backup
 

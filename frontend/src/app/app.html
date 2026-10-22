@@ -617,8 +617,18 @@
         }
       </p>
     }
+    @if (l.stato === 'IN_CORSO') {
+      @for (f of l.inLavorazione ?? []; track f.file) {
+        <p class="corrente tenue" [title]="f.file + ' · ' + f.fase + ' da ' + daQuanto(f.secondiFase)">
+          In lavorazione: {{ f.file }} · {{ f.fase }} · {{ daQuanto(f.secondi) }}
+        </p>
+      }
+    }
     @if (l.stato === 'IN_CORSO' && l.annullamento) {
-      <p class="tenue">Annullato: finiscono i file già cominciati, poi si ferma. Quelli non fatti restano dove sono.</p>
+      <p class="tenue">
+        Annullato: finiscono i file già cominciati, poi si ferma. Quelli non fatti restano dove sono; un file che non
+        risponde si lascia dopo un minuto.
+      </p>
     }
     @if (l.errore) {
       <p class="errore">{{ l.errore }}</p>
