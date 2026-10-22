@@ -14,6 +14,10 @@
 #   foto-da-pcloud.sh archivia   ordinate/ -> ARCHIVIO/AAAA/AAAA-MM.zip su pCloud, poi controlla
 #   foto-da-pcloud.sh pulisci    dopo GIORNI giorni da carica e archivia: cancella da pCloud
 #                                gli originali copiati (file, zip, cartelle rimaste vuote)
+#   foto-da-pcloud.sh metti-da-parte
+#                                sposta su pCloud, in RIMASTI, quelli rimasti in da-controllare.txt
+#                                (zip con altri file, file non letti, zip rovinati), per guardarli
+#                                tutti insieme. Chiede SPOSTA, non cancella niente
 #   foto-da-pcloud.sh stato      a che punto è
 #
 # La prima volta (poi si ricordano in LAVORO/impostazioni):
@@ -23,7 +27,7 @@
 #   foto-da-pcloud.sh raccogli
 # ESCLUDI: cartelle da saltare, relative a RADICE e separate da ":" (le scansioni
 # in JPG sono foto per lo script: le cartelle di documenti vanno escluse). Si
-# saltano sempre ARCHIVIO, "Crypto Folder" e le cartelle di sistema di Windows.
+# saltano sempre ARCHIVIO, RIMASTI, "Crypto Folder" e le cartelle di sistema di Windows.
 # Più radici: un raccogli per radice, prima di carica; i doppioni tra una e
 # l'altra entrano una volta sola.
 #
@@ -44,6 +48,14 @@
 # dentro anche altri file (documenti, ...) e i file non letti restano dove sono,
 # elencati in LAVORO/da-controllare.txt. Dopo carica, nell'app: "Indicizza archivio".
 #
+# metti-da-parte li sposta tutti in RIMASTI (predefinita "RADICE/Da controllare", si ricorda
+# in impostazioni), ognuno col suo percorso sotto RADICE: /mnt/p/Backups/x.zip finisce in
+# "Da controllare/Backups/x.zip". Prima dice quanti sono e quanto pesano e chiede SPOSTA.
+# Con scarica fatto sposta con rclone sul remote PCLOUD (lato server, niente download),
+# se no con mv su P:. Un file che a destinazione c'è già non si sovrascrive, uno che su
+# pCloud non c'è più si salta; tutto finisce in LAVORO/messi-da-parte.tsv, così rilanciato
+# rifà solo quelli non ancora spostati. RIMASTI poi si salta sempre, come ARCHIVIO.
+#
 # Serve: unzip, zip, exiftool, rclone (sudo apt install unzip zip libimage-exiftool-perl rclone).
 set -euo pipefail
 
@@ -53,7 +65,7 @@ IMPOSTAZIONI="$LAVORO/impostazioni"
 mkdir -p "$LAVORO"
 # Quello dato sulla riga di comando vale più di quello ricordato.
 DATI_RADICE="${RADICE:-}" DATI_ARCHIVIO="${ARCHIVIO:-}" DATI_DESTINAZIONE="${DESTINAZIONE:-}" DATI_GIORNI="${GIORNI:-}"
-DATI_ESCLUDI="${ESCLUDI-__nessuno__}" DATI_PCLOUD="${PCLOUD:-}"
+DATI_ESCLUDI="${ESCLUDI-__nessuno__}" DATI_PCLOUD="${PCLOUD:-}" DATI_RIMASTI="${RIMASTI:-}"
 if [ -f "$IMPOSTAZIONI" ]; then
     # shellcheck disable=SC1090
     . "$IMPOSTAZIONI"
@@ -65,6 +77,13 @@ GIORNI="${DATI_GIORNI:-${GIORNI:-7}}"
 [ "$DATI_ESCLUDI" != __nessuno__ ] && ESCLUDI="$DATI_ESCLUDI"
 ESCLUDI="${ESCLUDI:-}"
 PCLOUD="${DATI_PCLOUD:-${PCLOUD:-}}"
+# Dove metti-da-parte mette i file rimasti: relativa vuol dire sotto RADICE.
+RIMASTI="${DATI_RIMASTI:-${RIMASTI:-}}"
+if [ -n "$RADICE" ]; then
+    RIMASTI="${RIMASTI:-Da controllare}"
+    case "$RIMASTI" in /*) ;; *) RIMASTI="${RADICE%/}/$RIMASTI" ;; esac
+    [ "$RIMASTI" != / ] && RIMASTI="${RIMASTI%/}"
+fi
 RCLONE="${RCLONE:-rclone}"
 # File scaricati in parallelo da pCloud: con tante foto piccole il limite è l'attesa per
 # file, non la banda (8 -> 24 ha portato una fibra da 8 a 29 MB/s).
@@ -80,6 +99,7 @@ MANIFEST="$LAVORO/manifest.tsv"          # fonte \t file nello zip (o vuoto) \t 
 FONTI="$LAVORO/fonti.tsv"                # file|zip \t fonte \t si|no (si = si può cancellare)
 DA_CONTROLLARE="$LAVORO/da-controllare.txt"
 ARCHIVIATI="$LAVORO/archiviati.tsv"      # AAAA/MM \t zip su pCloud
+MESSI_DA_PARTE="$LAVORO/messi-da-parte.tsv"  # origine \t destinazione in RIMASTI \t esito
 RADICI="$LAVORO/radici.txt"              # le cartelle raccolte, una per riga
 TMP="$LAVORO/tmp"
 SPECCHIO="$LAVORO/specchio"              # copia locale di RADICE fatta da "scarica"
@@ -90,11 +110,16 @@ SCARTA_NEI_ZIP=()
 # shellcheck source=lib-foto.sh
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-foto.sh"
 
-# Il find delle radici: salta l'archivio, le cartelle escluse e quelle di sistema.
+# Il find delle radici: salta l'archivio, i file messi da parte (RIMASTI, anche nella
+# copia locale), le cartelle escluse e quelle di sistema.
 trova() {
     local radice="$1"; shift
     local -a salta=(-path "$ARCHIVIO" -o -name 'Crypto Folder' -o -name 'System Volume Information'
         -o -name '$RECYCLE.BIN' -o -name '.Trash*' -o -name '.pcloud*')
+    if [ -n "$RIMASTI" ]; then
+        salta+=(-o -path "$RIMASTI")
+        [ "${RIMASTI#"$RADICE"/}" != "$RIMASTI" ] && salta+=(-o -path "$radice/${RIMASTI#"$RADICE"/}")
+    fi
     local x
     local IFS=:
     for x in $ESCLUDI; do
@@ -112,8 +137,19 @@ controlla_archivio() {
 }
 
 salva_impostazioni() {
-    printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nDESTINAZIONE=%q\nGIORNI=%q\nPCLOUD=%q\n' \
-        "$RADICE" "$ARCHIVIO" "$ESCLUDI" "$DESTINAZIONE" "$GIORNI" "$PCLOUD" > "$IMPOSTAZIONI"
+    printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nDESTINAZIONE=%q\nGIORNI=%q\nPCLOUD=%q\nRIMASTI=%q\n' \
+        "$RADICE" "$ARCHIVIO" "$ESCLUDI" "$DESTINAZIONE" "$GIORNI" "$PCLOUD" "$RIMASTI" > "$IMPOSTAZIONI"
+}
+
+# RIMASTI è una cartella dentro RADICE (così rclone la raggiunge dallo stesso remote), non la
+# radice stessa, e non ha a che fare con ARCHIVIO.
+controlla_rimasti() {
+    case "$RIMASTI/" in
+        "$RADICE"/?*/) ;;
+        *) errore "RIMASTI ($RIMASTI) dev'essere una cartella dentro RADICE ($RADICE), per esempio '$RADICE/Da controllare'" ;;
+    esac
+    case "$RIMASTI/" in "$ARCHIVIO"/*) errore "RIMASTI ($RIMASTI) non può stare in ARCHIVIO ($ARCHIVIO)" ;; esac
+    case "$ARCHIVIO/" in "$RIMASTI"/*) errore "ARCHIVIO ($ARCHIVIO) non può stare in RIMASTI ($RIMASTI)" ;; esac
 }
 
 # Il remote rclone che corrisponde a RADICE: P: intero è "pcloud:", /mnt/p/Foto è "pcloud:Foto".
@@ -136,7 +172,9 @@ anteprima() {
     controlla_archivio
     salva_impostazioni
     echo "Cerco in $RADICE (può volerci qualche minuto)…"
-    echo "Salto: ${ARCHIVIO#"$RADICE"/}, Crypto Folder, cartelle di sistema${ESCLUDI:+, $ESCLUDI}"
+    local da_parte=""
+    [ -d "$RIMASTI" ] && da_parte="${RIMASTI#"$RADICE"/}, "
+    echo "Salto: ${ARCHIVIO#"$RADICE"/}, ${da_parte}Crypto Folder, cartelle di sistema${ESCLUDI:+, $ESCLUDI}"
     conta_media "$RADICE"
     date +%s > "$LAVORO/anteprima.ok"
     echo
@@ -157,6 +195,8 @@ scarica() {
     {
         rel="${ARCHIVIO#"$RADICE"/}"
         [ "$rel" != "$ARCHIVIO" ] && printf -- '- /%s/**\n' "$rel"
+        rel="${RIMASTI#"$RADICE"/}"
+        [ -n "$RIMASTI" ] && [ "$rel" != "$RIMASTI" ] && printf -- '- /%s/**\n' "$rel"
         printf -- '- Crypto Folder/**\n- System Volume Information/**\n- $RECYCLE.BIN/**\n- .Trash*/**\n- .pcloud*/**\n'
         local IFS=:
         for x in $ESCLUDI; do [ -n "$x" ] && printf -- '- /%s/**\n' "${x%/}"; done
@@ -280,6 +320,8 @@ pulisci() {
     local tipo fonte ok
     while IFS=$'\t' read -r tipo fonte ok; do
         [ "$ok" = si ] || continue
+        # Quello messo da parte non si tocca (lì ci sono solo "no", ma meglio esserne certi).
+        if [ -n "$RIMASTI" ] && [[ "$fonte" == "$RIMASTI"/* ]]; then continue; fi
         if [ -n "$con_rclone" ] || [ -e "$fonte" ]; then via+=("$fonte"); fi
     done < "$FONTI"
     if [ "${#via[@]}" -eq 0 ]; then
@@ -348,6 +390,186 @@ pulisci_con_rclone() {
     echo "Fatto. Le copie di lavoro sul PC non servono più: rm -rf '$ORDINATE' '$SPECCHIO'"
 }
 
+# I file rimasti su pCloud, quelli di da-controllare.txt, tutti insieme in RIMASTI: lì si
+# guardano a mano. Il percorso nelle righe è già quello vero sotto RADICE, anche se raccogli
+# ha letto dalla copia locale: lo scrivono applica_zip e applica_sciolti con fonte_in, che
+# toglie specchio/ e rimette il nome lungo di pCloud al posto di quello accorciato da scarica.
+# Le righe rientrate di 4 spazi (nomi d'esempio delle versioni vecchie) non contano.
+metti_da_parte() {
+    [ -n "$RADICE" ] || errore "manca RADICE: prima $0 anteprima"
+    [ "$RADICE" != / ] && RADICE="${RADICE%/}"
+    ARCHIVIO="${ARCHIVIO%/}"
+    controlla_rimasti
+    [ -s "$DA_CONTROLLARE" ] || { echo "Niente da mettere da parte: $DA_CONTROLLARE è vuoto o non c'è."; exit 0; }
+    # Con scarica fatto si sposta con rclone, lato server; se no con mv su P:.
+    local con_rclone=""
+    [ -f "$LAVORO/fase-scarica.ok" ] && [ -n "$PCLOUD" ] && con_rclone=1
+    if [ -n "$con_rclone" ]; then
+        richiede "$RCLONE"
+    else
+        [ -d "$RADICE" ] || errore "$RADICE non c'è (pCloud montato? sudo mount -t drvfs P: /mnt/p)"
+    fi
+    salva_impostazioni
+    local dentro="${RIMASTI#"$RADICE"/}"   # RIMASTI relativa a RADICE, cioè al remote PCLOUD
+
+    # Il registro: origine \t destinazione \t esito. Quello "spostato" non si rifà.
+    local -A ESITO=()
+    local o e riga
+    touch "$MESSI_DA_PARTE"
+    while IFS=$'\t' read -r o _ e; do [ -n "$o" ] && ESITO[$o]="$e"; done < "$MESSI_DA_PARTE"
+
+    local re_zip='^zip con [0-9]+ altri file, resta su pCloud: (.+)$'
+    local re_letto='^non letto: (.+)$'
+    local re_rotto='^zip rovinato \(unzip [0-9]+\): (.+)$'
+    local -A VISTA=() TIPO=()
+    local -a ordine=() rels=() fuori=()
+    local f tipo prima=0
+    while IFS= read -r riga; do
+        if [[ "$riga" =~ $re_zip ]]; then tipo=zip
+        elif [[ "$riga" =~ $re_letto ]]; then tipo=letto
+        elif [[ "$riga" =~ $re_rotto ]]; then tipo=rotto
+        else continue
+        fi
+        f="${BASH_REMATCH[1]}"
+        [ -n "${VISTA[$f]:-}" ] && continue
+        VISTA[$f]=1
+        # Da un'altra radice (radici.txt): RIMASTI è sotto questa, quelli restano dove sono.
+        if [[ "$f" != "$RADICE"/* ]] || [[ "$f" == "$RIMASTI"/* ]]; then fuori+=("$f"); continue; fi
+        ordine+=("$f")
+        if [ "${ESITO[$f]:-}" = spostato ]; then prima=$((prima + 1)); continue; fi
+        rels+=("${f#"$RADICE"/}")
+        TIPO[${f#"$RADICE"/}]="$tipo"
+    done < "$DA_CONTROLLARE"
+
+    # Dove sono adesso: l'origine c'è ancora? A destinazione c'è già un file con quel nome?
+    local origini="$LAVORO/da-spostare-origini.txt" arrivi="$LAVORO/da-spostare-arrivi.txt" rel
+    local -A PESO=() ARRIVO=()
+    printf '%s\n' "${rels[@]}" | sed '/^$/d' > "$origini"
+    sed "s|^|$(printf '%s' "$dentro" | sed 's/[\\|&]/\\&/g')/|" "$origini" > "$arrivi"
+    presenti PESO "$origini"
+    presenti ARRIVO "$arrivi"
+
+    local -a sposta=() doppi=() mancano=()
+    local n_zip=0 n_letti=0 n_rotti=0 peso=0 p
+    for rel in "${rels[@]}"; do
+        if [ -n "${PESO[$rel]+c}" ]; then
+            if [ -n "${ARRIVO[$dentro/$rel]+c}" ]; then
+                doppi+=("$rel"); ESITO[$RADICE/$rel]="c'è già a destinazione, non sovrascritto"
+            else
+                sposta+=("$rel"); p="${PESO[$rel]}"; peso=$((peso + p))
+                case "${TIPO[$rel]}" in zip) n_zip=$((n_zip + 1)) ;; letto) n_letti=$((n_letti + 1)) ;; *) n_rotti=$((n_rotti + 1)) ;; esac
+            fi
+        elif [ -n "${ARRIVO[$dentro/$rel]+c}" ]; then
+            # Spostato da un giro interrotto prima di scrivere il registro.
+            ESITO[$RADICE/$rel]=spostato; prima=$((prima + 1))
+        else
+            mancano+=("$rel"); ESITO[$RADICE/$rel]="non c'è più su pCloud"
+        fi
+    done
+
+    if [ "${#doppi[@]}" -gt 0 ]; then
+        echo "Salto ${#doppi[@]} file: in $RIMASTI c'è già un file con lo stesso nome (non lo sovrascrivo):"
+        printf '    %s\n' "${doppi[@]:0:10}"
+    fi
+    if [ "${#mancano[@]}" -gt 0 ]; then
+        echo "Salto ${#mancano[@]} file che su pCloud non ci sono più:"
+        printf '    %s\n' "${mancano[@]:0:10}"
+    fi
+    if [ "${#fuori[@]}" -gt 0 ]; then
+        echo "Salto ${#fuori[@]} file fuori da $RADICE (o già in $RIMASTI): restano dove sono"
+        printf '    %s\n' "${fuori[@]:0:10}"
+    fi
+    [ "$prima" -gt 0 ] && echo "Già messi da parte: $prima file."
+    if [ "${#sposta[@]}" -eq 0 ]; then
+        echo "Niente da spostare."
+        scrivi_messi_da_parte
+        riepilogo_messi_da_parte
+        rm -f "$origini" "$arrivi"
+        return
+    fi
+    echo "Sposto in $RIMASTI ${#sposta[@]} file ($(numfmt --to=iec --suffix=B "$peso")):" \
+        "$n_zip zip con altri file, $n_letti non letti, $n_rotti zip rovinati. Per esempio:"
+    printf '    %s\n' "${sposta[@]:0:10}"
+    echo "(ognuno col suo percorso: ${sposta[0]} -> $dentro/${sposta[0]})"
+    local risposta=""
+    read -r -p "Scrivi SPOSTA per confermare: " risposta || true
+    if [ "$risposta" != SPOSTA ]; then
+        echo "Non ho spostato niente."
+        rm -f "$origini" "$arrivi"
+        exit 0
+    fi
+
+    printf '%s\n' "${sposta[@]}" > "$origini"
+    sed "s|^|$(printf '%s' "$dentro" | sed 's/[\\|&]/\\&/g')/|" "$origini" > "$arrivi"
+    if [ -n "$con_rclone" ]; then
+        # Un solo rclone per tutti: con --files-from sposta file per file (mai una cartella
+        # intera), lato server, e crea le cartelle; --ignore-existing: mai sovrascrivere.
+        echo "Sposto con rclone su $PCLOUD…"
+        rc move "$PCLOUD" "$(remoto_di "$RIMASTI")" --files-from-raw "$origini" --ignore-existing \
+            --transfers "$TRASFERIMENTI" --stats-one-line --stats 30s --stats-log-level NOTICE || echo "rclone non è finito bene: controllo cosa si è spostato." >&2
+    else
+        echo "Sposto su $RADICE…"
+        for rel in "${sposta[@]}"; do
+            if mkdir -p "$(dirname "$RIMASTI/$rel")"; then mv -n -- "$RADICE/$rel" "$RIMASTI/$rel" || true; fi
+        done
+    fi
+    # Spostato è solo quello che ora è a destinazione e non più all'origine.
+    PESO=() ARRIVO=()
+    presenti PESO "$origini"
+    presenti ARRIVO "$arrivi"
+    local male=0
+    for rel in "${sposta[@]}"; do
+        if [ -n "${ARRIVO[$dentro/$rel]+c}" ] && [ -z "${PESO[$rel]+c}" ]; then
+            ESITO[$RADICE/$rel]=spostato
+        else
+            ESITO[$RADICE/$rel]="non spostato"; male=$((male + 1))
+        fi
+    done
+    scrivi_messi_da_parte
+    rm -f "$origini" "$arrivi"
+    riepilogo_messi_da_parte
+    [ "$male" -eq 0 ] || errore "$male file non si sono spostati (\"non spostato\" in $MESSI_DA_PARTE): rilancia $0 metti-da-parte"
+}
+
+# presenti MAPPA LISTA: per i percorsi della LISTA (relativi a RADICE) che ci sono, MAPPA[percorso]
+# = dimensione. Con rclone un solo lsf, che guarda solo quei file.
+# shellcheck disable=SC2004,SC2034
+presenti() {
+    local -n mappa="$1"
+    local lista="$2" peso rel
+    [ -s "$lista" ] || return 0
+    if [ -n "$con_rclone" ]; then
+        local uscita
+        uscita="$(rc lsf -R --files-only --files-from-raw "$lista" --format sp --separator $'\t' "$PCLOUD")" \
+            || errore "non riesco a leggere $PCLOUD: rilancia $0 metti-da-parte"
+        while IFS=$'\t' read -r peso rel; do
+            [ -n "$rel" ] && mappa[$rel]="$peso"
+        done <<< "$uscita"
+    else
+        while IFS= read -r rel; do
+            [ -f "$RADICE/$rel" ] && mappa[$rel]="$(stat -c %s -- "$RADICE/$rel")"
+        done < "$lista"
+    fi
+    return 0
+}
+
+# Il registro di nuovo, nell'ordine di da-controllare.txt (vedono ESITO, ordine, dentro).
+scrivi_messi_da_parte() {
+    local o
+    for o in "${ordine[@]}"; do
+        [ -n "${ESITO[$o]:-}" ] && printf '%s\t%s\t%s\n' "$o" "$RIMASTI/${o#"$RADICE"/}" "${ESITO[$o]}"
+    done > "$MESSI_DA_PARTE.nuovo"
+    mv "$MESSI_DA_PARTE.nuovo" "$MESSI_DA_PARTE"
+}
+
+riepilogo_messi_da_parte() {
+    echo "In $MESSI_DA_PARTE:"
+    cut -f3 "$MESSI_DA_PARTE" | sort | uniq -c | sed 's/^ */    /'
+    [ "${#fuori[@]}" -gt 0 ] && echo "    ${#fuori[@]} fuori da $RADICE, non toccati"
+    grep -q $'\tspostato$' "$MESSI_DA_PARTE" && echo "I file messi da parte sono in $RIMASTI."
+    return 0
+}
+
 stato() {
     echo "Lavoro:      $LAVORO"
     if [ -s "$RADICI" ]; then
@@ -367,6 +589,9 @@ stato() {
     [ -f "$LAVORO/fase-carica.ok" ] && echo "Caricati:    $(data_di "$LAVORO/fase-carica.ok")" || echo "Caricati:    -"
     [ -f "$LAVORO/fase-archivia.ok" ] && echo "Archiviati:  $(data_di "$LAVORO/fase-archivia.ok")" || echo "Archiviati:  -"
     [ -f "$LAVORO/fase-pulisci.ok" ] && echo "Puliti:      $(data_di "$LAVORO/fase-pulisci.ok")" || echo "Puliti:      -"
+    if [ -s "$MESSI_DA_PARTE" ]; then
+        echo "Da parte:    $(grep -c $'\tspostato$' "$MESSI_DA_PARTE" || true) file in $RIMASTI"
+    fi
 }
 
 case "$FASE" in
@@ -376,6 +601,7 @@ case "$FASE" in
     carica) carica ;;
     archivia) archivia ;;
     pulisci) pulisci ;;
+    metti-da-parte) metti_da_parte ;;
     stato) stato ;;
-    *) errore "fase sconosciuta: $FASE (anteprima, scarica, raccogli, carica, archivia, pulisci, stato)" ;;
+    *) errore "fase sconosciuta: $FASE (anteprima, scarica, raccogli, carica, archivia, pulisci, metti-da-parte, stato)" ;;
 esac
