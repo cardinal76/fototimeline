@@ -79,6 +79,7 @@ riprende da dove era arrivata. Sempre da `~/projects/fototimeline`, con `p-up` f
 | `carica` | li manda su LifetimeCloud `FotoTimeline/` e controlla | no |
 | `archivia` | su pCloud un zip per mese in `Archivio foto/AAAA/AAAA-MM.zip`, controllato | aggiunge |
 | `pulisci` | dopo 7 giorni e con `CANCELLA`: toglie gli originali copiati | **sì** |
+| `metti-da-parte` | con `SPOSTA`: sposta quelli rimasti (zip con altri file, non letti, rovinati) in `Da controllare/` | sposta |
 | `stato` | a che punto è | no |
 
 **2.1 Anteprima** e cartelle da escludere (documenti, scansioni, cartelle senza foto):
@@ -143,6 +144,21 @@ Rilanciato, riprende: uno zip conta come fatto solo quando è in `fonti.tsv`.
 ./deploy/foto-da-pcloud.sh pulisci           # mostra cosa toglie e chiede CANCELLA
 rm -rf ~/foto-da-pcloud/ordinate ~/foto-da-pcloud/specchio   # le copie sul PC non servono più
 ```
+
+**2.6 Quelli rimasti, tutti insieme.** Gli zip con dentro anche altri file, i file non letti e
+gli zip rovinati (le righe di `~/foto-da-pcloud/da-controllare.txt`) si spostano su pCloud in
+una cartella sola, `Da controllare`, ognuno col suo percorso (`Backups/x.zip` finisce in
+`Da controllare/Backups/x.zip`), per guardarli e decidere a mano:
+
+```bash
+./deploy/foto-da-pcloud.sh metti-da-parte    # dice quanti sono e quanto pesano e chiede SPOSTA
+```
+
+Con rclone lo spostamento è lato server: niente si scarica, niente si cancella. Un file che in
+`Da controllare` c'è già non si sovrascrive, uno sparito da pCloud si salta; l'esito di ognuno è
+in `~/foto-da-pcloud/messi-da-parte.tsv` e rilanciato rifà solo quelli non spostati. Per
+un'altra cartella: `RIMASTI='/mnt/p/Altra cartella'` davanti (si ricorda). Le fasi di prima
+(anteprima, scarica, raccogli, pulisci) quella cartella la saltano sempre.
 
 ---
 

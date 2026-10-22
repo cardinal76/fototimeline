@@ -340,16 +340,30 @@ in fasi separate, ognuna da rilanciare finché non finisce bene:
 | `carica` | copia `ordinate/` in `lifetime:FotoTimeline` e controlla che ci sia tutto. Poi nell'app: **Indicizza archivio**. |
 | `archivia` | su pCloud, in `ARCHIVIO/AAAA/AAAA-MM.zip`: uno zip per mese, controllato dopo la copia. |
 | `pulisci` | solo dopo `GIORNI` (7) giorni da carica e archivia, e dopo aver scritto `CANCELLA`: toglie da pCloud gli originali copiati e le cartelle rimaste vuote. |
+| `metti-da-parte` | dopo aver scritto `SPOSTA`: sposta su pCloud, in `RIMASTI` (`Da controllare`), quelli di `da-controllare.txt` (zip con altri file, file non letti, zip rovinati), ognuno col suo percorso. Non cancella niente. |
 
 Per lo script una scansione in JPG è una foto: le cartelle di documenti vanno
 escluse con `ESCLUDI` (relative a `RADICE`, separate da `:`). Si saltano sempre
-l'archivio, `Crypto Folder` e le cartelle di sistema. Pulisci toglie solo le
+l'archivio, `RIMASTI`, `Crypto Folder` e le cartelle di sistema. Pulisci toglie solo le
 cartelle svuotate da lui, mai le radici né, con tutto P: come radice, le
 cartelle in cima (Automatic Upload, My Pictures, ...).
 
 Gli zip con dentro anche altro (documenti, ...) e i file non letti restano su
 pCloud, elencati in `~/foto-da-pcloud/da-controllare.txt`. `stato` dice a che
 punto è. Sul PC serve spazio quanto tutte le foto, finché non si pulisce.
+
+`metti-da-parte` li raccoglie in una cartella sola di pCloud, `RIMASTI`
+(predefinita `RADICE/Da controllare`, ricordata in `impostazioni`), per
+guardarli insieme e decidere a mano. Ognuno tiene il suo percorso sotto
+`RADICE`: `/mnt/p/Backups/x.zip` va in `Da controllare/Backups/x.zip`. Prima
+dice quanti sono (zip, non letti, rovinati), quanto pesano e i primi 10, poi
+chiede `SPOSTA`. Dopo `scarica` sposta con rclone sul remote `PCLOUD`, lato
+server (un `rclone move --files-from-raw --ignore-existing`), se no con `mv` su
+P:. Un file che a destinazione c'è già non si sovrascrive, uno che su pCloud
+non c'è più si salta: tutti e due si segnalano. L'esito di ognuno va in
+`~/foto-da-pcloud/messi-da-parte.tsv` (origine, destinazione, esito):
+rilanciato rifà solo quelli non ancora spostati. Da lì in poi `anteprima`,
+`scarica`, `raccogli` e `pulisci` saltano `RIMASTI`, come l'archivio.
 
 `carica` crea prima, una alla volta, le cartelle che mancano su LifetimeCloud,
 poi copia `CARICA_PARALLELI` file insieme: se due caricamenti creano insieme la
@@ -368,6 +382,7 @@ deploy/foto-da-pcloud.sh raccogli
 deploy/foto-da-pcloud.sh carica
 deploy/foto-da-pcloud.sh archivia
 deploy/foto-da-pcloud.sh pulisci      # dopo 7 giorni
+deploy/foto-da-pcloud.sh metti-da-parte   # quelli rimasti, in "Da controllare"
 ```
 
 Per controllare che sia stato preso tutto, `deploy/verifica-tutto.sh` rifà in

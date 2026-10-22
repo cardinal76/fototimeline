@@ -15,6 +15,10 @@
 # 4. Cartelle doppie, con un finto LifetimeCloud che le ha: carica crea le cartelle prima di
 #    copiare (una alla volta) e si ferma se ce ne sono di doppie; sistema-cartelle-doppie.sh
 #    le trova, le riunisce senza perdere né cancellare niente, e rilanciato non fa niente.
+# 5. metti-da-parte, con rclone (dopo scarica) e con mv: uno zip con altri file (col nome
+#    lungo), un file non letto e uno zip rovinato finiscono in "Da controllare/<percorso>";
+#    senza SPOSTA non si muove niente, un file già lì non si sovrascrive, uno sparito si
+#    salta, il rilancio non fa niente; dopo, anteprima, scarica, raccogli e pulisci non la vedono.
 #
 # Serve: exiftool, rclone, zip, unzip (ffmpeg facoltativo, per un video vero).
 set -uo pipefail
@@ -100,14 +104,16 @@ gira_pcloud() {   # gira_pcloud SCRIPT con|senza USCITA [SCRIPT dal secondo racc
     # "Creo N cartelle": carica le crea prima di copiare (dopo c34f8b9).
     grep -Ev '^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]+ (NOTICE|INFO|ERROR)|Transferred:|Checks:|Elapsed time|^Creo [0-9]+ cartelle in ' "$out.grezza" \
         | sed -E 's|[0-9]{2}/[0-9]{2}/[0-9]{4} [0-9]{2}:[0-9]{2}|DATA|g' \
-        | sed -E 's|^(Da controllare \(restano su pCloud\): )[0-9]+ righe|\1N righe|' > "$out"
+        | sed -E 's|^(Da controllare \(restano su pCloud\): )[0-9]+ righe|\1N righe|' \
+        | sed 's/, metti-da-parte, stato)$/, stato)/' > "$out"
     {
         echo "== file di lavoro"
         (cd "$l" && for f in impostazioni impronte.tsv manifest.tsv fonti.tsv da-controllare.txt archiviati.tsv radici.txt filtri-scarica.txt da-cancellare.txt; do
             # Senza i nomi d'esempio degli zip con altri file (e il loro conto
             # nell'uscita): dopo c34f8b9 non si scrivono più, con migliaia di file
-            # facevano uscire raccogli (SIGPIPE).
-            [ -f "$f" ] && { echo "-- $f"; grep -v '^    ' "$f" || true; }
+            # facevano uscire raccogli (SIGPIPE). Senza RIMASTI (impostazioni e filtri di
+            # scarica): c'è dalla fase metti-da-parte.
+            [ -f "$f" ] && { echo "-- $f"; grep -v -e '^    ' -e '^RIMASTI=' -e '^- /Da controllare/\*\*$' "$f" || true; }
         done; ls)
         echo "== ordinate";     (cd "$l/ordinate" && find . -type f -exec sha256sum {} + | sort -k2)
         echo "== destinazione"; (cd "$T/dest" && find . -type f -exec sha256sum {} + | sort -k2)
@@ -481,6 +487,93 @@ verifica "carica dopo sistema: va"                        contiene "$T/finto-dop
 if [ "$KO" -gt 0 ]; then
     for f in finto-ferma doppie-elenco doppie-sistema doppie-ancora finto-dopo; do echo "--- $f"; cat "$T/$f.txt"; done
 fi
+
+# --- 5. metti-da-parte: i file rimasti su pCloud tutti in "Da controllare" ----------------
+echo "5. metti-da-parte"
+LUNGO_ZIP="Backup del telefono vecchio con dentro anche i documenti di casa"
+crea_rimasti() {
+    local r="$1"
+    jpg "$r/Foto/buona.jpg" buona '2015:05:06 07:08:09' '2015-05-06 10:00'
+    mkdir -p "$T/z" "$r/Vecchi backup" "$r/Zip"
+    jpg "$T/z/z.jpg" z '2017:01:02 10:00:00' '2017-01-02 10:00'
+    finto "$T/z/nota.txt" nota '2017-01-02 10:00'
+    (cd "$T/z" && zip -q -X "$r/Vecchi backup/$LUNGO_ZIP.zip" z.jpg nota.txt)
+    rm -rf "$T/z"
+    printf 'non sono uno zip' > "$r/Vecchi backup/rotto.zip"
+    printf 'neanche io' > "$r/Zip/guasto.zip"
+    # Già in "Da controllare" prima di tutto: un file col nome dello zip rovinato (non va
+    # sovrascritto) e una foto (anteprima, scarica e raccogli non la devono vedere).
+    mkdir -p "$r/Da controllare/Vecchi backup"
+    printf 'già qui' > "$r/Da controllare/Vecchi backup/rotto.zip"
+    jpg "$r/Da controllare/vecchia.jpg" vecchia '2011:01:01 10:00:00' '2011-01-01 10:00'
+}
+for modo in con senza; do
+    r="$T/rim-$modo" l="$HOME/rimasti-$modo" D="$T/rim-$modo/Da controllare" s="$QUI/foto-da-pcloud.sh"
+    crea_rimasti "$r"
+    export LAVORO="$l" NOME_MAX=60 NOME_CORTO=20
+    {
+        RADICE="$r" ARCHIVIO="$r/Archivio foto" GIORNI=0 DESTINAZIONE="$T/dest-rim-$modo" "$s" anteprima
+        [ "$modo" = con ] && PCLOUD="$r" "$s" scarica
+        "$s" raccogli
+    } > "$T/rim-$modo-raccogli.txt" 2>&1
+    verifica "$modo: zip col nome lungo, percorso vero di pCloud" contiene "$l/da-controllare.txt" "zip con 1 altri file, resta su pCloud: $r/Vecchi backup/$LUNGO_ZIP.zip"
+    verifica "$modo: zip rovinato segnato"                contiene "$l/da-controllare.txt" "zip rovinato (unzip 9): $r/Zip/guasto.zip"
+    verifica "$modo: raccogli salta Da controllare"       non_c_e "$l/ordinate/2011"
+    # Un file non letto (raccogli li segna quando exiftool non li sposta: qui si scrive a
+    # mano), uno sparito da pCloud e una riga d'esempio rientrata delle versioni vecchie.
+    finto "$r/Foto/strana.jpg" strana '2016-01-01 10:00'
+    printf 'non letto: %s\n    %s\nnon letto: %s\n' "$r/Foto/strana.jpg" "$r/Foto/buona.jpg" "$r/Foto/sparita.jpg" >> "$l/da-controllare.txt"
+    prima="$(sha_di "$r")"
+    echo no | "$s" metti-da-parte > "$T/rim-$modo-no.txt" 2>&1
+    verifica "$modo: senza SPOSTA non sposta niente"      [ "$prima" = "$(sha_di "$r")" ]
+    verifica "$modo: senza SPOSTA niente registro"        [ ! -s "$l/messi-da-parte.tsv" ]
+    verifica "$modo: prima dice quanti e quanto pesano"   grep -Eq "^Sposto in $D 3 file \([0-9.]+[KM]?B\): 1 zip con altri file, 1 non letti, 1 zip rovinati" "$T/rim-$modo-no.txt"
+    verifica "$modo: segnala il file già a destinazione"  contiene "$T/rim-$modo-no.txt" "c'è già un file con lo stesso nome"
+    verifica "$modo: segnala il file sparito"             contiene "$T/rim-$modo-no.txt" "Salto 1 file che su pCloud non ci sono più"
+    echo SPOSTA | "$s" metti-da-parte > "$T/rim-$modo-si.txt" 2>&1
+    verifica "$modo: zip con altri file in Da controllare" c_e "$D/Vecchi backup/$LUNGO_ZIP.zip"
+    verifica "$modo: zip con altri file non più al posto" non_c_e "$r/Vecchi backup/$LUNGO_ZIP.zip"
+    verifica "$modo: non letto in Da controllare"         c_e "$D/Foto/strana.jpg"
+    verifica "$modo: non letto non più al posto"          non_c_e "$r/Foto/strana.jpg"
+    verifica "$modo: zip rovinato in Da controllare"      c_e "$D/Zip/guasto.zip"
+    verifica "$modo: zip rovinato non più al posto"       non_c_e "$r/Zip/guasto.zip"
+    verifica "$modo: già a destinazione, non sovrascritto" [ "$(cat "$D/Vecchi backup/rotto.zip")" = 'già qui' ]
+    verifica "$modo: e l'origine resta"                   c_e "$r/Vecchi backup/rotto.zip"
+    verifica "$modo: la riga rientrata non conta"         c_e "$r/Foto/buona.jpg"
+    verifica "$modo: registro"                            contiene "$l/messi-da-parte.tsv" "$r/Zip/guasto.zip"$'\t'"$D/Zip/guasto.zip"$'\tspostato'
+    verifica "$modo: registro, già a destinazione"        contiene "$l/messi-da-parte.tsv" "$r/Vecchi backup/rotto.zip"$'\t'"$D/Vecchi backup/rotto.zip"$'\tc\'è già'
+    verifica "$modo: registro, sparito"                   contiene "$l/messi-da-parte.tsv" $'sparita.jpg\tnon c\'è più su pCloud'
+    verifica "$modo: impostazioni con RIMASTI"            contiene "$l/impostazioni" "RIMASTI="
+    [ "$modo" = con ] && verifica "con: con rclone"       contiene "$T/rim-con-si.txt" "Sposto con rclone su $r"
+    dopo="$(sha_di "$r")"
+    echo SPOSTA | "$s" metti-da-parte > "$T/rim-$modo-ancora.txt" 2>&1
+    verifica "$modo: rilancio, niente da spostare"        contiene "$T/rim-$modo-ancora.txt" "Niente da spostare."
+    verifica "$modo: rilancio, niente cambiato"           [ "$dopo" = "$(sha_di "$r")" ]
+    da_parte="$(sha_di "$D")"
+    {
+        "$s" anteprima
+        [ "$modo" = con ] && "$s" scarica
+        "$s" raccogli
+        "$s" carica
+        "$s" archivia
+        echo CANCELLA | "$s" pulisci
+        "$s" stato
+    } > "$T/rim-$modo-dopo.txt" 2>&1
+    verifica "$modo: anteprima salta Da controllare"     contiene "$T/rim-$modo-dopo.txt" "Salto: Archivio foto, Da controllare, Crypto Folder"
+    # shellcheck disable=SC2016
+    verifica "$modo: anteprima non la conta"             bash -c '! grep -q " Da controllare$" "$1"' _ "$T/rim-$modo-dopo.txt"
+    verifica "$modo: raccogli non la vede"               contiene "$T/rim-$modo-dopo.txt" "0 foto e video sciolti e 0 zip da fare"
+    verifica "$modo: raccogli, niente in ordinate"       non_c_e "$l/ordinate/2011"
+    [ "$modo" = con ] && verifica "con: scarica la salta" non_c_e "$l/specchio/Da controllare"
+    verifica "$modo: pulisci ha pulito"                  non_c_e "$r/Foto/buona.jpg"
+    verifica "$modo: pulisci non tocca Da controllare"   [ "$da_parte" = "$(sha_di "$D")" ]
+    verifica "$modo: stato"                              contiene "$T/rim-$modo-dopo.txt" "Da parte:    3 file in $D"
+    unset LAVORO NOME_MAX NOME_CORTO
+    if [ "$KO" -gt 0 ]; then
+        for f in raccogli no si ancora dopo; do echo "--- rim-$modo-$f"; cat "$T/rim-$modo-$f.txt"; done
+        cat "$l/messi-da-parte.tsv"
+    fi
+done
 
 echo
 if [ "$KO" -gt 0 ]; then
