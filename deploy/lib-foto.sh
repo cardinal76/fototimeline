@@ -15,6 +15,8 @@
 #                  toglie dal nome; i file identici di un blocco si ordinano una volta sola
 #   SCARTA_NEI_ZIP nomi (anche con *) da buttare dagli zip aperti prima di contarne gli
 #                  "altri file": Thumbs.db, desktop.ini, ...
+#   FASE_IN_FILA   (facoltativo) la fase da rilanciare nei messaggi di in_fila, se non è
+#                  "raccogli": per esempio "ordina" in ordina-da-controllare.sh
 # e definisce trova RADICE [condizioni di find...], il find che salta le cartelle escluse.
 
 ESTENSIONI=(jpg jpeg png gif bmp webp heic heif mp4 m4v mov)
@@ -213,7 +215,7 @@ declare -A PREPARAZIONI=()
 fermato() {
     [ -z "$FERMATO" ] && return 0
     ferma_preparazioni
-    echo "Interrotto: rilancia $0 raccogli per riprendere." >&2
+    echo "Interrotto: rilancia $0 ${FASE_IN_FILA:-raccogli} per riprendere." >&2
     exit "$FERMATO"
 }
 ferma_preparazioni() {
@@ -253,7 +255,7 @@ in_fila() {
             "$titolo" "$k"
             ristampa "$dir" < "$dir/.uscita"
             ristampa "$dir" < "$dir/.errori" >&2
-            [ -f "$dir/.pronto" ] || errore "la preparazione non è finita bene (vedi sopra): rilancia $0 raccogli"
+            [ -f "$dir/.pronto" ] || errore "la preparazione non è finita bene (vedi sopra): rilancia $0 ${FASE_IN_FILA:-raccogli}"
             if [ "$prossimo" -lt "$n" ]; then
                 avvia_preparazione "$prossimo" "$prepara"
                 prossimo=$((prossimo + 1))
