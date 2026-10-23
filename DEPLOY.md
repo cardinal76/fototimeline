@@ -437,6 +437,86 @@ sottofondo come `verifica-tutto.sh`, in cinque passi:
 - Per i test, `FT_DB_FILE` è un elenco già esportato (stesso formato) al posto di server2;
   `HASH_PCLOUD=server|scarica` salta la prova del passo 1.
 
+#### Quello che è rimasto in "Da controllare"
+
+`deploy/ordina-da-controllare.sh` riordina, senza toccarli, i file che
+`metti-da-parte` ha messo in `RIMASTI` (`/mnt/p/Da controllare`): zip con
+dentro anche altri file, foto e video non letti, zip rovinati. Gira sul PC,
+solo con rclone (P: non serve), in un lavoro suo, `~/foto-da-controllare`
+(`LAVORO`); RADICE, PCLOUD, DESTINAZIONE e RIMASTI li prende da
+`~/foto-da-pcloud/impostazioni`.
+
+| Fase | Cosa fa |
+|---|---|
+| `anteprima` | un `rclone lsf` di `RIMASTI`: quanti zip e altri file, quanti già fatti, quanti GB da scaricare. Non scrive niente su pCloud. |
+| `ordina` | l'anteprima, poi chiede `ORDINA` e li fa tutti; rilanciato rifà solo quelli che mancano. |
+| `carica` | carica il lotto rimasto in attesa da un giro interrotto (lo fa già `ordina` all'inizio). |
+| `stato` | a che punto è e il conto del registro per esito. |
+
+Ogni file di `RIMASTI` si scarica (`rclone copyto`, `PARALLELI` alla volta,
+predefinito 4) in `~/foto-da-controllare/tmp`, si apre e si cancella dal PC;
+quello che si tiene finisce su pCloud in `ORDINATI` (predefinita
+`/mnt/p/Da controllare ordinati`):
+
+- `Foto/AAAA/MM/GG/<nome>`: le foto e i video **nuovi**, cioè con un'impronta
+  (sha256) che non è in `~/foto-da-pcloud/impronte.tsv` (né in quelle di
+  `ALTRI_LAVORI`, né tra quelle già fatte qui). La data come in `raccogli`
+  (EXIF, poi data del video, poi data del file). Gli stessi file vanno anche
+  in `lifetime:FotoTimeline/AAAA/MM/GG/<nome>`. Entrano solo se exiftool li
+  riconosce come immagine o video; quelle già su FotoTimeline si contano e
+  basta.
+- `Documenti/AAAA/MM/<nome>`: gli altri file degli zip, col mese della loro
+  data dentro lo zip. Spazzatura di sistema (`__MACOSX/`, `._*`, `.DS_Store`,
+  `Thumbs.db`, `desktop.ini`) e collegamenti simbolici si saltano.
+- `Non letti/AAAA/MM/<nome>`: le foto e i video che neanche stavolta si
+  leggono, col mese della data del file.
+
+Un file identico a uno già visto (stessa impronta, anche in un altro zip) entra
+una volta sola ("doppione"). Due file diversi con lo stesso nome nella stessa
+cartella diventano `nome.ext`, `nome-1.ext`, ...; un nome che su pCloud o su
+LifetimeCloud c'è già, anche di una foto arrivata dal telefono, non si riusa
+(si legge prima la cartella di destinazione). I nomi oltre 255 byte si
+accorciano. Una voce con `../` resta dentro la cartella dello zip.
+
+Uno zip che `unzip` non apre tutto si prova a recuperare: `7z x` se c'è
+(`sudo apt install p7zip-full`) e lo zip gli torna intero, poi `unzip` una voce
+alla volta dallo zip com'è, poi `zip -FF` (rifà l'indice di uno zip troncato) e
+`unzip` una voce alla volta da quello riparato. Si tiene solo una voce che
+passa il controllo del CRC: niente foto a metà. Le voci che non si recuperano,
+e gli zip da cui non si legge niente, vanno nel registro come "irrecuperabile".
+
+I file nuovi aspettano in `~/foto-da-controllare/in-attesa` e si caricano a
+lotti (ogni `LOTTO` file di `RIMASTI`, 50, o `LOTTO_GB` GB, 2), come `carica`:
+prima le cartelle che mancano, una alla volta (contro le cartelle doppie di
+LifetimeCloud), poi `rclone copy --ignore-existing` e
+`rclone check --one-way --size-only`. Sul PC restano al massimo `PARALLELI`+1
+file aperti più un lotto.
+
+**Gli originali non si toccano**: in `RIMASTI` si legge soltanto, su pCloud si
+scrive solo in `ORDINATI`, su LifetimeCloud si aggiungono file nuovi, sempre
+senza sovrascrivere; nessun `rclone delete`, `move`, `purge` o `sync`. Gli zip
+di `Da controllare` si buttano a mano, dopo aver guardato.
+
+Il registro `~/foto-da-controllare/registro.tsv` ha una riga per file: origine
+(lo zip o il file in `RIMASTI`), file nello zip, sha256, dove è finito, esito
+(`nuova su FotoTimeline`, `già su FotoTimeline`, `documento`, `doppione`,
+`non letto`, `irrecuperabile`). Le foto nuove sono anche in
+`~/foto-da-controllare/impronte.tsv`, nello stesso formato di quello di
+`foto-da-pcloud.sh`, che invece si legge soltanto (lì restano le foto di
+`raccogli`). Un file conta come fatto solo quando il suo lotto è caricato e
+controllato (`fatti.tsv`): ucciso a metà e rilanciato, carica prima il lotto
+in attesa e poi fa solo quello che manca.
+
+```bash
+./deploy/ordina-da-controllare.sh anteprima
+echo ORDINA | nohup ./deploy/ordina-da-controllare.sh ordina > ~/foto-da-controllare/ordina.log 2>&1 &
+tail -f ~/foto-da-controllare/ordina.log
+./deploy/ordina-da-controllare.sh stato
+grep irrecuperabile ~/foto-da-controllare/registro.tsv   # quello che non si è recuperato
+```
+
+Alla fine nell'app: **Monta**, poi **Indicizza archivio**.
+
 #### Da Amazon Foto o da una cartella del PC
 
 Amazon Foto non ha API pubbliche: la libreria si scarica con l'app per Windows

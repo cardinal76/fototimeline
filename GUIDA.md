@@ -170,7 +170,35 @@ in `~/foto-da-pcloud/messi-da-parte.tsv` e rilanciato rifà solo quelli non spos
 un'altra cartella: `RIMASTI='/mnt/p/Altra cartella'` davanti (si ricorda). Le fasi di prima
 (anteprima, scarica, raccogli, pulisci) quella cartella la saltano sempre.
 
-**2.7 La prova che c'è tutto.** `deploy/confronta-tutto.sh` confronta **per contenuto**
+**2.7 Riordinare "Da controllare".** `deploy/ordina-da-controllare.sh` apre uno alla volta gli zip
+e i file di `Da controllare` (li scarica con rclone e poi li cancella dal PC) e li mette su pCloud in
+`Da controllare ordinati`:
+
+| Cartella | Cosa c'è |
+|---|---|
+| `Foto/AAAA/MM/GG` | foto e video **nuovi** (non ancora su FotoTimeline), caricati anche su LifetimeCloud `FotoTimeline/AAAA/MM/GG` |
+| `Documenti/AAAA/MM` | gli altri file degli zip (PDF, documenti, ...), col mese della loro data |
+| `Non letti/AAAA/MM` | le foto e i video che neanche stavolta si leggono |
+
+Le foto già su FotoTimeline si contano e basta, i doppioni entrano una volta, due file diversi con
+lo stesso nome diventano `nome-1.ext`. Gli zip rovinati si provano a recuperare (7z, `unzip` voce
+per voce, `zip -FF`); quello che non si recupera è nel registro come `irrecuperabile`. In
+`Da controllare` non si tocca niente: gli zip li butti tu quando hai guardato.
+
+```bash
+sudo apt install -y p7zip-full                 # facoltativo: qualche zip rovinato in più
+./deploy/ordina-da-controllare.sh anteprima    # quanti zip e file, quanti GB da scaricare
+echo ORDINA | nohup ./deploy/ordina-da-controllare.sh ordina > ~/foto-da-controllare/ordina.log 2>&1 &
+tail -f ~/foto-da-controllare/ordina.log       # Ctrl+C chiude solo il tail
+./deploy/ordina-da-controllare.sh stato        # a che punto è
+```
+
+Senza `ORDINA` non fa niente. Per fermarlo: `pkill -f "ordina-da-controllare.sh ordina"`; rilanciato
+con lo stesso comando riprende (carica prima il lotto rimasto a metà). Il registro, una riga per file
+con zip d'origine, file dentro, sha256, dove è finito ed esito, è
+`~/foto-da-controllare/registro.tsv`. Alla fine nell'app: **Monta** e **Indicizza archivio**.
+
+**2.8 La prova che c'è tutto.** `deploy/confronta-tutto.sh` confronta **per contenuto**
 (SHA-256) ogni foto e video che c'è *adesso* su pCloud, sciolti e dentro gli zip, `Da controllare`
 compresa, con gli hash delle schede di FotoTimeline (il DB su server2, letto via `ssh server2`).
 Non tocca niente: su pCloud e LifetimeCloud legge e basta, nel DB fa solo una ricerca. Gli zip si

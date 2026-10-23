@@ -26,6 +26,10 @@
 #    (nuove o no), raccolte non indicizzate, zip rovinato, ESCLUDI, "Da controllare", file di
 #    LifetimeCloud senza scheda e schede senza file, il video ricompresso, il "probabile";
 #    tutto in sola lettura, con e senza SHA-256 dal server; fermato a metà e ripreso.
+# 8. ordina-da-controllare.sh su un finto "Da controllare": foto nuove (su pCloud e LifetimeCloud)
+#    e già note, documenti per mese, doppioni tra zip, nomi uguali, __MACOSX, un non letto, uno
+#    zip rovinato a metà e uno irrecuperabile; senza ORDINA niente, il rilancio non rifà niente,
+#    ucciso a metà e ripreso come un giro intero, gli zip originali intatti.
 #
 # Serve: exiftool, rclone, zip, unzip, flock (ffmpeg facoltativo, per un video vero).
 set -uo pipefail
@@ -813,6 +817,178 @@ verifica "ripresa: niente zip contato due volte"         [ "$(grep -c '^F' "$l/c
 verifica "ripresa: stesso rapporto del giro intero"      [ "$(LC_ALL=C sort "$l/confronto-rapporto.tsv" | sed "s|$l|L|g")" = "$(LC_ALL=C sort "$HOME/conf-intero/confronto-rapporto.tsv" | sed "s|$HOME/conf-intero|L|g")" ]
 verifica "ripresa: 24 foto negli zip"                    contiene "$l/confronto-riepilogo.txt" "24 foto e video (0 sciolti, 24 in 8 zip)"
 [ "$KO" -gt 0 ] && { cat "$T/conf-r1.txt" "$l/confronto.log" "$T/conf-dove-r.txt"; }
+
+# --- 8. ordina-da-controllare: quello che è in "Da controllare", riordinato -------------
+echo "8. ordina-da-controllare"
+# Un finto pCloud ($T/p8, remote "$T/p8") con "Da controllare" come l'ha lasciato
+# metti-da-parte, un finto LifetimeCloud ($T/lt8) con una foto già nota e una del telefono,
+# e il lavoro di foto-da-pcloud.sh con impostazioni e impronte (ordinate/ non c'è più).
+crea_da_controllare() {   # crea_da_controllare PCLOUD LIFETIME LAVORO_PCLOUD
+    local p="$1" lt="$2" lp="$3" D="$1/Da controllare" z="$T/z8"
+    rm -rf "$p" "$lt" "$lp" "$z"
+    mkdir -p "$D/Backup" "$D/Copie" "$D/Zip" "$D/Foto" "$lp" "$z/1/sub" "$z/2/sub/a" "$z/3" "$z/x"
+    # Già su FotoTimeline (in impronte.tsv) e una foto del telefono che nessuna impronta conosce.
+    jpg "$z/1/nota.jpg" nota '2015:05:06 07:08:09' '2015-05-06 10:00'
+    mkdir -p "$lt/2015/05/06" "$lt/2016/07/08"
+    cp -p "$z/1/nota.jpg" "$lt/2015/05/06/nota.jpg"
+    printf '%s\t%s\n' "$(sha256sum < "$z/1/nota.jpg" | cut -d' ' -f1)" 2015/05/06/nota.jpg > "$lp/impronte.tsv"
+    printf 'dal telefono' > "$lt/2016/07/08/IMG_0001.jpg"
+    # Zip 1: la foto nota, due nuove (una col nome di quella del telefono), un PDF, un .docx,
+    # un testo, un nome lungo 250 byte, __MACOSX e la spazzatura.
+    jpg "$z/1/nuova.jpg" nuova '2016:07:08 10:00:00' '2016-07-08 10:00'
+    jpg "$z/1/IMG_0001.jpg" mia '2016:07:08 11:00:00' '2016-07-08 11:00'
+    finto "$z/1/fattura.pdf" fattura '2019-03-04 10:00'
+    finto "$z/1/lettera di Marco l'anno scorso.docx" lettera '2018-11-20 10:00'
+    finto "$z/1/sub/leggimi.txt" 'primo leggimi' '2019-03-10 10:00'
+    finto "$z/1/$LUNGO8.txt" 'lungo uno' '2019-03-11 10:00'
+    finto "$z/1/__MACOSX/._nuova.jpg" mac '2016-07-08 10:00'
+    finto "$z/1/.DS_Store" ds '2016-07-08 10:00'
+    finto "$z/1/sub/Thumbs.db" db '2016-07-08 10:00'
+    (cd "$z/1" && zip -q -r -X "$D/Backup/l'album di Marco (2016).zip" .)
+    # Zip 2: lo stesso PDF e la stessa foto nuova (doppioni), un leggimi diverso con lo
+    # stesso nome e mese, lo stesso nome lungo con dentro altro, una "foto" che non è una
+    # foto, e una voce con "../" (deve restare dentro).
+    cp -p "$z/1/fattura.pdf" "$z/2/sub/a/fattura.pdf"
+    cp -p "$z/1/nuova.jpg" "$z/2/copia.jpg"
+    finto "$z/2/sub/leggimi.txt" 'secondo leggimi' '2019-03-20 10:00'
+    finto "$z/2/$LUNGO8.txt" 'lungo due' '2019-03-12 10:00'
+    finto "$z/2/finta.jpg" 'non sono una foto' '2014-02-03 10:00'
+    finto "$z/x/fuori.txt" fuori '2012-12-12 10:00'
+    (cd "$z/2/sub" && zip -q -r -X "$D/Copie/secondo [2].zip" . ../copia.jpg ../finta.jpg "../$LUNGO8.txt" ../../x/fuori.txt)
+    # Uno zip con un nome di 300 byte, che il disco non accetta (fatto con perl: qui non si
+    # può creare un file così): unzip non lo apre tutto, la voce si estrae accorciata.
+    perl -MIO::Compress::Zip=zip,\$ZipError -e '
+        zip \"lungo" => $ARGV[0], Name => "cartella/$ARGV[1].txt", Time => 1552906800 or die $ZipError' \
+        "$D/Backup/nomi lunghi.zip" "$(printf 'parola-%.0s' {1..43})"
+    # Zip 3 rovinato a metà (tagliato dentro l'ultima voce): la foto si recupera, il resto no.
+    jpg "$z/3/salvata.jpg" salvata '2017:01:02 10:00:00' '2017-01-02 10:00'
+    head -c 300000 /dev/urandom > "$z/3/grande.bin"; touch -d '2017-01-02 10:00' "$z/3/grande.bin"
+    (cd "$z/3" && zip -q -X -0 "$z/rotto.zip" salvata.jpg grande.bin)
+    head -c 200000 "$z/rotto.zip" > "$D/Zip/rotto a metà.zip"
+    # Zip 4 irrecuperabile; un file non letto da raccogli e uno che stavolta si legge.
+    printf 'neanche io' > "$D/Zip/guasto.zip"
+    finto "$D/Foto/strana.jpg" strana '2016-01-01 10:00'
+    jpg "$D/Foto/rinata.jpg" rinata '' '2013-02-03 10:00'
+    touch -d '2018-01-01 10:00' "$D"/*/*.zip
+    rm -rf "$z"
+    printf 'RADICE=%q\nPCLOUD=%q\nDESTINAZIONE=%q\nRIMASTI=%q\n' "$p" "$p" "$lt" "$D" > "$lp/impostazioni"
+}
+LUNGO8="$(printf 'documento-%.0s' {1..24})fine"   # 250 byte
+P8="$T/p8" LT8="$T/lt8" L8="$HOME/foto-da-controllare" OR8="$T/p8/Da controllare ordinati"
+crea_da_controllare "$P8" "$LT8" "$HOME/pcloud-8"
+OC=(env LAVORO_PCLOUD="$HOME/pcloud-8" ALTRI_LAVORI="$HOME/pcloud-8" "$QUI/ordina-da-controllare.sh")
+originali="$(sha_di "$P8/Da controllare")"
+prima8="$(sha_di "$P8")"
+telefono="$(sha_di "$LT8")"
+"${OC[@]}" anteprima > "$T/o8-anteprima.txt" 2>&1
+verifica "anteprima: zip e altri file da fare"           contiene "$T/o8-anteprima.txt" "Da fare: 5 zip e 2 altri file"
+verifica "anteprima: quanto scaricare"                   grep -Eq 'da scaricare\.$' "$T/o8-anteprima.txt"
+echo no | "${OC[@]}" ordina > "$T/o8-no.txt" 2>&1
+verifica "senza ORDINA: non fa niente"                   contiene "$T/o8-no.txt" "Non ho fatto niente."
+verifica "senza ORDINA: pCloud com'era"                  [ "$prima8" = "$(sha_di "$P8")" ]
+verifica "senza ORDINA: LifetimeCloud com'era"           [ "$telefono" = "$(sha_di "$LT8")" ]
+verifica "senza ORDINA: niente registro"                 [ ! -s "$L8/registro.tsv" ]
+echo ORDINA | PARALLELI=2 "${OC[@]}" ordina > "$T/o8-si.txt" 2>&1
+R8="$L8/registro.tsv" F8="$OR8/Foto" DOC8="$OR8/Documenti"
+verifica "foto nuova in Foto/AAAA/MM/GG su pCloud"       c_e "$F8/2016/07/08/nuova.jpg"
+verifica "foto nuova anche su FotoTimeline"              cmp -s "$F8/2016/07/08/nuova.jpg" "$LT8/2016/07/08/nuova.jpg"
+verifica "foto già su FotoTimeline: non ricopiata"       non_c_e "$F8/2015"
+verifica "foto già su FotoTimeline: contata"             contiene "$R8" $'nota.jpg\t'
+verifica "foto già su FotoTimeline: nel registro"        grep -q $'\tgià su FotoTimeline$' "$R8"
+verifica "nome di una foto del telefono: IMG_0001-1.jpg" cmp -s "$F8/2016/07/08/IMG_0001-1.jpg" "$LT8/2016/07/08/IMG_0001-1.jpg"
+verifica "la foto del telefono non sovrascritta"         [ "$(cat "$LT8/2016/07/08/IMG_0001.jpg")" = 'dal telefono' ]
+verifica "su FotoTimeline solo le foto nuove"            [ "$(find "$LT8" -type f | wc -l)" -eq 6 ]
+verifica "PDF nel mese della sua data"                   c_e "$DOC8/2019/03/fattura.pdf"
+verifica ".docx nel mese della sua data"                 c_e "$DOC8/2018/11/lettera di Marco l'anno scorso.docx"
+verifica "lo stesso PDF in due zip: una volta"           [ "$(find "$OR8" -name 'fattura*' | wc -l)" -eq 1 ]
+verifica "lo stesso PDF: doppione nel registro"          grep -q $'\ta/fattura.pdf\t[0-9a-f]*\t.*/fattura.pdf\tdoppione$' "$R8"
+verifica "stessa foto in due zip: una volta"             [ "$(find "$OR8" -name 'copia*' | wc -l)" -eq 0 ]
+verifica "stesso nome, contenuto diverso: leggimi-1.txt" [ "$(cat "$DOC8/2019/03/leggimi.txt")-$(cat "$DOC8/2019/03/leggimi-1.txt")" = 'finto primo leggimi-finto secondo leggimi' ]
+verifica "nome lungo: com'è"                             c_e "$DOC8/2019/03/$LUNGO8.txt"
+verifica "nome lungo con un numero: entro 255 byte"      [ "$(find "$DOC8/2019/03" -name 'documento-*-1.txt' -printf '%f' | LC_ALL=C wc -c)" -le 255 ]
+verifica "nome lungo con un numero: c'è"                 [ "$(find "$DOC8/2019/03" -name 'documento-*-1.txt' | wc -l)" -eq 1 ]
+verifica "nome di 300 byte: accorciato a 255"            [ "$(find "$DOC8/2019/03" -name 'parola-*' -printf '%f' | LC_ALL=C wc -c)" -eq 255 ]
+verifica "nome di 300 byte: col suo contenuto"           [ "$(cat "$DOC8/2019/03"/parola-* 2>/dev/null)" = lungo ]
+verifica "voce con ../: dentro Documenti"                c_e "$DOC8/2012/12/fuori.txt"
+verifica "__MACOSX e spazzatura saltati"                 [ -z "$(find "$OR8" \( -name '._*' -o -name .DS_Store -o -name Thumbs.db -o -name __MACOSX \))" ]
+verifica "foto finta in uno zip: Non letti"              c_e "$OR8/Non letti/2014/02/finta.jpg"
+verifica "file non letto: Non letti/AAAA/MM"             c_e "$OR8/Non letti/2016/01/strana.jpg"
+verifica "non letto che ora si legge: tra le foto"       cmp -s "$F8/2013/02/03/rinata.jpg" "$LT8/2013/02/03/rinata.jpg"
+verifica "zip rovinato: la foto recuperata"              cmp -s "$F8/2017/01/02/salvata.jpg" "$LT8/2017/01/02/salvata.jpg"
+verifica "zip rovinato: il resto irrecuperabile"         grep -q $'rotto a metà.zip\tgrande.bin\t\t\tirrecuperabile$' "$R8"
+verifica "zip rovinato: niente file a metà"              [ -z "$(find "$OR8" -name 'grande*')" ]
+verifica "zip irrecuperabile nel registro"               grep -q $'guasto.zip\t\t\t\tirrecuperabile$' "$R8"
+verifica "impronte delle foto nuove"                     [ "$(cut -f2 "$L8/impronte.tsv" | sort | tr '\n' ' ')" = "2013/02/03/rinata.jpg 2016/07/08/IMG_0001-1.jpg 2016/07/08/nuova.jpg 2017/01/02/salvata.jpg " ]
+verifica "registro: ogni file con il suo zip"            grep -q "^$P8/Da controllare/Backup/l'album di Marco (2016).zip"$'\t'"lettera di Marco l'anno scorso.docx"$'\t' "$R8"
+verifica "ricorda Indicizza archivio"                    contiene "$T/o8-si.txt" "Indicizza archivio"
+verifica "zip originali intatti"                         [ "$originali" = "$(sha_di "$P8/Da controllare")" ]
+verifica "su pCloud solo Da controllare ordinati in più" [ "$(cd "$P8" && find . -mindepth 1 -maxdepth 1 | sort | tr '\n' ' ')" = "./Da controllare ./Da controllare ordinati " ]
+verifica "niente lasciato sul PC: tmp"                   non_c_e "$L8/tmp"
+verifica "niente lasciato sul PC: in attesa"             non_c_e "$L8/in-attesa"
+"${OC[@]}" stato > "$T/o8-stato.txt" 2>&1
+verifica "stato: tutti fatti"                            contiene "$T/o8-stato.txt" "Fatti:       7 file su 7"
+verifica "stato: il conto dei documenti"                 grep -Eq '^ +8 documento$' "$T/o8-stato.txt"
+prima_p="$(sha_di "$P8")" prima_l="$(sha_di "$LT8")" prima_r="$(cat "$R8")"
+echo ORDINA | "${OC[@]}" ordina > "$T/o8-ancora.txt" 2>&1
+verifica "rilancio: niente da fare"                      contiene "$T/o8-ancora.txt" "Da fare: niente."
+verifica "rilancio: pCloud com'era"                      [ "$prima_p" = "$(sha_di "$P8")" ]
+verifica "rilancio: LifetimeCloud com'era"               [ "$prima_l" = "$(sha_di "$LT8")" ]
+verifica "rilancio: registro com'era"                    [ "$prima_r" = "$(cat "$R8")" ]
+if [ "$KO" -gt 0 ]; then
+    for f in anteprima no si stato ancora; do echo "--- o8-$f"; cat "$T/o8-$f.txt"; done
+    echo "--- registro"; cat "$R8"; echo "--- ordinati"; (cd "$OR8" && find . -type f | sort)
+fi
+
+# Ripresa: 30 zip, lotti da 3, ucciso a metà (anche col lotto in attesa) e rilanciato:
+# stessi file, stessi nomi e stesso registro di un giro intero.
+crea_molti_da_controllare() {   # crea_molti_da_controllare PCLOUD LIFETIME LAVORO_PCLOUD
+    local p="$1" lt="$2" lp="$3" D="$1/Da controllare" k z="$T/z8m"
+    rm -rf "$p" "$lt" "$lp"
+    mkdir -p "$D" "$lt" "$lp"
+    : > "$lp/impronte.tsv"
+    for ((k = 1; k <= 30; k++)); do
+        rm -rf "$z"; mkdir -p "$z"
+        jpg "$z/IMG_$((k % 4)).jpg" "m$k" "2016:07:0$((k % 3 + 1)) 10:00:00" '2016-07-08 10:00'
+        finto "$z/conto.pdf" "conto $((k % 7))" "2019-0$((k % 5 + 1))-04 10:00"
+        finto "$z/nota $k.txt" "nota $k" '2019-03-04 10:00'
+        (cd "$z" && zip -q -X "$D/zip $k.zip" ./*)
+    done
+    rm -rf "$z"
+    printf 'RADICE=%q\nPCLOUD=%q\nDESTINAZIONE=%q\nRIMASTI=%q\n' "$p" "$p" "$lt" "$D" > "$lp/impostazioni"
+}
+giro_molti() {   # giro_molti NOME: lavoro, pCloud e LifetimeCloud con lo stesso NOME
+    local n="$1"
+    crea_molti_da_controllare "$T/$n-p" "$T/$n-lt" "$HOME/$n-pc"
+    MOLTI=(env LAVORO="$HOME/$n-oc" LAVORO_PCLOUD="$HOME/$n-pc" ALTRI_LAVORI="$HOME/$n-pc" LOTTO=3 PARALLELI=3 "$QUI/ordina-da-controllare.sh")
+}
+stato_molti8() {   # i file messi su pCloud e LifetimeCloud e il registro, coi percorsi tolti
+    echo "-- ordinati"; sha_di "$T/$1-p/Da controllare ordinati"
+    echo "-- lifetime"; sha_di "$T/$1-lt"
+    echo "-- registro"; sed "s|$T/$1-p|P|g; s|$T/$1-lt|L|g" "$HOME/$1-oc/registro.tsv"
+    echo "-- impronte"; cat "$HOME/$1-oc/impronte.tsv"
+}
+giro_molti intero
+echo ORDINA | "${MOLTI[@]}" ordina > "$T/o8-intero.txt" 2>&1
+stato_molti8 intero > "$T/o8-intero.file"
+giro_molti ripreso
+l="$HOME/ripreso-oc" uccisi=0 in_attesa=0
+for dopo in 4 13 22; do
+    echo ORDINA | "${MOLTI[@]}" ordina > "$T/o8-ucciso.txt" 2>&1 &
+    pid=$!
+    until [ "$(cat "$l/fatti.tsv" "$l/in-attesa/fatti.tsv" 2>/dev/null | wc -l)" -ge "$dopo" ] || ! kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
+    [ -d "$l/in-attesa" ] && in_attesa=$((in_attesa + 1))
+    kill -TERM "$pid" 2>/dev/null && uccisi=$((uccisi + 1))
+    wait "$pid"
+done
+echo "  ($uccisi volte ucciso a metà, $in_attesa col lotto in attesa)"
+echo ORDINA | "${MOLTI[@]}" ordina > "$T/o8-ripreso.txt" 2>&1
+stato_molti8 ripreso > "$T/o8-ripreso.file"
+verifica "ripresa: ucciso a metà tre volte"              [ "$uccisi" -eq 3 ]
+verifica "ripresa: giro intero, 30 zip fatti"            [ "$(wc -l < "$HOME/intero-oc/fatti.tsv")" -eq 30 ]
+verifica "ripresa: nomi uguali con un numero"            c_e "$T/intero-p/Da controllare ordinati/Foto/2016/07/02/IMG_1-1.jpg"
+verifica "ripresa: stessi file, nomi e registro"         cmp -s "$T/o8-intero.file" "$T/o8-ripreso.file"
+cmp -s "$T/o8-intero.file" "$T/o8-ripreso.file" || diff "$T/o8-intero.file" "$T/o8-ripreso.file" | head -30
+verifica "ripresa: niente lasciato sul PC"               non_c_e "$l/in-attesa"
 
 echo
 if [ "$KO" -gt 0 ]; then
