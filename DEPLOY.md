@@ -339,7 +339,7 @@ in fasi separate, ognuna da rilanciare finché non finisce bene:
 | `raccogli` | cerca foto e video sotto `RADICE`, in tutte le sottocartelle e dentro gli zip, e li mette in `~/foto-da-pcloud/ordinate/AAAA/MM/GG` (EXIF, poi data del video, poi data del file). Le copie identiche entrano una volta. |
 | `carica` | copia `ordinate/` in `lifetime:FotoTimeline` e controlla che ci sia tutto. Poi nell'app: **Indicizza archivio**. |
 | `archivia` | su pCloud, in `ARCHIVIO/AAAA/AAAA-MM.zip`: uno zip per mese, controllato dopo la copia. |
-| `pulisci` | solo dopo `GIORNI` (7) giorni da carica e archivia, e dopo aver scritto `CANCELLA`: toglie da pCloud gli originali copiati e le cartelle rimaste vuote. |
+| `pulisci` | solo dopo `GIORNI` (7) giorni da carica e archivia, e dopo aver scritto `CANCELLA`: toglie da pCloud gli originali copiati e le cartelle rimaste vuote. Con `SENZA_ARCHIVIO=si` non vuole `archivia` ma il controllo di `verifica-tutto.sh` passato dopo l'ultimo `carica` (e i `GIORNI` da `carica`): l'unica copia resta LifetimeCloud. Vale solo per quel lancio. |
 | `metti-da-parte` | dopo aver scritto `SPOSTA`: sposta su pCloud, in `RIMASTI` (`Da controllare`), quelli di `da-controllare.txt` (zip con altri file, file non letti, zip rovinati), ognuno col suo percorso. Non cancella niente. |
 
 Per lo script una scansione in JPG è una foto: le cartelle di documenti vanno
