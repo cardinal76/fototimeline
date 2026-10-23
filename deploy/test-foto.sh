@@ -21,12 +21,17 @@
 #    salta, il rilancio non fa niente; dopo, anteprima, scarica, raccogli e pulisci non la vedono.
 # 6. pulisci con SENZA_ARCHIVIO=si: senza archivia vuole il controllo di verifica-tutto.sh
 #    passato dopo carica e i GIORNI, avvisa che resta solo LifetimeCloud, chiede CANCELLA.
+# 7. confronta-tutto.sh: un finto pCloud e un finto LifetimeCloud dopo un giro vero di
+#    foto-da-pcloud.sh, con un finto export del DB: sciolte e negli zip trovate, mai raccolte
+#    (nuove o no), raccolte non indicizzate, zip rovinato, ESCLUDI, "Da controllare", file di
+#    LifetimeCloud senza scheda e schede senza file, il video ricompresso, il "probabile";
+#    tutto in sola lettura, con e senza SHA-256 dal server; fermato a metà e ripreso.
 # 8. ordina-da-controllare.sh su un finto "Da controllare": foto nuove (su pCloud e LifetimeCloud)
 #    e già note, documenti per mese, doppioni tra zip, nomi uguali, __MACOSX, un non letto, uno
 #    zip rovinato a metà e uno irrecuperabile; senza ORDINA niente, il rilancio non rifà niente,
 #    ucciso a metà e ripreso come un giro intero, gli zip originali intatti.
 #
-# Serve: exiftool, rclone, zip, unzip (ffmpeg facoltativo, per un video vero).
+# Serve: exiftool, rclone, zip, unzip, flock (ffmpeg facoltativo, per un video vero).
 set -uo pipefail
 
 QUI="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -620,6 +625,198 @@ verifica "pulisci segnato fatto"                   c_e "$l/fase-pulisci.ok"
 verifica "SENZA_ARCHIVIO non finisce in impostazioni" bash -c '! grep -q SENZA "$1"' _ "$l/impostazioni"
 unset LAVORO
 [ "$KO" -gt 0 ] && { cat "$o" "$T/senza-arch-dopo.txt"; }
+
+# --- 7. confronta-tutto.sh: pCloud contro FotoTimeline, per contenuto ---------------------
+echo "7. confronta-tutto.sh"
+# Un finto pCloud e un finto LifetimeCloud (cartelle locali, rclone vero sotto un rclone che
+# segna i comandi e, con SENZA_SHA, non dà lo SHA-256 senza --download, come pCloud US) e un
+# finto export del DB. Il giro di foto-da-pcloud.sh è vero: anteprima, scarica, raccogli,
+# carica, metti-da-parte.
+cat > "$T/bin/rclone-conf" <<'FINE'
+#!/usr/bin/env bash
+set -uo pipefail
+printf '%s\n' "$*" >> "$CONF_LOG"
+if [ "$1" = hashsum ] && [ -n "${SENZA_SHA:-}" ] && [[ " $* " != *" --download "* ]]; then
+    rclone "$@" | sed -E 's/^[0-9a-f]{64}  /                                                                  /'
+    exit "${PIPESTATUS[0]}"
+fi
+[ "$1" = copyto ] && [ -n "${LENTO:-}" ] && sleep "$LENTO"
+exec rclone "$@"
+FINE
+chmod +x "$T/bin/rclone-conf"
+export CONF_LOG="$T/conf-rclone.log"
+CT="$QUI/confronta-tutto.sh"
+# Il finto export: una riga per file di LifetimeCloud (fuori dalle cartelle col punto), come
+# la stampa js_db: id, hash, dimensione, giorno, video, conversione, nome, percorso; poi #fine.
+finto_db() {   # finto_db DESTINAZIONE USCITA [percorsi da saltare...]
+    local d="$1" out="$2" p n=0 salta
+    shift 2
+    salta=" $* "
+    : > "$out"
+    while IFS= read -r p; do
+        [[ "$salta" == *" $p "* ]] && continue
+        n=$((n + 1))
+        printf 'id-%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$(sha256sum < "$d/$p" | cut -c1-64)" "$(stat -c %s "$d/$p")" \
+            "$(printf '%s' "$p" | cut -c1-10 | tr / -)" "$(case "$p" in *.mp4) echo true ;; *) echo false ;; esac)" \
+            "" "$(basename "$p")" "$p" >> "$out"
+    done < <(cd "$d" && find . -type f ! -path './.*' | sed 's|^\./||' | LC_ALL=C sort)
+    printf '#fine\t%s\t%s\n' "$n" "$n" >> "$out"
+}
+aspetta_fine() {   # aspetta_fine LAVORO: finché il giro in sottofondo non ha finito (max 3 minuti)
+    local i
+    for ((i = 0; i < 1800; i++)); do
+        if grep -Eq '^(FATTO|.*ERRORE|.*FERMATO)' "$1/confronto.passo" 2>/dev/null && [ ! -f "$1/confronto/pid" ]; then return 0; fi
+        sleep 0.1
+    done
+    return 1
+}
+r="$T/conf-p" l="$HOME/conf" dest="$T/conf-lt" s="$QUI/foto-da-pcloud.sh"
+jpg "$r/Foto/a b [1].jpg" a '2015:05:06 07:08:09' '2015-05-06 10:00'
+cp -p "$r/Foto/a b [1].jpg" "$r/Foto/copia di a.jpg"
+jpg "$r/Foto/b.jpg" b '2012:03:04 10:00:00' '2012-03-04 10:00'
+finto "$r/Video/grande.mp4" 'video di molti gigabyte' '2014-04-04 12:00'
+jpg "$r/TASSE/scansione.jpg" tasse '' '2010-01-01 12:00'
+mkdir -p "$T/z" "$r/Zip"
+jpg "$T/z/x.jpg" x '2016:07:08 10:00:00' '2016-07-08 10:00'
+jpg "$T/z/è strano'.jpg" strano '2016:07:09 10:00:00' '2016-07-09 10:00'
+(cd "$T/z" && zip -q -X "$r/Zip/vacanze 2016.zip" x.jpg "è strano'.jpg")
+rm -rf "$T/z"; mkdir -p "$T/z"
+jpg "$T/z/z.jpg" z '2017:01:02 10:00:00' '2017-01-02 10:00'
+finto "$T/z/nota.txt" nota '2017-01-02 10:00'
+(cd "$T/z" && zip -q -X "$r/Zip/misto.zip" z.jpg nota.txt)
+rm -rf "$T/z"
+printf 'non sono uno zip' > "$r/Zip/rotto.zip"
+export LAVORO="$l"
+{
+    RADICE="$r" ARCHIVIO="$r/Archivio foto" ESCLUDI=TASSE GIORNI=0 DESTINAZIONE="$dest" "$s" anteprima
+    PCLOUD="$r" "$s" scarica
+    "$s" raccogli
+    "$s" carica
+    # Un file non letto (scritto a mano, come nella sezione 5), poi tutti in "Da controllare".
+    finto "$r/Foto/strana.jpg" strana '2016-01-01 10:00'
+    printf 'non letto: %s\n' "$r/Foto/strana.jpg" >> "$l/da-controllare.txt"
+    printf 'file\t%s\tno\n' "$r/Foto/strana.jpg" >> "$l/fonti.tsv"
+    echo SPOSTA | "$s" metti-da-parte
+} > "$T/conf-giro.txt" 2>&1
+# Dopo lo scarica (qui un'ora fa): una foto nuova, una vecchia mai vista, una ritoccata.
+echo $(( $(date +%s) - 3600 )) > "$l/fase-scarica.ok"
+jpg "$r/Foto/nuova.jpg" nuova '' "$(date '+%Y-%m-%d %H:%M')"
+jpg "$r/Foto/vecchia mai vista.jpg" vecchia '' '2011-11-11 10:00'
+jpg "$r/Foto/ritoccata.jpg" ritoccata '' '2014-02-03 10:00'
+# LifetimeCloud: il video grande ricompresso prima di carica (più piccolo, hash diverso), la
+# versione ritoccata sotto lo stesso nome e giorno, un file non da foto-da-pcloud.sh, i file
+# dell'app nelle cartelle col punto.
+printf 'h265' > "$dest/2014/04/04/grande.mp4"
+jpg "$dest/2014/02/03/ritoccata.jpg" ritoccata-in-ft '' '2014-02-03 10:00'
+jpg "$dest/2020/01/01/estraneo.jpg" estraneo '' '2020-01-01 10:00'
+mkdir -p "$dest/.backup" "$dest/.compatibili"; printf 'backup' > "$dest/.backup/fototimeline-1.json.gz"
+finto_db "$dest" "$T/conf-db.tsv" 2012/03/04/b.jpg 2020/01/01/estraneo.jpg
+id_grande="$(awk -F'\t' '$8 == "2014/04/04/grande.mp4" { print $1 }' "$T/conf-db.tsv")"
+awk -F'\t' -v OFS='\t' '$8 == "2014/04/04/grande.mp4" { $6 = "FATTA" } { print }' "$T/conf-db.tsv" > "$T/conf-db.tmp" && mv "$T/conf-db.tmp" "$T/conf-db.tsv"
+printf 'compatibile' > "$dest/.compatibili/$id_grande.mp4"
+# Una scheda senza file.
+sed -i '$d' "$T/conf-db.tsv"
+n="$(wc -l < "$T/conf-db.tsv")"
+printf 'id-perso\t%s\t5\t2019-09-09\tfalse\t\tperso.jpg\t2019/09/09/perso.jpg\n#fine\t%s\t%s\n' "$(printf perso | sha256sum | cut -c1-64)" $((n + 1)) $((n + 1)) >> "$T/conf-db.tsv"
+prima_p="$(sha_di "$r")" prima_lt="$(sha_di "$dest")"
+CC=(env RCLONE="$T/bin/rclone-conf" FT_DB_FILE="$T/conf-db.tsv" RICOMPRESSI_SOPRA=10 CAMPIONE=3 "$CT")
+: > "$CONF_LOG"
+SENZA_SHA=1 "${CC[@]}" > "$T/conf-1.txt" 2>&1
+aspetta_fine "$l"; rc_fine=$?
+"${CC[@]}" dove > "$T/conf-dove.txt" 2>&1
+R="$l/confronto-rapporto.tsv"
+riga_di() { awk -F'\t' -v p="$1" -v m="${2:-}" '$6 == p && $7 == m { print $1 "|" $2 "|" $3 }' "$R"; }
+verifica "stima: senza SHA-256 dal server scarica gli sciolti" contiene "$T/conf-1.txt" "pCloud non dà lo SHA-256 lato server"
+verifica "stima: dice quanto scaricherà"                   grep -Eq '^Scaricherà più o meno [0-9.]+ GB' "$T/conf-1.txt"
+verifica "stima: ESCLUDI contati a parte"                  contiene "$T/conf-1.txt" "in ESCLUDI (contati, non confrontati): 1 file"
+verifica "giro in sottofondo finito"                        [ "$rc_fine" -eq 0 ]
+verifica "con cose non spiegate: lo dice in confronto.passo" contiene "$l/confronto.passo" "NON SPIEGATE"
+verifica "dove: a che punto"                               contiene "$T/conf-dove.txt" "NON SPIEGATE"
+verifica "sciolta trovata (nome con spazi e [ ])"          [ "$(riga_di "$r/Foto/a b [1].jpg")" = "pcloud|trovato|" ]
+verifica "copia identica trovata"                          [ "$(riga_di "$r/Foto/copia di a.jpg")" = "pcloud|trovato|" ]
+verifica "dentro lo zip trovata"                           [ "$(riga_di "$r/Zip/vacanze 2016.zip" x.jpg)" = "pcloud|trovato|" ]
+verifica "dentro lo zip, nome con accento e apice"         [ "$(riga_di "$r/Zip/vacanze 2016.zip" "è strano'.jpg")" = "pcloud|trovato|" ]
+verifica "Da controllare confrontata: zip misto trovato"  [ "$(riga_di "$r/Da controllare/Zip/misto.zip" z.jpg)" = "pcloud|trovato|" ]
+verifica "raccolta ma non indicizzata"                     [ "$(riga_di "$r/Foto/b.jpg")" = "pcloud|mancante|raccolto-non-indicizzato" ]
+verifica "mai raccolta, dopo lo scarica"                   [ "$(riga_di "$r/Foto/nuova.jpg")" = "pcloud|mancante|nuovo-dopo-scarica" ]
+verifica "mai raccolta, data di prima: mai-visto"          [ "$(riga_di "$r/Foto/vecchia mai vista.jpg")" = "pcloud|mancante|mai-visto" ]
+verifica "stesso nome e data: probabile"                   [ "$(riga_di "$r/Foto/ritoccata.jpg")" = "pcloud|probabile|stesso-nome-e-data" ]
+verifica "video ricompresso: probabile, spiegato"          [ "$(riga_di "$r/Video/grande.mp4")" = "pcloud|probabile|ricompresso-h265" ]
+verifica "zip rovinato (in Da controllare)"                [ "$(riga_di "$r/Da controllare/Zip/rotto.zip")" = "pcloud|mancante|zip-rovinato" ]
+verifica "non letto, in Da controllare"                    [ "$(riga_di "$r/Da controllare/Foto/strana.jpg")" = "pcloud|mancante|da-controllare" ]
+verifica "Da controllare: il motivo da da-controllare.txt" grep -q $'\tda-controllare\t.*\tnon letto$' "$R"
+verifica "ESCLUDI: escluso di proposito"                   [ "$(riga_di "$r/TASSE/scansione.jpg")" = "pcloud|escluso|escluso-di-proposito" ]
+verifica "LifetimeCloud: raccolta non indicizzata"         [ "$(riga_di 2012/03/04/b.jpg)" = "lifetime|non-indicizzato|da-indicizzare" ]
+verifica "LifetimeCloud: file estraneo non indicizzato"    [ "$(riga_di 2020/01/01/estraneo.jpg)" = "lifetime|non-indicizzato|da-indicizzare" ]
+verifica "LifetimeCloud: cartelle col punto saltate"       bash -c '! grep -q "/\.\(backup\|compatibili\)/" "$1"' _ "$R"
+verifica "scheda senza file"                               [ "$(riga_di 2019/09/09/perso.jpg)" = "db|senza-file|senza-file" ]
+verifica "riepilogo: quanti su pCloud"                     contiene "$l/confronto-riepilogo.txt" "Su pCloud:         11 foto e video (8 sciolti, 3 in 3 zip), 10 contenuti diversi"
+verifica "riepilogo: trovati"                              contiene "$l/confronto-riepilogo.txt" "Trovati:           5"
+verifica "riepilogo: video compatibile contato"            contiene "$l/confronto-riepilogo.txt" "versioni compatibili dei video: 1 (1 schede con conversione FATTA, 0 senza il file; 0 senza scheda)"
+verifica "riepilogo: campione uguale alle schede"          contiene "$l/confronto-riepilogo.txt" "campione riscaricato: 3 con lo SHA-256 della scheda, 0 diversi"
+verifica "riepilogo: suggerisce Indicizza archivio"        contiene "$l/confronto-riepilogo.txt" "Indicizza archivio"
+verifica "rapporto: esce con 3"                            bash -c '"$@" rapporto >/dev/null 2>&1; [ $? -eq 3 ]' _ "${CC[@]}"
+verifica "sola lettura: pCloud com'era"                    [ "$prima_p" = "$(sha_di "$r")" ]
+verifica "sola lettura: LifetimeCloud com'era"             [ "$prima_lt" = "$(sha_di "$dest")" ]
+verifica "sola lettura: solo lsf, hashsum e copyto"        [ "$(cut -d' ' -f1 "$CONF_LOG" | LC_ALL=C sort -u | tr '\n' ' ')" = "copyto hashsum lsf " ]
+verifica "sola lettura: copyto solo verso tmp del PC"      bash -c '! grep "^copyto" "$1" | grep -vq " $2/confronto/tmp/"' _ "$CONF_LOG" "$l"
+verifica "sola lettura: niente delete/move/purge nel codice" bash -c '! grep -Eq "rc (delete|deletefile|move|moveto|purge|rmdir|rmdirs|sync|mkdir|copy) " "$1"' _ "$CT"
+verifica "senza SHA-256 dal server: sciolti scaricati"     grep -q -- '^hashsum sha256 --download --checkers 8 --files-from-raw' "$CONF_LOG"
+verifica "zip tolti da tmp"                                [ -z "$(ls -A "$l/confronto/tmp" 2>/dev/null)" ]
+[ "$KO" -gt 0 ] && { cat "$T/conf-giro.txt" "$T/conf-1.txt" "$l/confronto.log" "$R"; }
+
+# Sistemato quello che non torna, rilanciato: niente si riscarica e il risultato è pulito.
+# Con lo SHA-256 dal server (il rclone locale lo dà) la stima lo vede.
+rm -f "$r/Foto/vecchia mai vista.jpg" "$r/Foto/ritoccata.jpg" "$dest/2014/02/03/ritoccata.jpg"
+finto_db "$dest" "$T/conf-db.tsv" 2020/01/01/estraneo.jpg
+: > "$CONF_LOG"
+"${CC[@]}" stima > "$T/conf-2.txt" 2>&1
+"${CC[@]}" da 2 >> "$T/conf-2.txt" 2>&1
+aspetta_fine "$l"
+verifica "rilancio: SHA-256 lato server riconosciuto"     contiene "$T/conf-2.txt" "pCloud dà lo SHA-256 lato server"
+verifica "rilancio: niente da scaricare"                  contiene "$T/conf-2.txt" "Da fare: 0 sciolti (SHA-256 lato server, niente da scaricare) e 0 zip (0.0 GB)."
+verifica "rilancio: nessuno zip riscaricato"              bash -c '! grep -q "^copyto" "$1"' _ "$CONF_LOG"
+verifica "rilancio: tutto spiegato"                       grep -q '^FATTO .*: tutto trovato o mancante per un motivo noto' "$l/confronto.passo"
+verifica "rilancio: trovata b.jpg indicizzata"            [ "$(riga_di "$r/Foto/b.jpg")" = "pcloud|trovato|" ]
+verifica "rilancio: rapporto esce con 0"                  "${CC[@]}" rapporto
+[ "$KO" -gt 0 ] && { cat "$T/conf-2.txt" "$l/confronto.log"; }
+unset LAVORO
+
+# Ripresa: tanti zip, scaricati piano; fermato a metà e ripreso, stesso rapporto di un giro
+# intero, e gli zip finiti prima non si riscaricano.
+r="$T/conf-molti"
+for ((z = 1; z <= 8; z++)); do
+    mkdir -p "$T/z"
+    for ((i = 1; i <= 3; i++)); do veloce "$T/z/IMG_$i.jpg" "$T/vuota.jpg" "zip $z foto $i" '2019-01-01 10:00'; done
+    mkdir -p "$r/Album $z"; (cd "$T/z" && zip -q -X "$r/Album $z/foto [$z].zip" IMG_1.jpg IMG_2.jpg IMG_3.jpg)
+    rm -rf "$T/z"
+done
+mkdir -p "$T/conf-molti-lt"
+printf '#fine\t0\t0\n' > "$T/conf-molti-db.tsv"
+CM=(env RCLONE="$T/bin/rclone-conf" RADICE="$r" PCLOUD="$r" DESTINAZIONE="$T/conf-molti-lt" FT_DB_FILE="$T/conf-molti-db.tsv" CAMPIONE=0 ZIP_PARALLELI=2 "$CT")
+LAVORO="$HOME/conf-intero" "${CM[@]}" > /dev/null 2>&1; aspetta_fine "$HOME/conf-intero"
+l="$HOME/conf-ripreso"
+: > "$CONF_LOG"
+LAVORO="$l" LENTO=0.5 "${CM[@]}" > "$T/conf-r1.txt" 2>&1
+until [ "$(cat "$l/confronto/fatti" 2>/dev/null | wc -l)" -ge 3 ] || grep -q FATTO "$l/confronto.passo" 2>/dev/null; do sleep 0.1; done
+LAVORO="$l" "${CM[@]}" dove > "$T/conf-dove-r.txt" 2>&1
+LAVORO="$l" "${CM[@]}" ferma > /dev/null 2>&1
+aspetta_fine "$l"
+sleep 0.5
+fatti_prima="$(grep -c '^F' "$l/confronto/sha-zip.tsv")"
+verifica "ripresa: dove dice zip fatti e quanto manca"    grep -Eq '^zip: [0-9]+ su 8 fatti, scaricati' "$T/conf-dove-r.txt"
+verifica "ripresa: fermato a metà"                        contiene "$l/confronto.passo" "FERMATO"
+verifica "ripresa: e dice come riprendere"               contiene "$l/confronto.passo" "da 3"
+verifica "ripresa: niente processi rimasti"              bash -c '! pgrep -f "[c]onfronta-tutto.sh _zip" >/dev/null && ! pgrep -f "[c]onfronta-tutto.sh esegui" >/dev/null'
+verifica "ripresa: qualche zip fatto, non tutti"          [ "$fatti_prima" -ge 3 ] && [ "$fatti_prima" -lt 8 ]
+LAVORO="$l" "${CM[@]}" da 3 >> "$T/conf-r1.txt" 2>&1
+aspetta_fine "$l"
+verifica "ripresa: finito"                               grep -q "^FATTO" "$l/confronto.passo"
+verifica "ripresa: ogni zip finito scaricato una volta"  [ "$(grep -c '^copyto' "$CONF_LOG")" -le $((8 + 2)) ]
+verifica "ripresa: niente zip contato due volte"         [ "$(grep -c '^F' "$l/confronto/sha-zip.tsv")" -eq 8 ]
+verifica "ripresa: stesso rapporto del giro intero"      [ "$(LC_ALL=C sort "$l/confronto-rapporto.tsv" | sed "s|$l|L|g")" = "$(LC_ALL=C sort "$HOME/conf-intero/confronto-rapporto.tsv" | sed "s|$HOME/conf-intero|L|g")" ]
+verifica "ripresa: 24 foto negli zip"                    contiene "$l/confronto-riepilogo.txt" "24 foto e video (0 sciolti, 24 in 8 zip)"
+[ "$KO" -gt 0 ] && { cat "$T/conf-r1.txt" "$l/confronto.log" "$T/conf-dove-r.txt"; }
 
 # --- 8. ordina-da-controllare: quello che è in "Da controllare", riordinato -------------
 echo "8. ordina-da-controllare"
