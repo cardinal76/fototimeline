@@ -19,6 +19,8 @@
 #    lungo), un file non letto e uno zip rovinato finiscono in "Da controllare/<percorso>";
 #    senza SPOSTA non si muove niente, un file già lì non si sovrascrive, uno sparito si
 #    salta, il rilancio non fa niente; dopo, anteprima, scarica, raccogli e pulisci non la vedono.
+# 6. pulisci con SENZA_ARCHIVIO=si: senza archivia vuole il controllo di verifica-tutto.sh
+#    passato dopo carica e i GIORNI, avvisa che resta solo LifetimeCloud, chiede CANCELLA.
 # 8. ordina-da-controllare.sh su un finto "Da controllare": foto nuove (su pCloud e LifetimeCloud)
 #    e già note, documenti per mese, doppioni tra zip, nomi uguali, __MACOSX, un non letto, uno
 #    zip rovinato a metà e uno irrecuperabile; senza ORDINA niente, il rilancio non rifà niente,
@@ -578,6 +580,46 @@ for modo in con senza; do
         cat "$l/messi-da-parte.tsv"
     fi
 done
+
+# --- 6. pulisci SENZA_ARCHIVIO=si: senza archivia, se il controllo di verifica-tutto è passato --
+echo "6. pulisci senza archivio"
+r="$T/senza-arch" l="$HOME/senza-arch" s="$QUI/foto-da-pcloud.sh"
+jpg "$r/Foto/buona.jpg" buona '2015:05:06 07:08:09' '2015-05-06 10:00'
+mkdir -p "$T/z" "$r/Zip"
+jpg "$T/z/z.jpg" z '2017:01:02 10:00:00' '2017-01-02 10:00'
+finto "$T/z/nota.txt" nota '2017-01-02 10:00'
+(cd "$T/z" && zip -q -X "$r/Zip/misto.zip" z.jpg nota.txt)
+rm -rf "$T/z"
+export LAVORO="$l"
+{
+    RADICE="$r" ARCHIVIO="$r/Archivio foto" GIORNI=0 DESTINAZIONE="$T/dest-senza" "$s" anteprima
+    "$s" raccogli
+    "$s" carica
+    echo "--- senza archivia"; echo CANCELLA | "$s" pulisci
+    echo "--- senza controllo"; echo CANCELLA | SENZA_ARCHIVIO=si "$s" pulisci
+    echo "--- valore sbagliato"; echo CANCELLA | SENZA_ARCHIVIO=forse "$s" pulisci
+    echo "--- controllo vecchio"; echo $(( $(cat "$l/fase-carica.ok") - 10 )) > "$l/verifica-controllo.ok"
+    echo CANCELLA | SENZA_ARCHIVIO=si "$s" pulisci
+    echo "--- troppo presto"; date +%s > "$l/verifica-controllo.ok"
+    echo CANCELLA | SENZA_ARCHIVIO=si GIORNI=7 "$s" pulisci
+    echo "--- senza CANCELLA"; echo no | SENZA_ARCHIVIO=si GIORNI=0 "$s" pulisci
+} > "$T/senza-arch-prima.txt" 2>&1
+o="$T/senza-arch-prima.txt"
+verifica "senza archivia: si ferma e dice SENZA_ARCHIVIO" contiene "$o" "prima: $s archivia (o, senza archivio, SENZA_ARCHIVIO=si $s pulisci)"
+verifica "senza controllo: si ferma"               contiene "$o" "SENZA_ARCHIVIO=si vuole prima il controllo di deploy/verifica-tutto.sh passato dopo l'ultimo carica"
+verifica "valore sbagliato: si ferma"              contiene "$o" "SENZA_ARCHIVIO vale si o niente, non 'forse'"
+verifica "troppo presto: aspetta GIORNI"           contiene "$o" "Troppo presto: mancano 7 giorni"
+verifica "avvisa che resta solo LifetimeCloud"     contiene "$o" "SENZA ARCHIVIO: dopo, l'unica copia di queste foto e video è su LifetimeCloud ($T/dest-senza)."
+verifica "fin qui non ha cancellato niente"        c_e "$r/Foto/buona.jpg"
+verifica "GIORNI non si ricorda dal lancio"        contiene "$l/impostazioni" "GIORNI=0"
+echo CANCELLA | SENZA_ARCHIVIO=si GIORNI=0 "$s" pulisci > "$T/senza-arch-dopo.txt" 2>&1
+verifica "con CANCELLA: tolto l'originale copiato" non_c_e "$r/Foto/buona.jpg"
+verifica "resta lo zip con altri file"             c_e "$r/Zip/misto.zip"
+verifica "non ha creato l'archivio"                non_c_e "$r/Archivio foto"
+verifica "pulisci segnato fatto"                   c_e "$l/fase-pulisci.ok"
+verifica "SENZA_ARCHIVIO non finisce in impostazioni" bash -c '! grep -q SENZA "$1"' _ "$l/impostazioni"
+unset LAVORO
+[ "$KO" -gt 0 ] && { cat "$o" "$T/senza-arch-dopo.txt"; }
 
 # --- 8. ordina-da-controllare: quello che è in "Da controllare", riordinato -------------
 echo "8. ordina-da-controllare"

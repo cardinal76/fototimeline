@@ -13,7 +13,9 @@
 #   foto-da-pcloud.sh carica     ordinate/ -> lifetime:FotoTimeline, poi controlla
 #   foto-da-pcloud.sh archivia   ordinate/ -> ARCHIVIO/AAAA/AAAA-MM.zip su pCloud, poi controlla
 #   foto-da-pcloud.sh pulisci    dopo GIORNI giorni da carica e archivia: cancella da pCloud
-#                                gli originali copiati (file, zip, cartelle rimaste vuote)
+#                                gli originali copiati (file, zip, cartelle rimaste vuote).
+#                                SENZA_ARCHIVIO=si foto-da-pcloud.sh pulisci: senza archivia,
+#                                se il controllo di verifica-tutto.sh è passato dopo carica
 #   foto-da-pcloud.sh metti-da-parte
 #                                sposta su pCloud, in RIMASTI, quelli rimasti in da-controllare.txt
 #                                (zip con altri file, file non letti, zip rovinati), per guardarli
@@ -303,14 +305,34 @@ archivia() {
 
 pulisci() {
     [ -f "$LAVORO/fase-carica.ok" ] || errore "prima: $0 carica (e che finisca con il controllo a posto)"
-    [ -f "$LAVORO/fase-archivia.ok" ] || errore "prima: $0 archivia"
+    # SENZA_ARCHIVIO=si: niente archivia, l'unica copia resta LifetimeCloud. Al posto
+    # dell'archivio vuole il controllo di verifica-tutto.sh (rclone check di ordinate/
+    # contro LifetimeCloud) passato dopo l'ultimo carica. Vale solo per questo lancio.
+    local senza_archivio="" controllato="$LAVORO/verifica-controllo.ok"
+    case "${SENZA_ARCHIVIO:-}" in
+        si) senza_archivio=1 ;;
+        ""|no) ;;
+        *) errore "SENZA_ARCHIVIO vale si o niente, non '$SENZA_ARCHIVIO'" ;;
+    esac
+    local -a fatti=("$LAVORO/fase-carica.ok")
+    if [ -n "$senza_archivio" ]; then
+        [ -f "$controllato" ] && [ "$(cat "$controllato")" -ge "$(cat "$LAVORO/fase-carica.ok")" ] \
+            || errore "SENZA_ARCHIVIO=si vuole prima il controllo di deploy/verifica-tutto.sh passato dopo l'ultimo carica"
+    else
+        [ -f "$LAVORO/fase-archivia.ok" ] || errore "prima: $0 archivia (o, senza archivio, SENZA_ARCHIVIO=si $0 pulisci)"
+        fatti+=("$LAVORO/fase-archivia.ok")
+    fi
     local ultimo adesso mancano
-    ultimo=$(cat "$LAVORO/fase-carica.ok" "$LAVORO/fase-archivia.ok" | sort -n | tail -1)
+    ultimo=$(cat "${fatti[@]}" | sort -n | tail -1)
     adesso=$(date +%s)
     mancano=$(( (ultimo + GIORNI * 86400 - adesso + 86399) / 86400 ))
     if [ "$mancano" -gt 0 ]; then
         echo "Troppo presto: mancano $mancano giorni (si può dal $(date -d "@$((ultimo + GIORNI * 86400))" '+%d/%m/%Y %H:%M'))."
-        echo "Intanto guarda la timeline nell'app e gli zip in $ARCHIVIO."
+        if [ -n "$senza_archivio" ]; then
+            echo "Intanto guarda la timeline nell'app."
+        else
+            echo "Intanto guarda la timeline nell'app e gli zip in $ARCHIVIO."
+        fi
         exit 0
     fi
     # Con scarica le cancellazioni passano da rclone (molto più veloce che da P:).
@@ -328,7 +350,12 @@ pulisci() {
         echo "Niente da cancellare."
         exit 0
     fi
-    echo "Cancello da pCloud ${#via[@]} originali già in FotoTimeline e in $ARCHIVIO, per esempio:"
+    if [ -n "$senza_archivio" ]; then
+        echo "SENZA ARCHIVIO: dopo, l'unica copia di queste foto e video è su LifetimeCloud ($DESTINAZIONE)."
+        echo "Cancello da pCloud ${#via[@]} originali già in FotoTimeline, per esempio:"
+    else
+        echo "Cancello da pCloud ${#via[@]} originali già in FotoTimeline e in $ARCHIVIO, per esempio:"
+    fi
     printf '    %s\n' "${via[@]:0:10}"
     [ -s "$DA_CONTROLLARE" ] && echo "(restano su pCloud quelli in $DA_CONTROLLARE)"
     read -r -p "Scrivi CANCELLA per confermare: " risposta
