@@ -392,6 +392,51 @@ fila e in sottofondo stato, scarica, raccogli, carica, un `rclone check` di
 per riprendere). L'ultimo passo cancella `specchio/` sul PC, solo se il
 controllo di quel giro è passato. Non archivia e non cancella niente su pCloud.
 
+`deploy/confronta-tutto.sh` è la prova per contenuto: lo SHA-256 di ogni foto e video che c'è
+**adesso** su pCloud (sciolti e dentro gli zip, `RIMASTI` compresa; `ESCLUDI` contato a parte,
+`ARCHIVIO`, `Crypto Folder` e le cartelle di sistema saltati come in `foto-da-pcloud.sh`) contro
+gli hash delle schede di FotoTimeline (`Foto.hash`, lo SHA-256 del file). Gira sul PC in
+sottofondo come `verifica-tutto.sh`, in cinque passi:
+
+| Passo | Cosa fa |
+|---|---|
+| 1 `elenca` | `rclone lsf -R` di `PCLOUD`, con dimensione e data; prova se pCloud dà lo SHA-256 lato server (la regione EU sì: rclone lo chiede con `checksumfile`, una chiamata per file, niente download) e lo confronta con quello di 3 file scaricati. Dice quanti GB scaricherà. |
+| 2 `sciolti` | `rclone hashsum sha256` a blocchi: lato server, o con `--download` (in streaming, niente su disco), `PARALLELI` insieme (8). |
+| 3 `zip` | ogni zip in `~/foto-da-pcloud/confronto/tmp`, `ZIP_PARALLELI` insieme (3): estrae solo foto e video, ne fa lo SHA-256, cancella la copia. Le copie `._` dei Mac si contano e basta, come le butta `raccogli`. |
+| 4 `fototimeline` | su server2, in sola lettura (`find`): `docker exec fototimeline-mongo-1 mongosh ... fototimeline`, collezione `foto`, campi `_id`, `hash`, `dimensione`, `giorno`, `video`, `conversione`, `nomeOriginale`, `percorso`; `rclone lsf -R lifetime:FotoTimeline`; `CAMPIONE` (20) file riscaricati, il cui SHA-256 dev'essere quello della scheda. |
+| 5 `confronto` | per ogni foto e video di pCloud: trovato o mancante, col motivo; i file di LifetimeCloud senza scheda, le schede senza file, le dimensioni diverse. |
+
+```bash
+./deploy/confronta-tutto.sh stima      # passo 1, in primo piano
+./deploy/confronta-tutto.sh            # passo 1 (o la stima appena fatta), poi 2-5 in sottofondo
+./deploy/confronta-tutto.sh dove       # passo, zip fatti, GB scaricati, velocità, quanto manca
+./deploy/confronta-tutto.sh da 3       # riprende dal passo 3
+./deploy/confronta-tutto.sh ferma      # ferma tutto il gruppo (xargs, rclone, unzip)
+./deploy/confronta-tutto.sh rapporto   # solo il passo 5, in primo piano
+```
+
+- **Ripresa**: gli SHA-256 calcolati stanno in `~/foto-da-pcloud/confronto/sha-sciolti.tsv` e
+  `sha-zip.tsv`, con chiave percorso, dimensione e data di modifica: un rilancio non riscarica
+  niente di già fatto; uno zip conta solo quando è scritto per intero (una riga `F` in fondo).
+- **Quanto scarica**: tutti gli zip fuori da `ESCLUDI` e `ARCHIVIO`, più gli sciolti se pCloud non
+  dà lo SHA-256 lato server (allora anche i due video oltre i 20 GB). La stima la dice il passo 1.
+- **Motivi dei mancanti** (colonna 3 di `confronto-rapporto.tsv`): in `impronte.tsv` ma senza
+  scheda (`raccolto-non-indicizzato`: Indicizza archivio) o non su LifetimeCloud
+  (`raccolto-non-caricato`); mai raccolto perché in `RIMASTI`, non letto, in uno zip rovinato,
+  arrivato dopo lo scarica (data su pCloud dopo `fase-scarica.ok`), o `mai-visto`. Un secondo
+  abbinamento per nome e giorno (o stesso percorso in `ordinate/`) dà i "probabili, contenuto
+  diverso": un video oltre `RICOMPRESSI_SOPRA` (20 GB) più piccolo in FotoTimeline è
+  `ricompresso-h265`, spiegato. `manifest.tsv` non si usa.
+- **Video compatibili e HEIC**: la conversione scrive `FotoTimeline/.compatibili/<id>.mp4` e le
+  viste JPEG degli HEIC stanno sul disco di server2; l'originale e la sua scheda non cambiano, quindi
+  l'hash resta quello del file caricato. Il confronto salta le cartelle col punto e conta a parte le
+  versioni compatibili (e le schede `FATTA` senza il file).
+- **Codice d'uscita**: 3 se c'è qualcosa di non spiegato (`mai-visto`, `cambiato-dopo-raccogli`,
+  `stesso-nome-e-data`, `hash-non-letto`, zip non confrontati, schede senza file, campione
+  diverso), 0 altrimenti. `confronto.passo` lo dice.
+- Per i test, `FT_DB_FILE` è un elenco già esportato (stesso formato) al posto di server2;
+  `HASH_PCLOUD=server|scarica` salta la prova del passo 1.
+
 #### Da Amazon Foto o da una cartella del PC
 
 Amazon Foto non ha API pubbliche: la libreria si scarica con l'app per Windows

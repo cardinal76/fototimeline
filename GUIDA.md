@@ -170,6 +170,42 @@ in `~/foto-da-pcloud/messi-da-parte.tsv` e rilanciato rifà solo quelli non spos
 un'altra cartella: `RIMASTI='/mnt/p/Altra cartella'` davanti (si ricorda). Le fasi di prima
 (anteprima, scarica, raccogli, pulisci) quella cartella la saltano sempre.
 
+**2.7 La prova che c'è tutto.** `deploy/confronta-tutto.sh` confronta **per contenuto**
+(SHA-256) ogni foto e video che c'è *adesso* su pCloud, sciolti e dentro gli zip, `Da controllare`
+compresa, con gli hash delle schede di FotoTimeline (il DB su server2, letto via `ssh server2`).
+Non tocca niente: su pCloud e LifetimeCloud legge e basta, nel DB fa solo una ricerca. Gli zip si
+scaricano uno alla volta (3 insieme) in `~/foto-da-pcloud/confronto/tmp` e si cancellano subito.
+
+```bash
+cd ~/projects/fototimeline
+ssh server2 true                          # deve rispondere senza chiedere niente
+./deploy/confronta-tutto.sh stima         # qualche minuto: elenca pCloud e dice quanti GB scaricherà
+./deploy/confronta-tutto.sh               # riparte dalla stima e va avanti in sottofondo
+./deploy/confronta-tutto.sh dove          # a che passo è, zip fatti, GB scaricati, quanto manca
+cat ~/foto-da-pcloud/confronto-riepilogo.txt   # alla fine: i conti
+```
+
+Se si ferma (errore, PC spento, `./deploy/confronta-tutto.sh ferma`), `dove` dice da che passo
+riprendere, per esempio `./deploy/confronta-tutto.sh da 3`: quello già calcolato non si riscarica.
+Alla fine il riepilogo dice quanti sono su pCloud, quanti trovati, i mancanti per motivo e i file
+di LifetimeCloud senza scheda; una riga per file in `~/foto-da-pcloud/confronto-rapporto.tsv`:
+
+```bash
+awk -F'\t' '$2 == "mancante" || $2 == "probabile"' ~/foto-da-pcloud/confronto-rapporto.tsv | less -S
+```
+
+| Motivo | Cosa vuol dire | Cosa fare |
+|---|---|---|
+| `raccolto-non-indicizzato` | è su LifetimeCloud ma senza scheda | nell'app: **Monta**, **Indicizza archivio**, poi `./deploy/confronta-tutto.sh da 4` |
+| `nuovo-dopo-scarica` | arrivato su pCloud dopo lo scarica | un nuovo giro: `scarica`, `raccogli`, `carica` |
+| `da-controllare`, `non-letto`, `zip-rovinato` | lasciati apposta (`da-controllare.txt`) | guardarli a mano |
+| `ricompresso-h265` | i due video oltre i 20 GB, ricompressi prima di carica | niente: è normale che l'hash sia diverso |
+| `stesso-nome-e-data` (probabile) | stesso nome e giorno di una foto in FotoTimeline, contenuto diverso | guardarle tutte e due |
+| `mai-visto`, `cambiato-dopo-raccogli`, `hash-non-letto` | da capire | guardare il file; `hash-non-letto`: `da 2` |
+
+Se il riepilogo finisce con "RISULTATO: tutto quello che c'è su pCloud è in FotoTimeline, o manca
+per un motivo noto" (e lo script esce con 0), la prova è fatta.
+
 ---
 
 ## 3. Foto nuove dal telefono (automatico, su server2)
