@@ -78,7 +78,7 @@ riprende da dove era arrivata. Sempre da `~/projects/fototimeline`, con `p-up` f
 | `raccogli` | dalla copia: apre gli zip, legge la data di ogni foto e la mette in `AAAA/MM/GG`, senza doppioni | no |
 | `carica` | li manda su LifetimeCloud `FotoTimeline/` e controlla | no |
 | `archivia` | su pCloud un zip per mese in `Archivio foto/AAAA/AAAA-MM.zip`, controllato | aggiunge |
-| `pulisci` | dopo 7 giorni e con `CANCELLA`: toglie gli originali copiati | **sì** |
+| `pulisci` | dopo 7 giorni e con `CANCELLA`: toglie gli originali copiati (senza `archivia`: `SENZA_ARCHIVIO=si`, vedi 2.5) | **sì** |
 | `metti-da-parte` | con `SPOSTA`: sposta quelli rimasti (zip con altri file, non letti, rovinati) in `Da controllare/` | sposta |
 | `stato` | a che punto è | no |
 
@@ -144,6 +144,16 @@ Rilanciato, riprende: uno zip conta come fatto solo quando è in `fonti.tsv`.
 ./deploy/foto-da-pcloud.sh pulisci           # mostra cosa toglie e chiede CANCELLA
 rm -rf ~/foto-da-pcloud/ordinate ~/foto-da-pcloud/specchio   # le copie sul PC non servono più
 ```
+
+Senza `archivia` (nessuno zip per mese su pCloud): dopo i 7 giorni da `carica`, e solo se il
+controllo di `deploy/verifica-tutto.sh` (passo 5) è passato dopo l'ultimo `carica`:
+
+```bash
+SENZA_ARCHIVIO=si ./deploy/foto-da-pcloud.sh pulisci   # avvisa che resta solo LifetimeCloud, chiede CANCELLA
+```
+
+Così l'unica copia delle foto e dei video è quella su LifetimeCloud. `SENZA_ARCHIVIO` vale
+solo per quel lancio, non si ricorda.
 
 **2.6 Quelli rimasti, tutti insieme.** Gli zip con dentro anche altri file, i file non letti e
 gli zip rovinati (le righe di `~/foto-da-pcloud/da-controllare.txt`) si spostano su pCloud in
