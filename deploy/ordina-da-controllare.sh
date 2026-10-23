@@ -730,10 +730,20 @@ stato() {
     riepilogo
 }
 
+# Un giro solo alla volta: due ordina insieme scaricherebbero e caricherebbero gli stessi
+# file (e il secondo cancella il TMP del primo). Il lucchetto passa ai figli (anche rclone):
+# finché uno di loro gira, un altro ordina o carica non parte.
+un_giro_solo() {
+    command -v flock >/dev/null || return 0
+    mkdir -p "$LAVORO"
+    exec 9>"$LAVORO/in-corso.lock"
+    flock -n 9 || errore "c'è già un giro in corso (pgrep -af ordina-da-controllare.sh): aspetta che finisca, o fermalo prima di rilanciare"
+}
+
 case "$FASE" in
     anteprima) anteprima ;;
-    ordina) ordina ;;
-    carica) carica ;;
+    ordina) un_giro_solo; ordina ;;
+    carica) un_giro_solo; carica ;;
     stato) stato ;;
     *) errore "fase sconosciuta: $FASE (anteprima, ordina, carica, stato)" ;;
 esac
