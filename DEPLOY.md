@@ -319,7 +319,7 @@ un'importazione); alla fine la timeline si ricarica.
   stesso fanno "Importa cartella" e la cartella automatica: dal cloud quasi
   tutto il tempo di un file è attesa di rete (circa 1,3 s a file uno alla
   volta), e così le attese si sovrappongono. Miniature, heif-convert e ffmpeg
-  restano uno alla volta, per i 384 MB della JVM. Annulla non comincia file
+  restano uno alla volta, per la memoria (vedi "Memoria"). Annulla non comincia file
   nuovi e aspetta quelli in corso (al massimo `FOTOTIMELINE_ATTESA_ANNULLAMENTO`,
   poi li abbandona). Più di 4–6 serve a poco: il collo di bottiglia diventa la
   CPU o il WebDAV di LifetimeCloud.
@@ -516,7 +516,7 @@ rete interna e non esposto, con il segreto `VISIONE_SEGRETO`:
 - **l'indice**: un vettore di 512 numeri (float16) per foto, in memoria nel
   servizio e su disco nel volume `visione-dati` (`indice.npz` più un giornale
   delle modifiche, scritto a ogni foto: un riavvio non perde niente). Nella
-  JVM dell'app (384 MB) non ci starebbe; l'app tiene solo, su ogni foto,
+  JVM dell'app non ci starebbe; l'app tiene solo, su ogni foto,
   quando è entrata nell'indice (`contenutoIndicizzato`).
 
 Come entrano le foto:
@@ -578,7 +578,7 @@ stage `geonames` da `https://download.geonames.org/export/dump/` e mette in
 
 In tutto circa **26 MB** in più nell'immagine. All'avvio l'app li legge in un
 paio di secondi in un indice compatto (array di primitivi, k-d tree): circa
-**10 MB di heap** sui 384 della JVM. Oltre 30 km dal centro abitato più vicino
+**10 MB di heap**. Oltre 30 km dal centro abitato più vicino
 (`FOTOTIMELINE_LUOGHI_DISTANZA`) il luogo resta sconosciuto: mare aperto.
 Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
 "Luoghi spenti").
@@ -866,6 +866,65 @@ I thread di un lavoro si chiamano `importazione` (il lavoro) e
 `importazione-file <percorso>` (uno per file in corso, anche quelli
 abbandonati e ancora appesi): sono thread normali, quindi li mostra anche
 `docker kill -s QUIT fototimeline-app-1` (`kill -3`), nel log del container.
+
+## Memoria
+
+L'app ha **1,5 GB di heap** (`-Xmx1536m`) in un container con un tetto di
+**3 GB** (`mem_limit`): oltre l'heap la JVM usa memoria sua (metaspace, thread,
+codice compilato, qualche centinaio di MB) e nel container contano anche i
+processi figli, cioè ffmpeg della conversione dei video e heif-convert, che
+con una foto da 48 MP decodifica centinaia di MB. Si cambiano nel `.env`:
+
+| Variabile | Predefinito | Cosa fa |
+| --- | --- | --- |
+| `FOTOTIMELINE_JAVA_OPTS` | `-Xmx1536m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/diagnostica` | opzioni della JVM (`JAVA_TOOL_OPTIONS`): chi la cambia rimetta le due dell'heap dump |
+| `FOTOTIMELINE_MEMORIA_APP` | `3g` | tetto del container; oltre, Docker lo uccide |
+
+Il conto su server2 (7,8 GB di RAM, 2 GB di swap): app 3 GB al massimo,
+visione 1,5 GB (`mem_limit`), MongoDB circa 0,5 GB (cache di WiredTiger a
+0,25 GB), rclone fra 0,2 e 1 GB (i buffer dei file aperti), Caddy pochi MB:
+restano almeno 1,5 GB per il sistema e per i runner della CI. Con la RAM che
+cambia, `free -h` e `docker stats --no-stream` dicono quanto c'è e quanto si usa.
+
+**Prima erano 384 MB** e le importazioni finivano con
+`OutOfMemoryError: Java heap space` a ogni file nuovo (i "già presenti" no,
+perché non si decodificano): la miniatura decodificava tutta la foto, ~100 MB
+di heap per una da 12 MP e ~460 MB per una da 50 MP. Ora si legge già
+sottocampionata (`Riduzione`, pochi MB): 384 MB basterebbero di nuovo, l'heap
+più grande è margine per gli elenchi grandi (110.000 foto, le cartelle dei
+telefoni) e per le quasi uguali.
+
+**La toppa `~/fototimeline/heap.yml`** (heap a 1,5 GB data a mano prima di
+questa versione, con `-f ~/fototimeline/heap.yml`) dopo il rilascio non serve
+più: il rilascio non la usa, e i valori ora sono nel compose. Va cancellata,
+così nessuno la rilancia per sbaglio con valori vecchi:
+
+```bash
+rm ~/fototimeline/heap.yml
+```
+
+**Heap dump.** Al primo `OutOfMemoryError` la JVM scrive
+`/diagnostica/java_pid1.hprof` nel volume `fototimeline_diagnostica` (grande
+quanto l'heap usato, fino a 1,5 GB). Nel container il pid è sempre 1: finché
+quel file c'è, la JVM non ne scrive un altro, quindi il disco non si riempie.
+Per guardarlo (con Eclipse MAT o VisualVM sul PC) e poi toglierlo:
+
+```bash
+docker cp fototimeline-app-1:/diagnostica/java_pid1.hprof ~/oom-$(date +%F).hprof
+docker exec fototimeline-app-1 rm /diagnostica/java_pid1.hprof
+```
+
+Niente `-XX:+ExitOnOutOfMemoryError`: un `OutOfMemoryError` in un file di
+un'importazione chiude il lavoro come "non riuscita" con il messaggio nel
+riquadro (e la memoria del file si libera con il suo thread), mentre un
+riavvio cancellerebbe quel messaggio e smonterebbe il cloud, fermando tutto
+fino al prossimo **Monta**. Se l'app dopo un OOM resta strana, si riavvia a mano
+(`$C restart app`).
+
+Un file fallito per la memoria non resta tra i "già falliti" della cartella
+automatica: un errore che parla di memoria (`OutOfMemoryError`, `Java heap
+space`) non è un errore del file, e un ricordo vecchio con quel motivo si
+rilegge da solo al giro dopo. Per gli altri c'è sempre **Riprova tutti**.
 
 ## Backup
 

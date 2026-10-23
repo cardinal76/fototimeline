@@ -97,8 +97,19 @@ public class FotoService {
      * mancanti sul server) possono passare da soli.
      */
     public static boolean erroreDelFile(String messaggio) {
-        return messaggio != null && (messaggio.equals(CIFRATO_LIFETIME) || messaggio.startsWith("Formato non supportato")
+        return messaggio != null && !memoriaFinita(messaggio) && (messaggio.equals(CIFRATO_LIFETIME)
+                || messaggio.startsWith("Formato non supportato")
                 || messaggio.startsWith("Immagine illeggibile") || messaggio.startsWith("Video illeggibile"));
+    }
+
+    /**
+     * True se dietro l'errore c'è la memoria della JVM finita, non il file:
+     * anche se un lettore la avvolge in "Immagine illeggibile (...)", il file
+     * va riprovato, non ricordato tra i già falliti.
+     */
+    static boolean memoriaFinita(String messaggio) {
+        return messaggio.contains("OutOfMemoryError") || messaggio.contains("Java heap space")
+                || messaggio.contains("GC overhead limit");
     }
 
     /**
@@ -145,9 +156,10 @@ public class FotoService {
     /**
      * Le parti che prendono molta memoria o CPU, una alla volta anche quando
      * si importano più file insieme ({@code fototimeline.indicizzazione.paralleli}):
-     * la miniatura decodifica tutta l'immagine (una foto da 48 MP sono quasi
-     * 200 MB di heap, e la JVM sul server ne ha 384), heif-convert e ffmpeg
-     * sono processi grossi. Hash, metadati e attese di rete restano in parallelo.
+     * la miniatura decodifica l'immagine (sottocampionata, {@link it.fototimeline.media.Riduzione}:
+     * pochi MB anche per una foto da 50 MP, che intera ne prenderebbe ~460),
+     * heif-convert e ffmpeg sono processi grossi, fuori dall'heap ma nella
+     * memoria del container. Hash, metadati e attese di rete restano in parallelo.
      */
     private final Semaphore pesanti = new Semaphore(1, true);
 

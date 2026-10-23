@@ -254,6 +254,28 @@ class ImportazioneAutomaticaTest {
         assertThat(FotoService.erroreDelFile("File illeggibile (Input/output error)")).isFalse();
         assertThat(FotoService.erroreDelFile("Per i video servono ffmpeg e ffprobe sul server")).isFalse();
         assertThat(FotoService.erroreDelFile(null)).isFalse();
+        // La memoria della JVM finita non è colpa del file, anche se un lettore la avvolge.
+        assertThat(FotoService.erroreDelFile("Immagine illeggibile (java.lang.OutOfMemoryError: Java heap space)"))
+                .isFalse();
+        assertThat(FotoService.erroreDelFile("Immagine illeggibile (Java heap space)")).isFalse();
+    }
+
+    @Test
+    void unFileRicordatoPerLaMemoriaFinitaSiRilegge() throws IOException {
+        // Ricordato così da una versione di prima (o da un lettore che avvolge l'OutOfMemoryError):
+        // dopo la correzione deve rientrare da solo, senza "Riprova".
+        Path foto = telefono.resolve("Xiaomi - DCIM - Camera - IMG_20260318_213435.jpg");
+        Files.write(foto, immagine(Color.MAGENTA));
+        memoria.ricorda(foto, Files.size(foto), Files.getLastModifiedTime(foto).toInstant(),
+                "Immagine illeggibile (Java heap space)");
+
+        Registro giro = new Registro();
+        Importazione esito = importa(regole(), giro);
+
+        assertThat(giro.giaFallite).isZero();
+        assertThat(giro.lette).containsExactly(foto.getFileName().toString());
+        assertThat(esito.importate()).isEqualTo(1);
+        assertThat(memoria.elenco()).isEmpty();
     }
 
     @Test

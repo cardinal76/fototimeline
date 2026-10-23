@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * I luoghi di GeoNames in memoria, per trovare il più vicino a una posizione.
- * Con 150-250 mila punti e la JVM a 384 MB niente oggetti per punto: solo
+ * Con 150-250 mila punti e un heap limitato niente oggetti per punto: solo
  * array di primitivi, e i nomi tutti in un unico {@code byte[]} UTF-8.
  *
  * <p>La ricerca è un k-d tree implicito sui punti come vettori unitari in 3D

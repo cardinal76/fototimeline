@@ -354,7 +354,7 @@ public class LavoriImportazione {
             log.warn("{} di {} fallita", nome, lavoro.cartella, e);
             lavoro.finisci(Stato.FALLITA, e.getMessage() != null ? e.getMessage() : e.toString(), clock.instant());
         } catch (Throwable e) {
-            // Prima solo Exception: un OutOfMemoryError (la JVM ha 384 MB) lasciava il lavoro
+            // Prima solo Exception: un OutOfMemoryError lasciava il lavoro
             // "in corso" per sempre, senza thread e senza una riga nel log.
             log.error("{} di {} fermata da un errore inatteso", nome, lavoro.cartella, e);
             lavoro.finisci(Stato.FALLITA, "Errore inatteso: " + e, clock.instant());

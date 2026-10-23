@@ -63,7 +63,10 @@ services:
       SPRING_PROFILES_ACTIVE: server
       # I video salvano l'ora in UTC: si converte in quella italiana, come l'EXIF delle foto.
       TZ: Europe/Rome
-      JAVA_TOOL_OPTIONS: -Xmx384m
+      # Heap della JVM e, al primo OutOfMemoryError, un heap dump in /diagnostica (DEPLOY.md, "Memoria").
+      # 1,5 GB di heap nei 3 GB del container: il resto è la JVM fuori dall'heap e i processi figli
+      # (ffmpeg della conversione, heif-convert), che contano nella memoria del container.
+      JAVA_TOOL_OPTIONS: "${FOTOTIMELINE_JAVA_OPTS:--Xmx1536m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/diagnostica}"
       MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/fototimeline?authSource=admin
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://presenze.footballer.it/auth/realms/fototimeline}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?}
@@ -114,9 +117,13 @@ services:
       FOTOTIMELINE_GOOGLE_CHIAVE: ${FOTOTIMELINE_GOOGLE_CHIAVE:-}
       VISIONE_URL: http://visione:8000
       VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
+    # Il tetto del container: JVM (heap compreso) più ffmpeg e heif-convert. Oltre, Docker lo uccide (OOM killer).
+    mem_limit: ${FOTOTIMELINE_MEMORIA_APP:-3g}
     volumes:
       # Miniature sul disco di server2: dal cloud la timeline sarebbe lenta.
       - miniature:/miniature
+      # L'heap dump di un OutOfMemoryError (java_pid1.hprof): uno solo, finché non lo si cancella.
+      - diagnostica:/diagnostica
       - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
@@ -173,6 +180,7 @@ services:
 volumes:
   mongo:
   miniature:
+  diagnostica:
   rclone-cache:
   visione-dati:
   caddy-dati:
