@@ -29,7 +29,7 @@
 # 8. ordina-da-controllare.sh su un finto "Da controllare": foto nuove (su pCloud e LifetimeCloud)
 #    e già note, documenti per mese, doppioni tra zip, nomi uguali, __MACOSX, un non letto, uno
 #    zip rovinato a metà e uno irrecuperabile; senza ORDINA niente, il rilancio non rifà niente,
-#    ucciso a metà e ripreso come un giro intero, gli zip originali intatti.
+#    ucciso a metà e ripreso come un giro intero, gli zip originali intatti, un giro solo alla volta.
 #
 # Serve: exiftool, rclone, zip, unzip, flock (ffmpeg facoltativo, per un video vero).
 set -uo pipefail
@@ -931,6 +931,12 @@ verifica "stato: il conto dei documenti"                 grep -Eq '^ +8 document
 prima_p="$(sha_di "$P8")" prima_l="$(sha_di "$LT8")" prima_r="$(cat "$R8")"
 echo ORDINA | "${OC[@]}" ordina > "$T/o8-ancora.txt" 2>&1
 verifica "rilancio: niente da fare"                      contiene "$T/o8-ancora.txt" "Da fare: niente."
+# Un giro solo alla volta: con il lucchetto preso da un altro, ordina e carica si fermano.
+( flock -n 9 && echo ORDINA | "${OC[@]}" ordina > "$T/o8-doppio.txt" 2>&1; "${OC[@]}" carica > "$T/o8-doppio-carica.txt" 2>&1 ) 9>"$L8/in-corso.lock"
+verifica "due giri insieme: il secondo si ferma"         contiene "$T/o8-doppio.txt" "c'è già un giro in corso"
+verifica "due giri insieme: anche carica"                contiene "$T/o8-doppio-carica.txt" "c'è già un giro in corso"
+"${OC[@]}" stato > "$T/o8-doppio-stato.txt" 2>&1
+verifica "stato si legge anche durante un giro"          contiene "$T/o8-doppio-stato.txt" "Fatti:       7 file su 7"
 verifica "rilancio: pCloud com'era"                      [ "$prima_p" = "$(sha_di "$P8")" ]
 verifica "rilancio: LifetimeCloud com'era"               [ "$prima_l" = "$(sha_di "$LT8")" ]
 verifica "rilancio: registro com'era"                    [ "$prima_r" = "$(cat "$R8")" ]
