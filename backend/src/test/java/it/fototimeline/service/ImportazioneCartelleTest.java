@@ -34,6 +34,19 @@ class ImportazioneCartelleTest {
     Path disco;
 
     @Test
+    void iFileInsiemeStannoNellHeap() {
+        long mb = 1024L * 1024;
+        IndicizzazioneProperties tre = new IndicizzazioneProperties(3, Duration.ZERO);
+        // Il server di prima (384 MB) e quello di adesso: i 3 configurati ci stanno.
+        assertThat(tre.paralleliPerHeap(384 * mb)).isEqualTo(3);
+        assertThat(tre.paralleliPerHeap(1536 * mb)).isEqualTo(3);
+        // Con poco heap meno file insieme, ma almeno uno.
+        assertThat(tre.paralleliPerHeap(256 * mb)).isEqualTo(2);
+        assertThat(tre.paralleliPerHeap(64 * mb)).isEqualTo(1);
+        assertThat(new IndicizzazioneProperties(16, Duration.ZERO).paralleliPerHeap(512 * mb)).isEqualTo(6);
+    }
+
+    @Test
     void accettaSoloCartelleSottoLaRadice() throws IOException {
         Path radice = Files.createDirectories(disco.resolve("cloud"));
         var importazione = new ImportazioneCartelle(null, archivio(cloudMontato(true)),

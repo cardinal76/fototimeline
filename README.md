@@ -361,7 +361,7 @@ Link di condivisione (dietro login come il resto):
   Con il download permesso, originali e zip sono i file come sono, EXIF e GPS
   compresi (il dialogo lo dice).
 - **Zip** scritto direttamente sulla risposta, un file alla volta a pezzi di
-  64 KB (la JVM ha 384 MB). JPEG e video non si ricomprimono (deflate livello
+  64 KB (la JVM ha un heap limitato). JPEG e video non si ricomprimono (deflate livello
   0); non STORED perché vorrebbe CRC e dimensione prima di ogni file, cioè
   leggerlo due volte dal cloud. Nei download i nomi sono la data di scatto
   (`2024-05-17 14.03.22.jpg`), non quelli dell'archivio.

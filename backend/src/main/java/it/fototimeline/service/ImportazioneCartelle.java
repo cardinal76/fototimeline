@@ -354,9 +354,11 @@ public class ImportazioneCartelle {
             FileScartato scartato = scartati.get(percorso);
             if (automatica.inArrivo().test(p) || automatica.recente(modificatoIl)) {
                 inArrivo++;
-            } else if (scartato != null && scartato.uguale(attr.size(), modificatoIl)) {
+            } else if (scartato != null && scartato.uguale(attr.size(), modificatoIl)
+                    && FotoService.erroreDelFile(scartato.motivo())) {
                 giaFallite++;
             } else {
+                // Anche un ricordo il cui motivo oggi non è più "del file" (la memoria finita): si rilegge.
                 daLeggere.add(p);
                 attributi.put(p, attr);
                 if (scartato != null) {
@@ -490,7 +492,11 @@ public class ImportazioneCartelle {
         if (file.isEmpty()) {
             return;
         }
-        int n = Math.min(parallelismo.paralleli(), file.size());
+        int n = Math.min(parallelismo.paralleliPerHeap(Runtime.getRuntime().maxMemory()), file.size());
+        if (n < Math.min(parallelismo.paralleli(), file.size())) {
+            log.warn("Heap di {} MB: {} file insieme invece di {}", Runtime.getRuntime().maxMemory() >> 20, n,
+                    parallelismo.paralleli());
+        }
         Object segnale = new Object();
         Set<FileInLavorazione> attivi = ConcurrentHashMap.newKeySet();
         AtomicReference<Throwable> errore = new AtomicReference<>();

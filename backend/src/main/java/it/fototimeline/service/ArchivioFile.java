@@ -1,6 +1,5 @@
 package it.fototimeline.service;
 
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -22,8 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import it.fototimeline.cloud.Cloud;
+import it.fototimeline.media.Riduzione;
 import it.fototimeline.media.VideoProperties;
-import net.coobird.thumbnailator.Thumbnails;
 
 /**
  * Originali e miniature su disco. Gli originali stanno in una cartella per
@@ -274,19 +273,15 @@ public class ArchivioFile {
     }
 
     /**
-     * Scrive la miniatura JPEG da un'immagine che ImageIO sa leggere.
+     * Scrive la miniatura JPEG da un'immagine che ImageIO sa leggere, letta
+     * già sottocampionata ({@link Riduzione}): mai tutta l'immagine in memoria,
+     * che per una foto da 50 MP sarebbero centinaia di MB di heap.
      *
      * @param exif true per ruotarla secondo l'EXIF; false se è già dritta
      *             (un JPEG convertito da HEIC o un fotogramma di video)
      */
     public void creaMiniatura(String id, Path immagine, boolean exif) throws IOException {
-        Thumbnails.of(immagine.toFile())
-                .useExifOrientation(exif)
-                .size(latoMiniatura, latoMiniatura)
-                .imageType(BufferedImage.TYPE_INT_RGB)
-                .outputFormat("jpg")
-                .outputQuality(0.85)
-                .toFile(miniatura(id).toFile());
+        Riduzione.jpeg(immagine, miniatura(id), latoMiniatura, exif, 0.85, true);
     }
 
     /**

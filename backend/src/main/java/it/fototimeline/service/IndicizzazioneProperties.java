@@ -67,6 +67,25 @@ public record IndicizzazioneProperties(int paralleli, Duration attesaRiprova, Du
         this(paralleli, attesaRiprova, null, null, null);
     }
 
+    /** L'heap che serve comunque all'app (Spring, driver di Mongo, luoghi, cache), file a parte. */
+    static final long HEAP_DI_BASE = 128L * 1024 * 1024;
+    /**
+     * L'heap da tenere per ogni file in lavorazione: il buffer dell'hash, i
+     * segmenti EXIF/XMP letti da metadata-extractor, l'uscita di ffprobe, la
+     * scheda. La decodifica della miniatura, una alla volta, sta nel margine.
+     */
+    static final long HEAP_PER_FILE = 64L * 1024 * 1024;
+
+    /**
+     * I file insieme che l'heap regge: {@link #paralleli}, ma non più di
+     * quanti ne stanno in {@code heapMassimo} (di solito {@code Runtime.maxMemory()})
+     * oltre a {@link #HEAP_DI_BASE}, a {@link #HEAP_PER_FILE} l'uno. Almeno uno.
+     */
+    public int paralleliPerHeap(long heapMassimo) {
+        long stanno = (heapMassimo - HEAP_DI_BASE) / HEAP_PER_FILE;
+        return (int) Math.max(1, Math.min(paralleli, stanno));
+    }
+
     /** Il tempo massimo per un file di {@code dimensione} byte (0 se non si sa ancora), in proporzione anche ai pezzi di GB. */
     public Duration tempoMassimo(long dimensione) {
         long d = Math.max(0, dimensione);
