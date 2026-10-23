@@ -31,9 +31,16 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 ## Formati: foto, HEIC, video
 
 - `FotoService.importa(nome, Path, ...)` lavora su file, mai con tutto il
-  contenuto in memoria: i video pesano gigabyte e la JVM sul server ha 384 MB.
+  contenuto in memoria: i video pesano gigabyte e la JVM sul server ha 1,5 GB
+  di heap (`FOTOTIMELINE_JAVA_OPTS`, prima 384 MB).
   Anche i caricamenti dal browser passano da un file temporaneo
   (`transferTo`). Non tornare a `byte[]` / `readAllBytes`.
+- Miniature e viste dei link condivisi passano da `media/Riduzione`: l'immagine
+  si legge già sottocampionata (`setSourceSubsampling`, al più 8 MP letti),
+  mai intera. `Thumbnails.of(file)` decodifica tutto (~460 MB di heap per una
+  foto da 50 MP) ed era la causa degli OutOfMemoryError a ogni file nuovo:
+  non tornarci. Heap e tetto del container sono nel compose
+  (`FOTOTIMELINE_JAVA_OPTS`, `FOTOTIMELINE_MEMORIA_APP`, DEPLOY.md "Memoria").
 - `Genere`: FOTO (ImageIO + metadata-extractor), HEIC (`heif-convert` →
   JPEG per miniatura e "vista"), VIDEO (`ffprobe` per dimensioni, durata,
   data e GPS; `ffmpeg` per un fotogramma). Tutto in `StrumentiMedia`; se un
@@ -109,7 +116,7 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   repository). Senza cartella l'app parte, senza luoghi.
 - `IndiceLuoghi` è un k-d tree implicito su vettori unitari 3D: solo array di
   primitivi e i nomi in un `byte[]`, niente oggetti per punto (225 mila punti,
-  ~10 MB). Non aggiungere campi per punto senza pensare alla RAM (384 MB).
+  ~10 MB). Non aggiungere campi per punto senza pensare alla RAM.
 - `FotoService.leggi` chiama `applica`: luogo, regione, nazione, codice nazione
   e `luogoCalcolato` (true anche in mare aperto, così "Calcola luoghi" non li
   rifà). "Calcola luoghi" è un lavoro di `LavoriImportazione` (origine
@@ -283,13 +290,16 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   esclusivo) e una cartella tolta da un altro thread perché vuota si ricrea
   (`inCartella`). Miniatura, heif-convert e ffmpeg passano da
   `FotoService.unaAllaVolta` (memoria). `Riepilogo` e `Lavoro` sono
-  sincronizzati.
+  sincronizzati. I file insieme non superano quanti ne regge l'heap
+  (`IndicizzazioneProperties.paralleliPerHeap`: 128 MB di base, 64 MB a file).
 - Gli errori di lettura (`FotoService.ILLEGGIBILE`, "File illeggibile (...)":
   il mount che non risponde) si riprovano una volta dopo
   `attesa-riprova` e non sono `erroreDelFile`, quindi la cartella automatica
   non li ricorda. Un'eccezione con un `FileSystemException` o un
   "Input/output error" dentro diventa errore di lettura anche se arriva da
-  ImageIO o Thumbnailator (`letturaNonRiuscita`).
+  ImageIO o Thumbnailator (`letturaNonRiuscita`). Nemmeno la memoria finita
+  (`OutOfMemoryError`, "Java heap space" nel messaggio, `memoriaFinita`) è un
+  errore del file: un ricordo con quel motivo si rilegge al giro dopo.
 - **Un file appeso non ferma il lavoro.** Ogni file ha un tempo massimo
   (`tempo-massimo-file` + `tempo-massimo-per-gb`, `FOTOTIMELINE_TEMPO_MASSIMO_FILE`
   e `_PER_GB`, 5 min + 5 min/GB): oltre, chi sorveglia lo abbandona

@@ -1,6 +1,5 @@
 package it.fototimeline.condivisione;
 
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -39,9 +38,9 @@ import org.springframework.stereotype.Service;
 
 import it.fototimeline.condivisione.Condivisione.Origine;
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.media.Riduzione;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
-import net.coobird.thumbnailator.Thumbnails;
 
 /**
  * Link pubblici a un gruppo di foto. Il token è l'unica chiave: 256 bit
@@ -294,20 +293,9 @@ public class CondivisioniService {
             boolean exif = !heic(foto);
             Files.createDirectories(file.getParent());
             temporaneo = Files.createTempFile(file.getParent(), "riduzione-", ".jpg");
-            int lato = properties.latoVista();
-            var costruttore = Thumbnails.of(sorgente.toFile());
-            if (foto.getLarghezza() != null && foto.getAltezza() != null
-                    && foto.getLarghezza() <= lato && foto.getAltezza() <= lato) {
-                costruttore.scale(1.0);
-            } else {
-                costruttore.size(lato, lato);
-            }
-            // Thumbnailator riscrive l'immagine: l'EXIF (e il GPS) non passa.
-            costruttore.useExifOrientation(exif)
-                    .imageType(BufferedImage.TYPE_INT_RGB)
-                    .outputFormat("jpg")
-                    .outputQuality(0.88)
-                    .toFile(temporaneo.toFile());
+            // Letta già ridotta (Riduzione), mai a piena risoluzione; Thumbnailator riscrive
+            // l'immagine: l'EXIF (e il GPS) non passa. Le più piccole del lato restano come sono.
+            Riduzione.jpeg(sorgente, temporaneo, properties.latoVista(), exif, 0.88, false);
             Files.move(temporaneo, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return file;
         } catch (IOException e) {
