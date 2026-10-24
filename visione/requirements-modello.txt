@@ -3,3 +3,5 @@ torch==2.14.1
 transformers==5.18.0
 sentence-transformers==6.1.0
 huggingface_hub==1.33.0
+# Volti (YuNet + SFace): solo cv2.dnn, senza GUI. Numpy è quello di requirements.txt.
+opencv-python-headless==4.14.0.94

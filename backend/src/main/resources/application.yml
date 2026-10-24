@@ -170,6 +170,25 @@ fototimeline:
     massimo: 500
     blocco: 16
     attesa: PT20S
+  # Riconoscimento dei volti, nello stesso servizio visione (YuNet + SFace):
+  # serve anche visione.url. false = spento del tutto (niente lavoro, niente
+  # pagina "Persone", niente nomi nel visore).
+  volti:
+    attiva: ${FOTOTIMELINE_VOLTI:true}
+    # Volti più piccoli di così (lato corto, in pixel della miniatura da 480)
+    # non si tengono: troppo pochi pixel per riconoscerli.
+    lato-minimo: ${FOTOTIMELINE_VOLTI_LATO_MINIMO:32}
+    punteggio-minimo: 0.8
+    # Coseno tra i vettori di SFace: sopra soglia-gruppo un volto entra nel
+    # gruppo senza nome dei suoi vicini; in una persona con nome solo sopra
+    # soglia-sicura, e fra soglia-proposta e soglia-sicura resta una proposta.
+    soglia-gruppo: ${FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO:0.5}
+    soglia-sicura: ${FOTOTIMELINE_VOLTI_SOGLIA_SICURA:0.6}
+    soglia-proposta: ${FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA:0.42}
+    vicini: 10
+    blocco: 8
+    minimo-gruppo: 2
+    attesa: PT20S
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
     # Ruolo di realm richiesto; vuoto = basta un utente del realm.

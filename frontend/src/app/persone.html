@@ -1,0 +1,215 @@
+<div class="velo" (click)="chiudi.emit()">
+  <section
+    #dialogo
+    class="dialogo"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="titolo-persone"
+    tabindex="-1"
+    (click)="$event.stopPropagation()"
+  >
+    <header>
+      @if (aperta()) {
+        <button type="button" class="link" (click)="torna()">← Persone</button>
+      }
+      <h2 id="titolo-persone">{{ aperta() ? etichetta(aperta()!) : 'Persone' }}</h2>
+      @if (!aperta() && totale()) {
+        <span class="tenue">{{ totale() }}</span>
+      }
+      <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
+    </header>
+
+    @if (stato(); as s) {
+      @if (inCorso()) {
+        <div class="lavoro" role="status">
+          <div class="riga">
+            <span>
+              {{ s.lavoro!.ricostruisci && !s.lavoro!.fatte ? "Rimetto i volti nell'indice…" : 'Cerco i volti…' }}
+              {{ s.lavoro!.fatte }} / {{ s.lavoro!.daFare }} foto · {{ s.lavoro!.volti }} volti
+            </span>
+            @if (admin()) {
+              <button type="button" class="link" (click)="galleria.annullaVolti()">Annulla</button>
+            }
+          </div>
+          <progress [value]="percentuale()" max="100"></progress>
+        </div>
+      } @else if (s.mancanti || indicePerso() || s.lavoro?.stato === 'FALLITO') {
+        <div class="lavoro">
+          <p class="tenue">
+            @if (s.mancanti) {
+              {{ s.mancanti }} foto ancora da guardare.
+            }
+            @if (indicePerso()) {
+              L'indice dei volti di visione ne ha {{ s.nellIndice }} su {{ s.volti }}.
+            }
+            @if (s.lavoro?.stato === 'FALLITO') {
+              <span class="errore">Ultimo giro non riuscito: {{ s.lavoro?.errore }}</span>
+            }
+            @if (!admin()) {
+              Un amministratore può avviare «Riconosci volti».
+            }
+          </p>
+          @if (admin()) {
+            <div class="azioni">
+              @if (indicePerso()) {
+                <button type="button" [disabled]="occupato()" (click)="riconosci(true)">Ricostruisci indice</button>
+              }
+              @if (s.mancanti) {
+                <button type="button" class="primario" [disabled]="occupato()" (click)="riconosci()">Riconosci volti ({{ s.mancanti }})</button>
+              }
+            </div>
+          }
+        </div>
+      }
+    }
+
+    @if (aperta(); as p) {
+      <!-- Dettaglio: nome, nascondi, volti (i dubbi prima), proposte, gruppi simili. -->
+      <div class="dettaglio">
+        <div class="intestazione-persona">
+          @if (ritaglio(p.copertina); as r) {
+            <img class="grande" [src]="r" alt="" />
+          }
+          <form class="campo-nome" (ngSubmit)="salvaNome()">
+            <label>
+              <span>Nome</span>
+              <input name="nome" [(ngModel)]="nome" placeholder="Chi è?" maxlength="80" autocomplete="off" />
+            </label>
+            <button type="submit" class="primario" [disabled]="occupato() || nome.trim() === (p.nome ?? '')">Salva</button>
+          </form>
+          <div class="azioni">
+            <button type="button" (click)="mostraFoto(p)">Mostra le {{ p.volti }} foto</button>
+            <button type="button" [disabled]="occupato()" (click)="nascondi(!p.nascosta)"
+              [title]="p.nascosta ? '' : 'Sconosciuti, folla: non si vede più tra le persone (i volti simili ci finiscono lo stesso)'">
+              {{ p.nascosta ? 'Mostra di nuovo' : 'Non mostrare' }}
+            </button>
+          </div>
+        </div>
+
+        @if (proposteAperta().length) {
+          <section class="blocco">
+            <div class="riga">
+              <h3>Forse è {{ p.nome }}? ({{ proposteAperta().length }})</h3>
+              <button type="button" [disabled]="occupato()" (click)="confermaTutte()">Sì, tutte</button>
+            </div>
+            <ul class="volti">
+              @for (v of proposteAperta(); track v.id) {
+                <li>
+                  <img [src]="ritaglio(v.id)" alt="" loading="lazy" [title]="'Somiglianza ' + percento(v.somiglianza)" />
+                  <div class="comandi">
+                    <button type="button" aria-label="Sì, è lei/lui" title="Sì" [disabled]="occupato()" (click)="conferma(v)">✓</button>
+                    <button type="button" aria-label="No, non è lei/lui" title="No" [disabled]="occupato()" (click)="rifiuta(v)">✕</button>
+                  </div>
+                </li>
+              }
+            </ul>
+          </section>
+        }
+
+        @if (similiAperta(); as simili) {
+          @if (simili.length) {
+            <section class="blocco">
+              <h3>Somigliano: la stessa persona?</h3>
+              <ul class="persone piccole">
+                @for (s of simili; track s.persona.id) {
+                  <li>
+                    @if (ritaglio(s.persona.copertina); as r) {
+                      <img [src]="r" alt="" loading="lazy" />
+                    }
+                    <span class="nome">{{ etichetta(s.persona) }}</span>
+                    <span class="tenue">{{ s.persona.volti }} · {{ percento(s.somiglianza) }}</span>
+                    <button type="button" [disabled]="occupato()" (click)="unisciSimile(s)">Unisci</button>
+                  </li>
+                }
+              </ul>
+            </section>
+          }
+        }
+
+        <section class="blocco">
+          <h3>I suoi volti <small class="tenue">· i meno somiglianti per primi</small></h3>
+          <ul class="volti">
+            @for (v of voltiAperta(); track v.id) {
+              <li>
+                <img [src]="ritaglio(v.id)" alt="" loading="lazy" [title]="'Somiglianza ' + percento(v.somiglianza)" />
+                <div class="comandi">
+                  <button type="button" title="Non è lei/lui: toglilo" aria-label="Non è lei/lui" [disabled]="occupato()" (click)="togli(v)">✕</button>
+                  <button type="button" title="Usa questo volto nella griglia" aria-label="Usa come copertina" [disabled]="occupato() || v.id === p.copertina" (click)="usaCopertina(v)">★</button>
+                </div>
+              </li>
+            } @empty {
+              <li class="tenue">Nessun volto.</li>
+            }
+          </ul>
+        </section>
+      </div>
+    } @else {
+      <div class="schede" role="tablist" aria-label="Quali persone">
+        @for (s of schede; track s.tipo) {
+          <button type="button" role="tab" [attr.aria-selected]="tipo() === s.tipo" (click)="scegliScheda(s.tipo)">{{ s.nome }}</button>
+        }
+        <span class="spazio"></span>
+        <button type="button" [attr.aria-pressed]="unendo()" title="Scegli due o più volti della stessa persona" (click)="commutaUnione()">
+          {{ unendo() ? 'Fine' : 'Unisci…' }}
+        </button>
+      </div>
+
+      @if (unendo()) {
+        <div class="riga avviso-unione">
+          <span class="tenue">Clic sui volti della stessa persona: {{ scelte().length }} scelti.</span>
+          <button type="button" class="primario" [disabled]="scelte().length < 2 || occupato()" (click)="unisci()">Unisci ({{ scelte().length }})</button>
+        </div>
+      }
+
+      @if (caricando()) {
+        <span class="rotella" aria-label="Caricamento"></span>
+      } @else {
+        <ul class="persone">
+          @for (p of elenco(); track p.id) {
+            <li [class.scelta]="scelte().includes(p.id)">
+              <button
+                type="button"
+                class="volto"
+                [attr.aria-pressed]="unendo() ? scelte().includes(p.id) : null"
+                [attr.aria-label]="(unendo() ? 'Scegli ' : 'Le foto di ') + etichetta(p)"
+                (click)="clic(p)"
+              >
+                @if (ritaglio(p.copertina); as r) {
+                  <img [src]="r" alt="" loading="lazy" />
+                } @else {
+                  <span class="senza" aria-hidden="true">?</span>
+                }
+              </button>
+              <button type="button" class="nome link-nome" [title]="p.nome ? 'Modifica' : 'Dai un nome'" (click)="apri(p)">
+                {{ etichetta(p) }}
+              </button>
+              <span class="tenue">
+                {{ p.volti }} {{ p.volti === 1 ? 'foto' : 'foto' }}
+                @if (p.proposte) {
+                  · <span class="proposte" [title]="p.proposte + ' volti forse suoi'">{{ p.proposte }}?</span>
+                }
+              </span>
+            </li>
+          } @empty {
+            <li class="vuoto">
+              @switch (tipo()) {
+                @case ('NOMINATE') {
+                  Nessuna persona con un nome. Da «Senza nome» un clic sul nome di un gruppo e scrivi chi è.
+                }
+                @case ('GRUPPI') {
+                  Nessun gruppo di volti{{ stato()?.mancanti ? ': le foto non sono ancora state guardate tutte' : '' }}.
+                }
+                @default {
+                  Niente di nascosto.
+                }
+              }
+            </li>
+          }
+        </ul>
+        @if (totale() > elenco().length) {
+          <p class="tenue">Ne mostro {{ elenco().length }} su {{ totale() }}: i più grandi.</p>
+        }
+      }
+    }
+  </section>
+</div>

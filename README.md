@@ -111,6 +111,14 @@ Il server: [DEPLOY.md](DEPLOY.md).
   quando una voce cambia stato (DEPLOY.md).
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
+- **Persone** (sul server, col servizio `visione`): i volti delle foto si
+  riconoscono sul server (YuNet + SFace di OpenCV, niente servizi esterni) e
+  si raggruppano da soli; Strumenti → *Persone* mostra un volto per persona,
+  con quante foto. Si dà un nome a un gruppo, si uniscono i gruppi della stessa
+  persona, si nascondono gli sconosciuti, si toglie un volto sbagliato. Clic
+  sul volto: le sue foto; il filtro *Persona* si combina con gli altri, e il
+  visore dice chi c'è nella foto. I nomi non escono mai dai link condivisi
+  (DEPLOY.md).
 - **Ricerca per contenuto** (sul server, col servizio `visione`): con
   l'interruttore *Per contenuto* accanto al campo di ricerca si scrive cosa
   c'è nella foto, in italiano ("spiaggia", "cane", "torta di compleanno",
@@ -220,6 +228,11 @@ java -jar target/fototimeline-1.0.0.jar
 | `VISIONE_SEGRETO`       | (vuoto)                                   | Segreto condiviso con visione (header `X-Visione-Segreto`) |
 | `FOTOTIMELINE_VISIONE_SOGLIA` | `0.24`                              | Somiglianza minima di un risultato per contenuto |
 | `FOTOTIMELINE_VISIONE_MARGINE` | `0.06`                             | Distacco massimo dalla foto più somigliante |
+| `FOTOTIMELINE_VOLTI`    | `true`                                    | Riconoscimento dei volti (serve anche `VISIONE_URL`); `false` = spento del tutto |
+| `FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO` | `0.5`                          | Coseno minimo per entrare in un gruppo senza nome |
+| `FOTOTIMELINE_VOLTI_SOGLIA_SICURA` | `0.6`                          | Coseno minimo per dare da solo un volto a una persona con nome |
+| `FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA` | `0.42`                       | Da qui alla soglia sicura il volto resta una proposta |
+| `FOTOTIMELINE_VOLTI_LATO_MINIMO` | `32`                             | Lato minimo di un volto, in pixel della miniatura (480) |
 | `FOTOTIMELINE_TELEFONO_PROPRIETARIO` | (vuoto)                      | Di chi è il telefono migrato da quando era uno solo; vuoto = del primo admin che entra |
 | `FOTOTIMELINE_LUOGHI`   | (vuoto; nel container `/app/geonames`)    | Cartella dei file di GeoNames; vuoto = niente luoghi |
 | `FOTOTIMELINE_LUOGHI_DISTANZA` | `30`                               | Km oltre i quali il luogo è sconosciuto  |
@@ -259,7 +272,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `persona` (id di una persona o di un gruppo di volti), `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
@@ -283,6 +296,25 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/contenuto`             | Ricerca per contenuto: `attiva`, foto, `indicizzate`, `mancanti`, `nellIndice`, ultimo lavoro |
 | POST   | `/api/contenuto/indicizza`   | "Indicizza contenuto" in sottofondo (`daCapo=true` per rifare tutto); 202, 409 se già in corso (admin) |
 | POST   | `/api/contenuto/annulla`     | Ferma "Indicizza contenuto" (admin)                        |
+| GET    | `/api/volti`                 | Riconoscimento dei volti: `attiva`, `foto`, `cercate`, `mancanti`, `volti`, `nellIndice`, `persone` (con nome), ultimo lavoro |
+| POST   | `/api/volti/riconosci`       | "Riconosci volti" in sottofondo (`ricostruisci=true`: prima rimette i vettori nell'indice di visione); 202, 409 se già in corso o spento (admin) |
+| POST   | `/api/volti/annulla`         | Ferma "Riconosci volti" (admin)                            |
+| GET    | `/api/persone`               | `tipo` = `NOMINATE` (per nome), `GRUPPI` (senza nome, dal più grande), `NASCOSTE`; `limite` → `{ persone: [{ id, nome, nascosta, volti, proposte, copertina }], totale }` |
+| GET    | `/api/persone/{id}`          | Una persona o un gruppo, con i conteggi                    |
+| PUT    | `/api/persone/{id}`          | `{ nome }`: dà o cambia il nome (vuoto: torna gruppo); 409 con `persona` se un'altra ha già quel nome |
+| POST   | `/api/persone/{id}/nascondi` | `{ nascosta }`: "non mostrare" (sconosciuti, folla)         |
+| POST   | `/api/persone/unisci`        | `{ in, da: [id] }`: le persone `da` passano in `in`         |
+| GET    | `/api/persone/{id}/volti`    | I suoi volti, i meno somiglianti prima (`pagina`, `dimensione`) |
+| GET    | `/api/persone/{id}/proposte` | I volti proposti (somiglianti, sotto la soglia sicura)     |
+| POST   | `/api/persone/{id}/proposte/conferma` | Tutte le proposte diventano sue: `{ confermate }`  |
+| GET    | `/api/persone/{id}/simili`   | Altri gruppi che le somigliano, da unire                   |
+| POST   | `/api/persone/{id}/copertina`| `{ volto }`: il volto da mostrare nella griglia            |
+| GET    | `/api/foto/{id}/volti`       | I volti della foto: `riquadro` (frazioni della miniatura), `personaId`, `nome`, `proposta` |
+| GET    | `/api/volti/{id}/ritaglio`   | Il volto ritagliato dalla miniatura, JPEG 160×160          |
+| POST   | `/api/volti/{id}/togli`      | "Non è lei/lui": il volto esce dalla persona e non ci torna da solo |
+| POST   | `/api/volti/{id}/assegna`    | `{ persona }`: il volto è suo (anche per confermare una proposta) |
+| POST   | `/api/volti/{id}/nome`       | `{ nome }`: "Chi è?" (persona esistente, nome al gruppo o persona nuova) |
+| POST   | `/api/volti/{id}/rifiuta`    | Rifiuta la proposta del volto                              |
 | GET    | `/api/archivio/video`        | Coda dei video da convertire: `fatti`, `daFare`, `corrente`, `percentuale`, `inAttesa` (cloud smontato) |
 | POST   | `/api/archivio/video/converti` | "Converti video": mette in coda i video già in archivio che ne hanno bisogno, 202 (admin) |
 | POST   | `/api/archivio/video/annulla`  | Ferma quello in corso e svuota la coda (admin)          |
@@ -515,6 +547,13 @@ Solo sulla rete interna di Docker, tutte (tranne `/salute`) con l'header
 | POST   | `/clip/indice` | Più foto insieme: multipart, un `file` per foto con l'id come nome del file |
 | DELETE | `/clip/indice/{id}` | Toglie (404 se non c'era) |
 | GET    | `/clip/cerca` | `q`, `k` (≤ 2000), `soglia` → `{"risultati":[{"id","punteggio"}]}` dal più simile |
+| POST   | `/volti/rileva` | Multipart, un `file` per immagine con l'id come nome del file (≤ 64); `lato_minimo` (px), `punteggio_minimo` → `{"risultati":{id:{"larghezza","altezza","volti":[{"riquadro":{x,y,larghezza,altezza},"punteggio","vettore":[128]}]}},"errori":{id:motivo}}`. Non tocca l'indice |
+| GET    | `/volti/indice` | Modello, dimensione e numero di volti nell'indice dei volti |
+| POST   | `/volti/indice` | `{"voci":[{"id","vettore"}]}`: aggiunge o sostituisce |
+| POST   | `/volti/indice/togli` | `{"ids":[...]}` → `{"tolti","totale"}` |
+| POST   | `/volti/vicini` | `{"vettori":[[...]],"k":10,"soglia":0.4}` (≤ 256 vettori, k ≤ 200) → per ogni vettore i volti più simili |
+
+Con `VISIONE_VOLTI=false` (o senza OpenCV, come nei test) le `/volti/...` rispondono 503 e CLIP va come prima.
 il binario di MongoDB. Per i luoghi usano un mini dataset di GeoNames in
 `src/test/resources/geonames` (Roma, Sperlonga, Parigi, ...).
 

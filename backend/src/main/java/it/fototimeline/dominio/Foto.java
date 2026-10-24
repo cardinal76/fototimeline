@@ -102,6 +102,20 @@ public class Foto {
     @Indexed
     private Instant contenutoIndicizzato;
     /**
+     * Quando "Riconosci volti" ha guardato la miniatura (anche senza trovare
+     * volti); null = non ancora. Solo foto, mai video.
+     */
+    @Indexed
+    private Instant voltiCercati;
+    /**
+     * Le persone e i gruppi senza nome dei volti di questa foto (id della
+     * collezione {@code persone}): li tiene aggiornati {@code volti.Persone},
+     * servono al filtro "persona" come gli altri campi della timeline. Solo
+     * id, mai nomi; null se non ce ne sono.
+     */
+    @Indexed
+    private Set<String> persone;
+    /**
      * Quando è finita nel cestino; null = nell'archivio. Nel cestino la scheda
      * resta (hash compreso, così la stessa foto non rientra come nuova) e il
      * file resta dov'è: sparisce da tutti gli elenchi ({@code FotoService.nonNelCestino()})
@@ -217,6 +231,12 @@ public class Foto {
 
     public Instant getContenutoIndicizzato() { return contenutoIndicizzato; }
     public void setContenutoIndicizzato(Instant contenutoIndicizzato) { this.contenutoIndicizzato = contenutoIndicizzato; }
+
+    public Instant getVoltiCercati() { return voltiCercati; }
+    public void setVoltiCercati(Instant voltiCercati) { this.voltiCercati = voltiCercati; }
+
+    public Set<String> getPersone() { return persone; }
+    public void setPersone(Set<String> persone) { this.persone = persone; }
 
     public Instant getEliminataIl() { return eliminataIl; }
     public void setEliminataIl(Instant eliminataIl) { this.eliminataIl = eliminataIl; }

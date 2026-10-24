@@ -430,6 +430,32 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   stesso documento non si uniscono più tra loro (risolvi lo fa per le tenute,
   se più d'una). Le preferite: `tieni` sempre vero e `risolvi` le rifiuta (400).
 
+## Volti e persone
+
+- Pacchetto `volti`, nel servizio `visione` (`visione/app/volti.py`): YuNet
+  (rilevamento, MIT) + SFace (vettore di 128, Apache 2.0) con `cv2.dnn`, niente
+  torch; pesi scaricati nel Dockerfile a revisione fissa con SHA-256. Senza
+  OpenCV (CI) o con `VISIONE_VOLTI=false` le `/volti/...` rispondono 503: i
+  pytest usano un modello finto. L'indice dei vicini dei volti è un
+  `IndiceVettori` suo in `/dati/volti` (`cerca_molti`: un blocco di domande
+  per una lettura dell'indice).
+- `RiconoscimentoVolti` ("Riconosci volti", thread `riconosci-volti`; foto
+  nuove ed eventi del cestino sul thread `volti`): solo foto, dalla
+  **miniatura**, mai originali né video. `Foto.voltiCercati` segna le foto
+  fatte (anche senza volti); riparte da `impostazioni/riconosci-volti`.
+  `elaborazione` tiene un blocco alla volta fra lavoro e foto nuove.
+- `Persone`: tutte le modifiche (assegnazione dei volti nuovi, nomi, unioni,
+  "non è lei", proposte, cestino) passano da lì e sono `synchronized`.
+  `Foto.persone` (solo id, anche dei gruppi senza nome) va tenuto allineato
+  ai `volti`: `aggiornaFoto` o, per le unioni, `addToSet`/`pull`. È il campo
+  del filtro `persona` in `FotoService.criteri`.
+- Gli id dei volti sono ObjectId (quelli delle foto UUID): niente
+  `_id > ""` per partire, il primo giro va senza.
+- Privacy: nessuna API dei volti è pubblica e `FotoCondivisa` non ha
+  `persone` (test in `CondivisioniTest`). `FOTOTIMELINE_VOLTI=false` spegne
+  tutto (409), i dati restano. Vedere e nominare: chi usa l'app; il lavoro:
+  admin.
+
 ## Cestino
 
 - `FotoService.elimina` non cancella: mette `Foto.eliminataIl` (indice) e la
@@ -451,7 +477,8 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   permessi dell'eliminazione.
 - Eventi: `FotoNelCestino`, `FotoRipristinata`, `FotoEliminata` (solo per
   sempre: toglie il vettore da visione). `QuasiUguali` li ascolta, perché nel
-  cestino il numero di schede non cambia e la cache non se ne accorgerebbe.
+  cestino il numero di schede non cambia e la cache non se ne accorgerebbe;
+  `RiconoscimentoVolti` pure (volti `nelCestino`, fuori dall'indice dei vicini).
 
 ## Git e CI
 

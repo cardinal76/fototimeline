@@ -1193,6 +1193,10 @@ public class FotoService {
         if (f.caricataDa() != null && !f.caricataDa().isBlank()) {
             e.add(Criteria.where("caricataDa").is(f.caricataDa().trim()));
         }
+        // Una persona o un gruppo di volti (pacchetto volti): l'id sta nelle foto, come i tag.
+        if (f.persona() != null && !f.persona().isBlank()) {
+            e.add(Criteria.where("persone").is(f.persona().trim()));
+        }
         if (f.dal() != null || f.al() != null) {
             Criteria data = Criteria.where("scattataIl");
             if (f.dal() != null) {

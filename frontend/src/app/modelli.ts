@@ -45,6 +45,8 @@ export interface Foto {
   erroreConversione?: string;
   /** Quando è finita nel cestino; assente per le foto nell'archivio. */
   eliminataIl?: string;
+  /** Persone e gruppi di volti di questa foto (solo id). */
+  persone?: string[];
 }
 
 export type StatoConversione = 'IN_CODA' | 'IN_CORSO' | 'FATTA' | 'ERRORE';
@@ -98,6 +100,8 @@ export interface Filtro {
   al?: string;
   /** Cerca q in quello che c'è nella foto ("spiaggia", "cane"), non nei testi. */
   contenuto?: boolean;
+  /** Id di una persona o di un gruppo di volti senza nome: solo le sue foto. */
+  persona?: string;
 }
 
 export type Esito = 'CARICATA' | 'DUPLICATA' | 'ERRORE';
@@ -345,6 +349,79 @@ export interface StatoContenuto {
   /** Vettori nell'indice di visione; assente se visione non risponde. */
   nellIndice?: number;
   lavoro?: LavoroContenuto;
+}
+
+export interface LavoroVolti {
+  id: string;
+  stato: 'IN_CORSO' | 'FINITO' | 'ANNULLATO' | 'FALLITO';
+  iniziatoIl: string;
+  finitoIl?: string;
+  /** Le foto senza volti cercati quando è partito. */
+  daFare: number;
+  fatte: number;
+  volti: number;
+  errori: number;
+  messaggi: string[];
+  errore?: string;
+  ricostruisci: boolean;
+}
+
+/** Riconoscimento dei volti: se c'è e a che punto è. */
+export interface StatoVolti {
+  attiva: boolean;
+  foto: number;
+  cercate: number;
+  mancanti: number;
+  volti: number;
+  /** Volti nell'indice di visione; assente se visione non risponde. */
+  nellIndice?: number;
+  /** Le persone con un nome. */
+  persone: number;
+  lavoro?: LavoroVolti;
+}
+
+export type TipoPersone = 'NOMINATE' | 'GRUPPI' | 'NASCOSTE';
+
+/** Una persona (con nome) o un gruppo di volti senza nome. */
+export interface VocePersona {
+  id: string;
+  nome?: string;
+  nascosta: boolean;
+  volti: number;
+  proposte: number;
+  /** Id del volto da mostrare: /api/volti/{copertina}/ritaglio. */
+  copertina?: string;
+}
+
+export interface ElencoPersone {
+  persone: VocePersona[];
+  totale: number;
+}
+
+export interface VoceVolto {
+  id: string;
+  fotoId: string;
+  punteggio: number;
+  /** Con la persona (o con la proposta): da -1 a 1. */
+  somiglianza?: number;
+  manuale: boolean;
+}
+
+export interface PersonaSimile {
+  persona: VocePersona;
+  somiglianza: number;
+  vicini: number;
+}
+
+/** Un volto nel visore; il riquadro è in frazioni dell'immagine. */
+export interface VoltoInFoto {
+  id: string;
+  riquadro: { x: number; y: number; larghezza: number; altezza: number };
+  personaId?: string;
+  nome?: string;
+  nascosta: boolean;
+  proposta?: string;
+  nomeProposta?: string;
 }
 
 /** I telefoni visibili (l'admin tutti, gli altri il proprio) e quello che vale per tutti. */

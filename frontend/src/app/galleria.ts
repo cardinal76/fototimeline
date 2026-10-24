@@ -19,7 +19,9 @@ import {
   StatoCloud,
   StatoContenuto,
   StatoConversioni,
+  StatoVolti,
   VoceMese,
+  VocePersona,
 } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
@@ -91,6 +93,12 @@ export class Galleria {
   });
   /** Ricerca per contenuto: null finché non si sa, attiva=false se il servizio visione non c'è. */
   readonly contenuto = signal<StatoContenuto | null>(null);
+  /** Riconoscimento dei volti: null finché non si sa, attiva=false se è spento. */
+  readonly volti = signal<StatoVolti | null>(null);
+  /** Le persone con un nome, per il filtro "Persona". */
+  readonly personeNominate = signal<VocePersona[]>([]);
+  /** La persona o il gruppo del filtro, se non è tra quelle con nome (un gruppo scelto da "Persone"). */
+  readonly personaScelta = signal<VocePersona | null>(null);
   /** I risultati sono in ordine di somiglianza, non di data: niente giorni né timeline. */
   readonly perContenuto = computed(() => !!(this.filtro().contenuto && this.filtro().q));
   /** Coda delle versioni compatibili dei video (solo admin); null quando non c'è niente da mostrare. */
@@ -140,6 +148,7 @@ export class Galleria {
   private richiesta?: Subscription;
   private avvisoTimer?: ReturnType<typeof setTimeout>;
   private contenutoTimer?: ReturnType<typeof setTimeout>;
+  private voltiTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
     this.api.io().subscribe((io) => {
@@ -150,6 +159,7 @@ export class Galleria {
         this.seguiSalute();
       }
       this.seguiContenuto();
+      this.seguiVolti();
     });
     this.aggiornaCloud();
     this.ricarica();
@@ -266,6 +276,46 @@ export class Galleria {
       },
       error: () => this.contenuto.set(null),
     });
+  }
+
+  // ------------------------------------------------------------ volti e persone
+
+  async avviaVolti(ricostruisci = false): Promise<void> {
+    await firstValueFrom(this.api.riconosciVolti(ricostruisci));
+    this.seguiVolti();
+  }
+
+  annullaVolti(): void {
+    this.api.annullaVolti().subscribe(() => this.seguiVolti());
+  }
+
+  /** Lo stato: agli admin ogni 3 secondi mentre "Riconosci volti" gira, ogni minuto altrimenti. */
+  private seguiVolti(): void {
+    clearTimeout(this.voltiTimer);
+    this.api.volti().subscribe({
+      next: (v) => {
+        const prima = this.volti();
+        this.volti.set(v);
+        if (v.attiva && (!prima || prima.persone !== v.persone)) {
+          this.aggiornaPersone();
+        }
+        if (v.attiva && this.io()?.admin) {
+          this.voltiTimer = setTimeout(() => this.seguiVolti(), v.lavoro?.stato === 'IN_CORSO' ? 3000 : 60000);
+        }
+      },
+      error: () => this.volti.set(null),
+    });
+  }
+
+  /** Le persone con nome per il filtro (dopo un nome dato o un'unione). */
+  aggiornaPersone(): void {
+    this.api.persone('NOMINATE').subscribe({ next: (e) => this.personeNominate.set(e.persone), error: () => {} });
+  }
+
+  /** Solo le foto di questa persona (o gruppo), con gli altri filtri. */
+  filtraPersona(p: VocePersona | null): void {
+    this.personaScelta.set(p && !this.personeNominate().some((n) => n.id === p.id) ? p : null);
+    this.imposta({ persona: p?.id });
   }
 
   // ------------------------------------------------------------ conversioni dei video

@@ -37,6 +37,14 @@ import {
   StatoConversioni,
   StatoImpronte,
   StatoTelefono,
+  StatoVolti,
+  LavoroVolti,
+  ElencoPersone,
+  PersonaSimile,
+  TipoPersone,
+  VocePersona,
+  VoceVolto,
+  VoltoInFoto,
   Utente,
   VoceMese,
 } from './modelli';
@@ -337,6 +345,89 @@ export class FotoApi {
 
   annullaContenuto(): Observable<void> {
     return this.http.post<void>('/api/contenuto/annulla', {});
+  }
+
+  // ------------------------------------------------------------ volti e persone
+
+  /** Se il riconoscimento dei volti c'è, e a che punto è. */
+  volti(): Observable<StatoVolti> {
+    return this.http.get<StatoVolti>('/api/volti');
+  }
+
+  /** "Riconosci volti" in sottofondo (solo admin); ricostruisci = prima rifà l'indice dei vicini di visione. */
+  riconosciVolti(ricostruisci = false): Observable<LavoroVolti> {
+    return this.http.post<LavoroVolti>('/api/volti/riconosci', {}, { params: ricostruisci ? { ricostruisci } : {} });
+  }
+
+  annullaVolti(): Observable<void> {
+    return this.http.post<void>('/api/volti/annulla', {});
+  }
+
+  persone(tipo: TipoPersone = 'NOMINATE', limite = 500): Observable<ElencoPersone> {
+    return this.http.get<ElencoPersone>('/api/persone', { params: { tipo, limite } });
+  }
+
+  persona(id: string): Observable<VocePersona> {
+    return this.http.get<VocePersona>(`/api/persone/${encodeURIComponent(id)}`);
+  }
+
+  /** Nome vuoto: torna un gruppo senza nome. 409 se un'altra ha già quel nome (error.persona). */
+  nominaPersona(id: string, nome: string): Observable<VocePersona> {
+    return this.http.put<VocePersona>(`/api/persone/${encodeURIComponent(id)}`, { nome });
+  }
+
+  nascondiPersona(id: string, nascosta: boolean): Observable<VocePersona> {
+    return this.http.post<VocePersona>(`/api/persone/${encodeURIComponent(id)}/nascondi`, { nascosta });
+  }
+
+  /** Le persone "da" passano in "in". */
+  unisciPersone(dentro: string, da: string[]): Observable<VocePersona> {
+    return this.http.post<VocePersona>('/api/persone/unisci', { in: dentro, da });
+  }
+
+  voltiPersona(id: string, pagina = 0, dimensione = 100): Observable<VoceVolto[]> {
+    return this.http.get<VoceVolto[]>(`/api/persone/${encodeURIComponent(id)}/volti`, { params: { pagina, dimensione } });
+  }
+
+  proposte(id: string): Observable<VoceVolto[]> {
+    return this.http.get<VoceVolto[]>(`/api/persone/${encodeURIComponent(id)}/proposte`);
+  }
+
+  confermaProposte(id: string): Observable<{ confermate: number }> {
+    return this.http.post<{ confermate: number }>(`/api/persone/${encodeURIComponent(id)}/proposte/conferma`, {});
+  }
+
+  simili(id: string): Observable<PersonaSimile[]> {
+    return this.http.get<PersonaSimile[]>(`/api/persone/${encodeURIComponent(id)}/simili`);
+  }
+
+  copertina(id: string, volto: string): Observable<void> {
+    return this.http.post<void>(`/api/persone/${encodeURIComponent(id)}/copertina`, { volto });
+  }
+
+  voltiDellaFoto(id: string): Observable<VoltoInFoto[]> {
+    return this.http.get<VoltoInFoto[]>(`/api/foto/${encodeURIComponent(id)}/volti`);
+  }
+
+  togliVolto(id: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/togli`, {});
+  }
+
+  assegnaVolto(id: string, persona: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/assegna`, { persona });
+  }
+
+  /** "Chi è?": una persona che c'è già, il nome al gruppo del volto, o una persona nuova. */
+  nominaVolto(id: string, nome: string): Observable<VocePersona> {
+    return this.http.post<VocePersona>(`/api/volti/${encodeURIComponent(id)}/nome`, { nome });
+  }
+
+  rifiutaProposta(id: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/rifiuta`, {});
+  }
+
+  static ritaglio(voltoId: string): string {
+    return `/api/volti/${encodeURIComponent(voltoId)}/ritaglio`;
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

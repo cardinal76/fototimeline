@@ -53,9 +53,10 @@ public class ContenutoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dal,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate al,
+            @RequestParam(required = false) String persona,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return indice.cerca(q, new FiltroFoto(null, tag, album, preferite, dal, al),
+        return indice.cerca(q, new FiltroFoto(null, tag, album, preferite, dal, al, null, null, null, null, persona),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 }

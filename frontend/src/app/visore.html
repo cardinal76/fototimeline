@@ -85,6 +85,8 @@
       }
     </header>
 
+    <app-persone-foto [foto]="foto()" (scelta)="chiudi.emit()" />
+
     <form (ngSubmit)="salva()" (input)="modificata.set(true)" (change)="modificata.set(true)">
       <label>
         Titolo

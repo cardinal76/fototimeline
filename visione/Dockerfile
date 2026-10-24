@@ -1,4 +1,4 @@
-# Servizio "visione" di FotoTimeline: CLIP multilingue su CPU, con l'indice dei vettori.
+# Servizio "visione" di FotoTimeline: CLIP multilingue e i volti (YuNet + SFace) su CPU, con gli indici dei vettori.
 # Lo costruisce deploy/docker-compose.yml (contesto: questa cartella).
 
 FROM python:3.12-slim
@@ -21,6 +21,11 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 \
 # a runtime niente download, e il container parte anche senza internet.
 COPY app/__init__.py app/modello.py app/
 RUN python -m app.modello && rm -rf /root/.cache
+
+# I modelli dei volti (YuNet 0,2 MB + SFace 37 MB, revisione fissa e SHA-256 controllato): uno strato a parte,
+# così cambiare volti.py non riscarica CLIP.
+COPY app/volti.py app/
+RUN python -m app.volti && rm -rf /root/.cache /modelli/volti/.cache
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 
 COPY app/ app/

@@ -17,6 +17,7 @@ import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { durata } from './formati';
 import { Foto } from './modelli';
+import { PersoneFoto } from './persone-foto';
 
 interface Bozza {
   titolo: string;
@@ -47,7 +48,7 @@ const SWIPE_PX = 50;
 @Component({
   selector: 'app-visore',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, FormsModule, PersoneFoto],
   host: {
     role: 'dialog',
     'aria-modal': 'true',

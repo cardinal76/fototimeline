@@ -38,6 +38,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -54,6 +58,8 @@ import it.fototimeline.cloud.Cloud;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.volti.Persona;
+import it.fototimeline.volti.Volto;
 
 /** I link pubblici con il login acceso, come su server2 (vedi SicurezzaTest). */
 @SpringBootTest(properties = {
@@ -99,6 +105,9 @@ class CondivisioniTest {
 
     @Autowired
     CondivisioniService service;
+
+    @Autowired
+    MongoTemplate mongo;
 
     @MockitoSpyBean
     Cloud cloud;
@@ -156,6 +165,40 @@ class CondivisioniTest {
                 .andExpect(jsonPath("$[0].visite").value(1))
                 .andExpect(jsonPath("$[0].ultimoAccesso").isNotEmpty())
                 .andExpect(jsonPath("$[0].token").value(token));
+    }
+
+    @Test
+    void chiHaIlLinkNonVedeNomiNeVoltiDellePersone() throws Exception {
+        // Una persona con nome riconosciuta nella foto rossa (come la lascia "Riconosci volti").
+        Persona zia = new Persona();
+        zia.setNome("Zia Pina");
+        zia = mongo.insert(zia);
+        Volto volto = new Volto();
+        volto.setFotoId(rossa.getId());
+        volto.setRiquadro(new Volto.Riquadro(0.1, 0.1, 0.3, 0.3));
+        volto.setPersonaId(zia.getId());
+        volto = mongo.insert(volto);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(rossa.getId())),
+                new Update().set("persone", List.of(zia.getId())), Foto.class);
+        try {
+            String token = crea(utente("anna"), Map.of("ids", List.of(rossa.getId())));
+            String base = "/api/condivise/" + token;
+            String risposta = mvc.perform(get(base).with(da(ip))).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.foto.length()").value(1))
+                    .andReturn().getResponse().getContentAsString();
+            for (String vietato : List.of("Zia Pina", zia.getId(), volto.getId(), "persone", "volti", "riquadro")) {
+                assertThat(risposta).as(vietato).doesNotContain(vietato);
+            }
+            // Nessuna strada per i volti dal link: né sotto /api/condivise, né le API private senza login.
+            mvc.perform(get(base + "/foto/" + rossa.getId() + "/volti").with(da(ip))).andExpect(status().isNotFound());
+            mvc.perform(get("/api/foto/" + rossa.getId() + "/volti").with(da(ip))).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/persone").with(da(ip))).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/volti/" + volto.getId() + "/ritaglio").with(da(ip))).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/foto").param("persona", zia.getId()).with(da(ip))).andExpect(status().isUnauthorized());
+        } finally {
+            mongo.remove(new Query(), Volto.class);
+            mongo.remove(new Query(), Persona.class);
+        }
     }
 
     @Test

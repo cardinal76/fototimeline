@@ -91,6 +91,20 @@
           <span>Luogo</span>
           <app-filtro-luogo />
         </div>
+        @if (galleria.volti()?.attiva && (galleria.personeNominate().length || galleria.filtro().persona)) {
+          <label class="campo">
+            <span>Persona</span>
+            <select aria-label="Persona" [ngModel]="galleria.filtro().persona ?? ''" (ngModelChange)="scegliPersona($event)">
+              <option value="">Tutte le persone</option>
+              @if (galleria.personaScelta(); as g) {
+                <option [value]="g.id">{{ g.nome ?? 'Gruppo senza nome' }}</option>
+              }
+              @for (p of galleria.personeNominate(); track p.id) {
+                <option [value]="p.id">{{ p.nome }} ({{ p.volti }})</option>
+              }
+            </select>
+          </label>
+        }
         <button
           type="button"
           class="interruttore"
@@ -119,6 +133,19 @@
           Contenuto {{ percentualeContenuto() }}%
           <progress [value]="percentualeContenuto()" max="100"></progress>
           <button type="button" class="link" (click)="galleria.annullaIndiceContenuto()">Annulla</button>
+        </span>
+      }
+    }
+  }
+
+  <!-- "Riconosci volti" in corso, come il contenuto: un clic apre "Persone". -->
+  @if (galleria.io()?.admin) {
+    @if (galleria.volti(); as v) {
+      @if (v.attiva && v.lavoro?.stato === 'IN_CORSO') {
+        <span class="lavoro-contenuto" role="status" [title]="v.lavoro!.fatte + ' foto su ' + v.lavoro!.daFare + ', ' + v.lavoro!.volti + ' volti'">
+          <button type="button" class="link" (click)="dialogoPersone.set(true)">Volti {{ percentualeVolti() }}%</button>
+          <progress [value]="percentualeVolti()" max="100"></progress>
+          <button type="button" class="link" (click)="galleria.annullaVolti()">Annulla</button>
         </span>
       }
     }
@@ -259,6 +286,23 @@
                 (click)="chiudiMenu(); convertiVideo()"
               >
                 Converti video
+              </button>
+            }
+          }
+          @if (galleria.volti()?.attiva) {
+            <button type="button" class="voce" role="menuitem" title="I volti riconosciuti: dai un nome, unisci, nascondi; clic su un volto per le sue foto" (click)="chiudiMenu(); dialogoPersone.set(true)">
+              Persone
+            </button>
+            @if (galleria.io()?.admin && galleria.volti()?.lavoro?.stato !== 'IN_CORSO' && galleria.volti()?.mancanti) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [class.errore]="galleria.volti()?.lavoro?.stato === 'FALLITO'"
+                [title]="galleria.volti()?.lavoro?.stato === 'FALLITO' ? 'Ultimo giro non riuscito: ' + (galleria.volti()?.lavoro?.errore ?? '') : 'Cerca i volti nelle foto che non sono ancora state guardate'"
+                (click)="chiudiMenu(); riconosciVolti()"
+              >
+                Riconosci volti ({{ galleria.volti()?.mancanti }})
               </button>
             }
           }
@@ -1038,6 +1082,10 @@
     [disponibile]="galleria.archivioDisponibile()"
     (chiudi)="dialogoQuasiUguali.set(false)"
   />
+}
+
+@if (dialogoPersone()) {
+  <app-persone [admin]="!!galleria.io()?.admin" (chiudi)="dialogoPersone.set(false)" />
 }
 
 @if (dialogoCestino()) {
