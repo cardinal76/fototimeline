@@ -204,6 +204,16 @@ export class FotoApi {
     return this.http.post<StatoTelefono>(`/api/telefoni/${encodeURIComponent(id)}/sincronizza`, {});
   }
 
+  /** Ferma la ricompressione di un video troppo grande (admin); l'originale resta su pCloud. */
+  annullaVideoGrande(id: string): Observable<void> {
+    return this.http.post<void>(`/api/telefoni/video-grandi/${encodeURIComponent(id)}/annulla`, {});
+  }
+
+  /** Rimette in coda un video troppo grande in errore, annullato o rimandato (admin). */
+  riprovaVideoGrande(id: string): Observable<void> {
+    return this.http.post<void>(`/api/telefoni/video-grandi/${encodeURIComponent(id)}/riprova`, {});
+  }
+
   /** Gruppi di foto quasi uguali, dal più numeroso. */
   quasiUguali(pagina: number, dimensione = 20): Observable<PaginaGruppi> {
     return this.http.get<PaginaGruppi>('/api/quasi-uguali', { params: { pagina, dimensione } });

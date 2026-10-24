@@ -64,6 +64,12 @@ import it.fototimeline.telefono.SorgenteTelefono.Giro;
  * <p>La cartella automatica resta piatta per tutti i telefoni (le
  * sottocartelle diventerebbero album): di chi è un file lo dice il registro
  * delle copie, cercando la sua destinazione ({@link #caricataDa(Path)}).
+ *
+ * <p>I video troppo grandi per il cloud (oltre {@code massimo-mb}, o rifiutati
+ * con "File too large" o 413) non sono errori: vanno a {@link VideoGrandi},
+ * che li ricomprime e li rimette nella cartella automatica; il giro dopo
+ * l'importazione ne sposta l'originale su pCloud nella cartella dedicata, che
+ * la sincronizzazione non guarda.
  */
 @Service
 public class SincronizzazioneTelefono implements ProvenienzaFile {
@@ -95,8 +101,12 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
     private final Set<String> prenotati = ConcurrentHashMap.newKeySet();
     /** I giri che stanno girando, per mostrarne i contatori prima che finiscano. */
     private final Map<String, Corrente> correnti = new ConcurrentHashMap<>();
-    /** Le destinazioni (relative al remote) che si stanno copiando: l'importazione non le legge a metà. */
-    private final Set<String> inCopia = ConcurrentHashMap.newKeySet();
+    /**
+     * Le destinazioni (relative al remote) che si stanno copiando, anche i
+     * ricompressi di {@link VideoGrandi}: l'importazione non le legge a metà.
+     */
+    private final Set<String> inCopia;
+    private final VideoGrandi videoGrandi;
     /** Ogni quanto chiedere a rclone a che punto è una copia. */
     private Duration attesaCopia = Duration.ofSeconds(2);
     /** Il tempo massimo di una copia, più quello che vuole la dimensione a {@link #BYTE_AL_SECONDO}. */
@@ -112,8 +122,10 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
      */
     public SincronizzazioneTelefono(Rclone rclone, CloudProperties cloud, ImportazioneAutomaticaProperties automatica,
             MongoTemplate mongo, @Value("${fototimeline.telefono.proprietario:}") String proprietarioMigrato,
-            Optional<Clock> clock) {
+            VideoGrandi videoGrandi, Optional<Clock> clock) {
         this.rclone = rclone;
+        this.videoGrandi = videoGrandi;
+        this.inCopia = videoGrandi.inCopia;
         this.cloud = cloud;
         this.automatica = automatica;
         this.mongo = mongo;
@@ -125,7 +137,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
     /** Un telefono e il suo stato, per l'API. */
     public record Stato(String id, String nome, String proprietario, boolean attiva, String sorgente,
             int intervalloOre, int giorniPrimaDiCancellare, int copieInParallelo, boolean inCorso, boolean inCoda,
-            Giro ultimoGiro, Instant prossimoGiroIl, Giro giroInCorso) {
+            Giro ultimoGiro, Instant prossimoGiroIl, Giro giroInCorso, List<VideoGrandi.Vista> videoGrandi) {
     }
 
     /**
@@ -173,7 +185,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         boolean prenotato = prenotati.contains(s.id());
         return new Stato(s.id(), s.nome(), s.proprietario(), s.attiva(), s.sorgente(), s.intervalloOre(),
                 s.giorniPrimaDiCancellare(), s.copie(), prenotato, prenotato && c == null, s.ultimoGiro(), prossimo,
-                giroInCorso);
+                giroInCorso, videoGrandi.elenco(s.sorgente()));
     }
 
     /** Aggiunge un telefono; nome, proprietario e cartella servono. Valori fuori misura → IllegalArgumentException (400). */
@@ -488,10 +500,12 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         String messaggio;
         try {
             Sorgente sorgente = Sorgente.da(s.sorgente());
-            copia(s, sorgente, destinazione(), inizio, c);
+            Set<String> presenti = copia(s, sorgente, destinazione(), inizio, c);
             if (s.giorniPrimaDiCancellare() > 0) {
                 cancella(sorgente, inizio.minus(Duration.ofDays(s.giorniPrimaDiCancellare())), inizio, c);
             }
+            // Gli originali dei video ricompressi e importati vanno nella cartella dedicata (mai cancellati).
+            c.videoGrandi(videoGrandi.giro(sorgente, presenti));
             int errori = c.errori();
             esito = errori == 0 ? Esito.OK : Esito.ERRORE;
             messaggio = errori == 0 ? "Fatto" : errori + " file non riusciti";
@@ -506,8 +520,9 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         mongo.updateFirst(Query.query(Criteria.where("_id").is(id)), Update.update("ultimoGiro", giro),
                 SorgenteTelefono.class);
         log.info("Sincronizzazione di {} {}: {} trovati, {} copiati, {} già copiati, {} tolti dalla sorgente, "
-                + "{} copie a metà tolte, {} errori", s.nome(), esito, giro.trovati(), giro.copiati(), giro.giaCopiati(),
-                giro.cancellati(), giro.aMetaTolte(), giro.errori());
+                + "{} copie a metà tolte, {} video ricompressi, {} in ricompressione, {} errori", s.nome(), esito,
+                giro.trovati(), giro.copiati(), giro.giaCopiati(), giro.cancellati(), giro.aMetaTolte(),
+                giro.ricompressi(), giro.inRicompressione(), giro.errori());
         return giro;
     }
 
@@ -520,8 +535,17 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
      * registro. Prima toglie le copie a metà lasciate dai giri di prima
      * ({@link #togliCopieAMeta}): i loro file, se non sono nel registro, si
      * ricopiano interi in questo stesso giro.
+     *
+     * <p>Un video troppo grande per il cloud va a {@link VideoGrandi}: oltre
+     * la soglia senza provare, rifiutato dal cloud dopo averci provato. Quelli
+     * già suoi non si toccano (né si copiano né si guardano come copie a
+     * metà: il ricompresso ha il loro nome ed è più piccolo). La cartella
+     * degli originali spostati si salta.
+     *
+     * @return le chiavi ({@link #chiave}) dei file che la sorgente ha adesso
      */
-    private void copia(SorgenteTelefono telefono, Sorgente sorgente, String cartella, Instant adesso, Contatori c) {
+    private Set<String> copia(SorgenteTelefono telefono, Sorgente sorgente, String cartella, Instant adesso,
+            Contatori c) {
         int inParallelo = telefono.copie();
         Map<String, Object> risposta = rclone.chiama("operations/list", Map.of(
                 "fs", sorgente.fs(),
@@ -543,12 +567,21 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
             }
             String relativo = sorgente.relativo(path);
             String nome = relativo.substring(relativo.lastIndexOf('/') + 1);
-            if (nome.startsWith(".") || !FotoService.eMedia(nome)) {
+            if (nome.startsWith(".") || !FotoService.eMedia(nome)
+                    || videoGrandi.nellaCartellaOriginali(sorgente.dentro(relativo))) {
                 continue;
             }
             file.add(new FileSorgente(relativo, numero(voce.get("Size")), data(voce.get("ModTime"))));
         }
-        togliCopieAMeta(sorgente, cartella, file, c);
+        Set<String> presenti = new HashSet<>();
+        file.forEach(f -> presenti.add(chiave(f.relativo(), f.dimensione())));
+        Map<String, VideoGrande> giaGrandi = videoGrandi.di(sorgente);
+        // Un video ricompresso (o che si sta caricando) ha in destinazione il nome dell'originale ed è più
+        // piccolo: non è una copia a metà. Quelli ancora da ricomprimere sì: una copia rifiutata a metà si toglie.
+        togliCopieAMeta(sorgente, cartella, file.stream().filter(f -> {
+            VideoGrande v = giaGrandi.get(chiave(f.relativo(), f.dimensione()));
+            return v == null || !VideoGrandi.haUnRicompresso(v);
+        }).toList(), c);
         // I nomi presi in questo giro: due copie in parallelo non devono scegliere lo stesso.
         Set<String> prenotati = ConcurrentHashMap.newKeySet();
         Semaphore grandi = new Semaphore(1);
@@ -567,6 +600,16 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                     c.giaCopiato();
                     continue;
                 }
+                String nome = relativo.substring(relativo.lastIndexOf('/') + 1);
+                if (giaGrandi.containsKey(chiave(relativo, dimensione))) {
+                    // Già in mano alla ricompressione: com'è messo lo dice videoGrandi.giro.
+                    continue;
+                }
+                if (videoGrandi.oltreLaSoglia(nome, dimensione)) {
+                    videoGrandi.metti(telefono, sorgente, cartella, relativo, dimensione, f.modificatoIl(),
+                            videoGrandi.soglia());
+                    continue;
+                }
                 lavori.add(copie.submit(() -> {
                     boolean grande = dimensione >= GRANDE;
                     String destinazione = null;
@@ -577,7 +620,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                         destinazione = copiaFile(sorgente, relativo, dimensione, cartella, prenotati);
                         mongo.insert(new CopiaTelefono(new ObjectId().toHexString(), sorgente.testo(), telefono.id(),
                                 telefono.proprietario(), relativo, dimensione, f.modificatoIl(), destinazione,
-                                adesso, null));
+                                adesso, null, null));
                         registrate.add(chiave(relativo, dimensione));
                         if (c.copiato() % 100 == 0) {
                             log.info("Sincronizzazione di {}: {} copiati finora", telefono.nome(), c.copiati());
@@ -585,7 +628,13 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     } catch (RuntimeException e) {
-                        c.errore(relativo, e);
+                        if (videoGrandi.daRicomprimere(nome, e)) {
+                            // Non un errore: il cloud non lo prende così, lo prende ricompresso.
+                            videoGrandi.metti(telefono, sorgente, cartella, relativo, dimensione, f.modificatoIl(),
+                                    e.getMessage());
+                        } else {
+                            c.errore(relativo, e);
+                        }
                     } finally {
                         if (destinazione != null) {
                             inCopia.remove(destinazione);
@@ -599,6 +648,7 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
             for (Future<?> lavoro : lavori) {
                 lavoro.get();
             }
+            return presenti;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("sincronizzazione interrotta");
@@ -624,12 +674,13 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         String voluto = voluto(cartella, relativo);
         Map<?, ?> gia = stat(cloud.remoto(), voluto);
         if (gia != null && numero(gia.get("Size")) == dimensione && prenotati.add(voluto)) {
-            log.info("Telefono, {}: già arrivato intero in {}, non lo ricopio", relativo, voluto);
-            inCopia.add(voluto);
-            return voluto;
+            if (inCopia.add(voluto)) {
+                log.info("Telefono, {}: già arrivato intero in {}, non lo ricopio", relativo, voluto);
+                return voluto;
+            }
         }
+        // Prenotato in inCopia da libero: chi chiama lo toglie dopo averlo registrato.
         String destinazione = libero(voluto, prenotati);
-        inCopia.add(destinazione);
         try {
             return copiaEControlla(sorgente, relativo, dimensione, destinazione);
         } catch (RuntimeException e) {
@@ -657,6 +708,13 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
                 break;
             } catch (RcloneNonRiesce e) {
                 Map<?, ?> arrivato = statSenzaErrori(cloud.remoto(), destinazione);
+                if (VideoGrandi.rifiutatoPerDimensione(e)) {
+                    // Riprovare uguale non serve: il cloud lo rifiuta per la dimensione. Niente a metà nell'archivio.
+                    if (arrivato != null) {
+                        togliSenzaErrori(destinazione);
+                    }
+                    throw e;
+                }
                 if (arrivato != null && numero(arrivato.get("Size")) == dimensione) {
                     log.info("Telefono, {}: {}, ma il file è arrivato intero", relativo, e.getMessage());
                     break;
@@ -835,19 +893,35 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         return m.group(1) + nome.substring(base.length());
     }
 
-    /** Il nome se è libero, altrimenti "nome (2).ext", "nome (3).ext"...: non si sovrascrive mai. */
+    /**
+     * Il nome se è libero, altrimenti "nome (2).ext", "nome (3).ext"...: non
+     * si sovrascrive mai. Torna prenotato in {@link #inCopia}, dove lo cerca
+     * anche {@link VideoGrandi} per i suoi ricompressi.
+     */
     private String libero(String voluto, Set<String> prenotati) {
         int punto = voluto.lastIndexOf('.');
         String base = punto > voluto.lastIndexOf('/') ? voluto.substring(0, punto) : voluto;
         String estensione = voluto.substring(base.length());
         String nome = voluto;
-        for (int n = 2; !prenotati.add(nome) || stat(cloud.remoto(), nome) != null; n++) {
+        for (int n = 2;; n++) {
+            if (prenotati.add(nome) && inCopia.add(nome)) {
+                boolean preso;
+                try {
+                    preso = stat(cloud.remoto(), nome) != null;
+                } catch (RuntimeException e) {
+                    inCopia.remove(nome);
+                    throw e;
+                }
+                if (!preso) {
+                    return nome;
+                }
+                inCopia.remove(nome);
+            }
             if (n > 1000) {
                 throw new IllegalStateException("troppi file con il nome " + voluto);
             }
             nome = base + " (" + n + ")" + estensione;
         }
-        return nome;
     }
 
     /**
@@ -855,10 +929,14 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
      * sono più nella cartella automatica, cioè che l'importazione ha spostato
      * nell'archivio. Quelli ancora lì (importazione non riuscita) restano.
      * Solo le copie di questa sorgente: ogni telefono ha i suoi giorni.
+     *
+     * <p>Mai i video ricompressi ({@code ricompresso}): in destinazione c'era
+     * un altro file, e il loro originale non si cancella, lo sposta
+     * {@link VideoGrandi} nella cartella dedicata.
      */
     private void cancella(Sorgente questa, Instant limite, Instant adesso, Contatori c) {
         Query vecchie = Query.query(Criteria.where("cancellatoIl").is(null).and("copiatoIl").lt(limite)
-                .and("sorgente").is(questa.testo()));
+                .and("sorgente").is(questa.testo()).and("ricompresso").ne(true));
         for (CopiaTelefono copia : mongo.find(vecchie, CopiaTelefono.class)) {
             try {
                 if (stat(cloud.remoto(), copia.destinazione()) != null) {
@@ -877,6 +955,15 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
             } catch (RuntimeException e) {
                 c.errore(copia.percorso(), e);
             }
+        }
+    }
+
+    /** Toglie dalla cartella automatica una copia nostra non riuscita; se rclone non risponde lo dice il log. */
+    private void togliSenzaErrori(String destinazione) {
+        try {
+            rclone.chiama("operations/deletefile", Map.of("fs", cloud.remoto(), "remote", destinazione));
+        } catch (RuntimeException e) {
+            log.warn("Copia non riuscita {} non tolta: {}", destinazione, e.getMessage());
         }
     }
 
@@ -964,7 +1051,10 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         private int cancellati;
         private int aMetaTolte;
         private int errori;
+        private int ricompressi;
+        private int inRicompressione;
         private final List<String> messaggi = new ArrayList<>();
+        private final List<String> videoGrandi = new ArrayList<>();
 
         synchronized void trovato() {
             trovati++;
@@ -995,16 +1085,28 @@ public class SincronizzazioneTelefono implements ProvenienzaFile {
         }
 
         synchronized void errore(String file, RuntimeException e) {
+            errore(file, e.getMessage());
+        }
+
+        synchronized void errore(String file, String messaggio) {
             errori++;
-            log.warn("Telefono, {}: {}", file, e.getMessage());
+            log.warn("Telefono, {}: {}", file, messaggio);
             if (messaggi.size() < MAX_MESSAGGI) {
-                messaggi.add(file + ": " + e.getMessage());
+                messaggi.add(file + ": " + messaggio);
             }
+        }
+
+        /** Com'è messa la ricompressione dei video troppo grandi: i suoi errori restano errori del giro. */
+        synchronized void videoGrandi(VideoGrandi.Riepilogo r) {
+            ricompressi += r.ricompressi();
+            inRicompressione += r.inCorso();
+            r.righe().stream().limit(MAX_MESSAGGI).forEach(videoGrandi::add);
+            r.errori().forEach(e -> errore(e[0], e[1]));
         }
 
         synchronized Giro giro(Instant inizio, Instant fine, Esito esito, String messaggio) {
             return new Giro(inizio, fine, esito, messaggio, trovati, copiati, giaCopiati, cancellati, aMetaTolte,
-                    errori, List.copyOf(messaggi));
+                    errori, List.copyOf(messaggi), ricompressi, inRicompressione, List.copyOf(videoGrandi));
         }
     }
 }

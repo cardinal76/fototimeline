@@ -353,6 +353,22 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   possono avere la stessa cartella né una dentro l'altra (`Sorgente.sovrapposta`). Dopo
   `giorniPrimaDiCancellare` si toglie dalla sorgente (solo le copie di quella
   sorgente) se non è più nella cartella automatica.
+- **Video troppo grandi per LifetimeCloud** (oltre 20480 MB "File too large", o 413 di
+  nginx): `VideoGrandi` (collezione `video_grandi_telefono`). Il giro non copia i video oltre
+  `fototimeline.telefono.video-grandi.massimo-mb` e mette in coda quelli rifiutati per la
+  dimensione (`VideoGrandi.rifiutatoPerDimensione`, niente seconda prova): non sono errori. Un
+  thread `video-grandi` alla volta: rclone scarica l'originale in `cartella` (sul server
+  `/video-grandi`, condivisa con rclone come `/takeout`; spazio controllato prima, se manca
+  RIMANDATO), `StrumentiMedia.ricomprimi` (x265, `nice`, `-fs`, `oom_score_adj` 1000), durata
+  controllata, CRF più alto se ancora grande, poi nella cartella automatica col nome
+  dell'originale e nel registro con `ricompresso=true`. Il giro dopo, **solo se c'è una scheda
+  con lo SHA-256 del ricompresso**, l'originale si sposta (`operations/movefile`, nome libero) in
+  `cartella-originali` su pCloud, che `copia` salta. `cancella` non tocca mai le copie
+  `ricompresso`, e nessun percorso cancella l'originale: tenere così. I lavori lunghi di ffmpeg
+  (questa e `ConversioneVideo`) prendono il `TurnoVideo`, uno alla volta; la memoria stimata
+  (`FormatoVideo.memoriaX265`) oltre `memoria-massima` è un errore che lo dice.
+  `inCopia` (le destinazioni in scrittura) è di `VideoGrandi` e condiviso col giro: un nome si
+  prenota lì prima di scriverci.
 - **Di chi è un file importato**: `LavoriImportazione` passa all'importazione
   automatica i `ProvenienzaFile` (oggi solo `SincronizzazioneTelefono.caricataDa`):
   si cerca nel registro la copia con quella `destinazione` (la più recente) e

@@ -29,11 +29,12 @@ import {
   StatoContenuto,
   StatoSalute,
   StatoTelefono,
+  VideoGrande,
   Utente,
   FileScartato,
   LavoroImportazione,
 } from './modelli';
-import { daQuanto, durata } from './formati';
+import { daQuanto, durata, peso } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { Cestino } from './cestino';
@@ -731,6 +732,9 @@ export class App {
         this.telefoni.set(t);
         if (t.telefoni.some((s) => s.inCorso)) {
           this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 3000);
+        } else if (t.telefoni.some((s) => s.videoGrandi?.some((v) => v.stato === 'IN_CORSO'))) {
+          // Una ricompressione dura ore: basta guardarla ogni tanto.
+          this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 10000);
         }
       },
       error: (e: unknown) => {
@@ -811,6 +815,47 @@ export class App {
       this.aggiornaTelefoni();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione non partita');
+    }
+  }
+
+  protected readonly peso = peso;
+
+  /** Com'è messo un video troppo grande, a parole. */
+  protected statoVideoGrande(v: VideoGrande): string {
+    switch (v.stato) {
+      case 'IN_CODA':
+        return 'in coda per la ricompressione';
+      case 'IN_CORSO':
+        return (v.fase ?? 'in ricompressione') + (v.percentuale != null ? ` ${v.percentuale}%` : '');
+      case 'RIMANDATO':
+        return `rimandato: ${v.messaggio ?? ''}`;
+      case 'CARICATO':
+        return "ricompresso, aspetta l'importazione";
+      case 'FATTO':
+        return 'ricompresso e importato';
+      case 'ERRORE':
+        return `non riuscito: ${v.messaggio ?? ''}`;
+      case 'ANNULLATO':
+        return 'annullato';
+    }
+  }
+
+  protected async annullaVideoGrande(v: VideoGrande): Promise<void> {
+    if (!confirm(`Fermare la ricompressione di ${v.nome}? L'originale resta su pCloud.`)) return;
+    try {
+      await firstValueFrom(this.api.annullaVideoGrande(v.id));
+      this.aggiornaTelefoni();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non annullato');
+    }
+  }
+
+  protected async riprovaVideoGrande(v: VideoGrande): Promise<void> {
+    try {
+      await firstValueFrom(this.api.riprovaVideoGrande(v.id));
+      this.aggiornaTelefoni();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non rimesso in coda');
     }
   }
 

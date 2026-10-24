@@ -826,6 +826,12 @@
                   @if (g.aMetaTolte) {
                     · {{ g.aMetaTolte }} copie a metà tolte
                   }
+                  @if (g.ricompressi) {
+                    · {{ g.ricompressi }} video ricompressi
+                  }
+                  @if (g.inRicompressione) {
+                    · {{ g.inRicompressione }} in ricompressione
+                  }
                   @if (g.errori) {
                     · <span class="errore">{{ g.errori }} errori</span>
                   }
@@ -839,6 +845,41 @@
                 }
               } @else if (!t.inCorso) {
                 <p class="tenue">Nessun giro finora.</p>
+              }
+              @if (t.videoGrandi?.length) {
+                <h4>Video troppo grandi per il cloud</h4>
+                <p class="tenue">
+                  Ricompressi in H.265 sul server, uno alla volta; l'originale resta su pCloud, nella sua cartella.
+                </p>
+                <ul class="video-grandi">
+                  @for (v of t.videoGrandi; track v.id) {
+                    <li>
+                      <b [title]="v.percorso">{{ v.nome }}</b>
+                      · {{ peso(v.dimensione) }}
+                      @if (v.dimensioneRicompresso) {
+                        → {{ peso(v.dimensioneRicompresso) }}
+                        @if (v.crf != null) {
+                          (CRF {{ v.crf }})
+                        }
+                      }
+                      · <span [class.errore]="v.stato === 'ERRORE'">{{ statoVideoGrande(v) }}</span>
+                      @if (v.stato === 'IN_CORSO') {
+                        <span class="rotella piccola" aria-hidden="true"></span>
+                      }
+                      @if (v.originaleIn) {
+                        <br /><span class="tenue">Originale in <code>{{ v.originaleIn }}</code></span>
+                      }
+                      @if (galleria.io()?.admin) {
+                        @if (v.stato === 'IN_CODA' || v.stato === 'IN_CORSO' || v.stato === 'RIMANDATO') {
+                          <button type="button" class="piccolo" (click)="annullaVideoGrande(v)">Annulla</button>
+                        }
+                        @if (v.stato === 'ERRORE' || v.stato === 'ANNULLATO' || v.stato === 'RIMANDATO') {
+                          <button type="button" class="piccolo" (click)="riprovaVideoGrande(v)">Riprova</button>
+                        }
+                      }
+                    </li>
+                  }
+                </ul>
               }
               @if (prossimoGiro(t); as p) {
                 <p class="tenue">Prossimo giro: {{ p }}</p>

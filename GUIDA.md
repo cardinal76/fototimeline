@@ -279,6 +279,14 @@ rilascio compare da solo come "Telefono", con le sue impostazioni, e non ricopia
 `FOTOTIMELINE_TELEFONO_PROPRIETARIO` (nel `.env`) o, se vuoto, del primo amministratore che entra;
 da **Modifica** gli si cambia nome e proprietario.
 
+**3.3 Video troppo grandi.** LifetimeCloud non prende file oltre 20 GB (e a volte rifiuta con
+"413" anche più piccoli). Quei video l'app li ricomprime da sola in H.265 su server2, uno alla volta
+e anche per ore, e li importa come gli altri; l'originale resta su pCloud, spostato in
+`Video originali troppo grandi` solo dopo che il ricompresso è in archivio. In **Telefoni**, sotto
+ogni telefono, "Video troppo grandi" dice a che punto è, quanto pesava e quanto pesa; da admin
+**Annulla** e **Riprova**. Dettagli e limiti (spazio, memoria) in DEPLOY.md, "Video troppo grandi
+per LifetimeCloud".
+
 Controllo da server2:
 
 ```bash
@@ -663,6 +671,8 @@ backup): un'altra cartella di lavoro per ogni giro, per esempio
 | "La ricerca per contenuto non risponde" | il container visione riparte o è fermo | `docker logs fototimeline-visione-1` su server2; si riprova dopo un minuto |
 | il rilascio dice "Manca VISIONE_SEGRETO" | `.env` di prima della ricerca per contenuto | aggiungere `VISIONE_SEGRETO=$(openssl rand -hex 32)` in `~/fototimeline/.env` |
 | scarica: `file name too long` | su pCloud un nome oltre 255 byte (didascalie lunghe), che il disco di Linux non accetta | `git pull` e rilanciare `scarica`: quei file arrivano col nome accorciato (`…~1a2b3c4d.jpg`), e `pulisci` cancella comunque l'originale |
+| Video troppo grande "rimandato: spazio insufficiente in /video-grandi" | su server2 non c'è posto per originale e ricompresso | liberare spazio (`df -h ~/fototimeline`): riprova da solo ogni ora |
+| Video troppo grande "ffmpeg vuole circa ... di memoria" | un 4K a 10 bit (HDR) o un 8K | DEPLOY.md, "Video troppo grandi per LifetimeCloud", Memoria; poi **Riprova** |
 | Takeout: "Spazio insufficiente in /takeout ..." | su server2 non c'è posto per lo zip | liberare spazio (`df -h ~`) o rifare Takeout con zip più piccoli (6.1), poi **Avvia** |
 | Takeout: `didn't find section in config file` per `gdrive:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 6.2 |
 | Takeout: "Qui non si può: ... senza rclone" | app sul PC, non sul server | il Takeout si importa solo da server2 |

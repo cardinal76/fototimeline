@@ -59,7 +59,9 @@ Il server: [DEPLOY.md](DEPLOY.md).
   il suo proprietario e i suoi orari. Ogni tot ore copia le foto nuove nella
   cartella automatica e, dopo qualche giorno, le toglie da pCloud se sono
   state importate. L'admin li aggiunge e li cambia; ognuno vede lo stato del
-  proprio e può lanciarne un giro (DEPLOY.md).
+  proprio e può lanciarne un giro (DEPLOY.md). I video troppo grandi per
+  LifetimeCloud (oltre 20 GB) si ricomprimono da soli in H.265 sul server ed
+  entrano come gli altri; l'originale resta su pCloud, in una cartella sua.
 - **Google Foto**, in due modi (pulsante *Google Foto*; dettagli sotto,
   "Google Foto"):
   - **Importa da Google Takeout** (admin, sul server): tutta la libreria dagli

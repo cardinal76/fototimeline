@@ -410,6 +410,23 @@ progress {
   display: flex;
   justify-content: space-between;
 }
+.elenco-telefoni h4 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.95rem;
+}
+.video-grandi {
+  margin: 0.25rem 0;
+  padding-left: 1.1rem;
+  overflow-wrap: anywhere;
+}
+.video-grandi li {
+  margin-bottom: 0.35rem;
+}
+.video-grandi button.piccolo {
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.85rem;
+}
 .rilascio {
   position: fixed;
   inset: 0.75rem;

@@ -46,6 +46,8 @@ services:
       - rclone-cache:/cache
       # Google Takeout: rclone ci scarica uno zip alla volta, l'app lo apre (stesso percorso nei due container).
       - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
+      # Video del telefono troppo grandi per LifetimeCloud: rclone ci scarica l'originale, l'app lo ricomprime.
+      - ${FOTOTIMELINE_DATI:?}/video-grandi:/video-grandi
       # rshared: il montaggio fatto qui dentro si vede sull'host e quindi nell'app.
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
@@ -65,7 +67,7 @@ services:
       TZ: Europe/Rome
       # Heap della JVM e, al primo OutOfMemoryError, un heap dump in /diagnostica (DEPLOY.md, "Memoria").
       # 1,5 GB di heap nei 3 GB del container: il resto è la JVM fuori dall'heap e i processi figli
-      # (ffmpeg della conversione, heif-convert), che contano nella memoria del container.
+      # (ffmpeg della conversione e della ricompressione, heif-convert), che contano nella memoria del container.
       JAVA_TOOL_OPTIONS: "${FOTOTIMELINE_JAVA_OPTS:--Xmx1536m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/diagnostica}"
       MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/fototimeline?authSource=admin
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://presenze.footballer.it/auth/realms/fototimeline}
@@ -93,6 +95,20 @@ services:
       FOTOTIMELINE_VIDEO_ATTIVA: ${FOTOTIMELINE_VIDEO_ATTIVA:-true}
       FOTOTIMELINE_VIDEO_THREAD: ${FOTOTIMELINE_VIDEO_THREAD:-2}
       FOTOTIMELINE_VIDEO_RISOLUZIONE: ${FOTOTIMELINE_VIDEO_RISOLUZIONE:-1080}
+      # Video del telefono troppo grandi per LifetimeCloud (oltre 20480 MB, o 413): ricompressi in H.265 qui,
+      # un video alla volta, originale scaricato in /video-grandi (disco di server2) e poi spostato su pCloud
+      # nella cartella FOTOTIMELINE_VIDEO_GRANDI_PCLOUD (DEPLOY.md, "Video troppo grandi").
+      FOTOTIMELINE_VIDEO_GRANDI_ATTIVA: ${FOTOTIMELINE_VIDEO_GRANDI_ATTIVA:-true}
+      FOTOTIMELINE_VIDEO_MAX_MB: ${FOTOTIMELINE_VIDEO_MAX_MB:-20000}
+      FOTOTIMELINE_VIDEO_GRANDI_PCLOUD: ${FOTOTIMELINE_VIDEO_GRANDI_PCLOUD:-Video originali troppo grandi}
+      FOTOTIMELINE_VIDEO_GRANDI_CARTELLA: /video-grandi
+      FOTOTIMELINE_VIDEO_GRANDI_RISERVA: ${FOTOTIMELINE_VIDEO_GRANDI_RISERVA:-2GB}
+      FOTOTIMELINE_VIDEO_GRANDI_THREAD: ${FOTOTIMELINE_VIDEO_GRANDI_THREAD:-2}
+      FOTOTIMELINE_VIDEO_GRANDI_CRF: ${FOTOTIMELINE_VIDEO_GRANDI_CRF:-24}
+      FOTOTIMELINE_VIDEO_GRANDI_CRF_MASSIMO: ${FOTOTIMELINE_VIDEO_GRANDI_CRF_MASSIMO:-32}
+      FOTOTIMELINE_VIDEO_GRANDI_X265: ${FOTOTIMELINE_VIDEO_GRANDI_X265:-frame-threads=1:rc-lookahead=5:bframes=2:ref=2:lookahead-slices=0}
+      # Quanta memoria può prendere ffmpeg (x265) nel tetto del container: con 3g di tetto, un 4K a 8 bit.
+      FOTOTIMELINE_VIDEO_GRANDI_MEMORIA: ${FOTOTIMELINE_VIDEO_GRANDI_MEMORIA:-1100MB}
       RCLONE_RC_URL: http://rclone:5572
       RCLONE_RC_PASSWORD: ${RCLONE_RC_PASSWORD:?}
       RCLONE_REMOTO: ${RCLONE_REMOTO:-lifetime:}
@@ -127,6 +143,8 @@ services:
       # L'heap dump di un OutOfMemoryError (java_pid1.hprof): uno solo, finché non lo si cancella.
       - diagnostica:/diagnostica
       - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
+      # Originale (fino a 20 GB e oltre) e ricompresso di un video troppo grande: sul disco, non in /tmp del container.
+      - ${FOTOTIMELINE_DATI:?}/video-grandi:/video-grandi
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
         target: /cloud
