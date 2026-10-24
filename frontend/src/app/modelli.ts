@@ -365,12 +365,21 @@ export interface GiroTelefono {
   videoGrandi?: string[];
 }
 
-/** Un video del telefono troppo grande per il cloud, ricompresso in H.265 sul server. */
+/** Un video del telefono troppo grande per il cloud, ricompresso in H.265 sul PC (o sul server). */
 export interface VideoGrande {
   id: string;
   nome: string;
   percorso: string;
-  stato: 'IN_CODA' | 'IN_CORSO' | 'RIMANDATO' | 'CARICATO' | 'FATTO' | 'ERRORE' | 'ANNULLATO';
+  stato:
+    | 'IN_CODA'
+    | 'IN_CORSO'
+    | 'RIMANDATO'
+    | 'CARICATO'
+    | 'FATTO'
+    | 'ERRORE'
+    | 'ANNULLATO'
+    | 'DA_RICOMPRIMERE_PC'
+    | 'RICOMPRESSO_PC';
   /** Solo per quello in corso: "ricomprimo in H.265 (CRF 24)". */
   fase?: string;
   percentuale?: number;
@@ -386,6 +395,10 @@ export interface VideoGrande {
   messaggio?: string;
   creatoIl: string;
   aggiornatoIl: string;
+  /** Ricompresso sul PC (deploy/ricomprimi-video-grandi.sh). */
+  dalPc?: boolean;
+  /** Quello che il PC sta facendo: "sul PC: ricomprimo in H.265 (CRF 24) 37%". */
+  sulPc?: string;
 }
 
 /** Un telefono della famiglia (pCloud → cartella automatica). */

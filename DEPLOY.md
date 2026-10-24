@@ -20,6 +20,7 @@ login: Keycloak di presenze, realm "fototimeline"
 | Miniature | volume Docker `fototimeline_miniature` su server2 (si rigenerano dagli originali) |
 | Video compatibili (H.264) | LifetimeCloud, `FotoTimeline/.compatibili/<id>.mp4` (si rifanno con "Converti video") |
 | Originali dei video troppo grandi per LifetimeCloud | pCloud, `Video originali troppo grandi/` (in archivio c'è la versione ricompressa in H.265) |
+| Video ricompressi sul PC in arrivo | LifetimeCloud, `video-grandi-dal-pc/<id>.mp4`, finché il server non li sposta nella cartella automatica (minuti) |
 | Metadati (date, tag, album) | MongoDB, volume `fototimeline_mongo` su server2 |
 | Indice della ricerca per contenuto | volume `fototimeline_visione-dati` su server2 (si rifà dalle miniature) |
 | Volti e persone (nomi, gruppi) | MongoDB, collezioni `volti` e `persone`; l'indice dei vicini in `fototimeline_visione-dati`, cartella `volti` (si rifà da Mongo) |
@@ -291,14 +292,88 @@ LifetimeCloud non prende file oltre **20480 MB** (`File too large. Max 20480MB o
 Lifetime.: 403 Forbidden`), e il suo nginx a volte rifiuta anche file più piccoli con un **413
 Request Entity Too Large** (la soglia vera di nginx non è scritta da nessuna parte: si tratta
 come lo stesso caso). Prima erano due errori a ogni giro del telefono; ora un video così si
-**ricomprime in H.265** su server2 e entra in FotoTimeline come ogni altro, mentre l'originale
-resta su pCloud in una cartella sua.
+**ricomprime in H.265** e entra in FotoTimeline come ogni altro, mentre l'originale resta su
+pCloud in una cartella sua. **Dove** si ricomprime lo dice `FOTOTIMELINE_VIDEO_GRANDI_DOVE`:
+`pc` (il predefinito) sul PC di Marco, `server` su server2. Sul server non ci sta: per un video da
+23 GB servono ~45 GB (originale, ricompresso, 2 GB di riserva) e server2 ne ha 34 liberi su 96, e
+x265 terrebbe la CPU occupata per ore insieme a CI, app e volti. Il PC ha ~950 GB liberi.
 
-1. **Il giro del telefono** non prova nemmeno a copiare un video oltre `FOTOTIMELINE_VIDEO_MAX_MB`
-   (20000 MB, poco sotto il limite) e mette in coda anche quelli che il cloud rifiuta per la
-   dimensione (403 "File too large" o 413: niente seconda prova, un'eventuale copia a metà si
-   toglie). Non sono errori: nel riepilogo sono "N in ricompressione". Il registro
-   `video_grandi_telefono` (MongoDB) li ricorda: un giro dopo non li riprova a copiare.
+**Il giro del telefono**, in tutte e due le modalità, non prova nemmeno a copiare un video oltre
+`FOTOTIMELINE_VIDEO_MAX_MB` (20000 MB, poco sotto il limite) e mette in coda anche quelli che il
+cloud rifiuta per la dimensione (403 "File too large" o 413: niente seconda prova, un'eventuale
+copia a metà si toglie). Non sono errori: nel riepilogo sono "N in ricompressione". Il registro
+`video_grandi_telefono` (MongoDB) li ricorda: un giro dopo non li riprova a copiare.
+
+#### Sul PC (`FOTOTIMELINE_VIDEO_GRANDI_DOVE=pc`, predefinito)
+
+Il server mette i video in coda come **da ricomprimere sul PC** (`DA_RICOMPRIMERE_PC`) e non li
+tocca: niente download, niente ffmpeg, il volume `/video-grandi` non serve (resta, vuoto, per
+tornare a `server`). **Salute** (voce dei telefoni, gialla) e **Telefoni** dicono "N video da
+ricomprimere sul PC" col comando. Sul PC (WSL, GUIDA.md 3.3), la prima volta
+`sudo apt install -y ffmpeg`, poi:
+
+```bash
+cd ~/projects/fototimeline && git pull
+./deploy/ricomprimi-video-grandi.sh elenco      # la coda su server2, in sola lettura, e lo spazio che serve
+./deploy/ricomprimi-video-grandi.sh avvia       # in sottofondo (setsid nohup), uno alla volta
+./deploy/ricomprimi-video-grandi.sh stato       # video, fase, percentuale di ffmpeg, velocità, quanto manca
+tail -f ~/video-grandi/ricomprimi.log
+./deploy/ricomprimi-video-grandi.sh ferma       # poi "avvia" riprende: niente si riscarica né si ricomprime
+```
+
+Come il PC e il server si passano il video:
+
+1. Lo script legge la coda con `ssh server2 docker exec fototimeline-mongo-1 mongosh ...` (un
+   `find` sulla collezione `video_grandi_telefono`, come `confronta-tutto.sh`): id, stato,
+   dimensione, cartella del telefono e percorso su pCloud. Fa solo i `DA_RICOMPRIMERE_PC`.
+2. Controlla lo spazio in `~/video-grandi` (originale + ricompresso + `RISERVA_GB`, 2), scarica
+   l'originale da pCloud con `rclone copyto` (pCloud solo in lettura) in `~/video-grandi/<id>/`.
+3. Ricomprime con lo stesso comando e la stessa logica del server, senza i suoi limiti di CPU e
+   memoria (niente `-fs`, x265 coi parametri normali): `nice -n 19 ffmpeg -i in -map 0
+   -map_metadata 0 -c copy -c:v libx265 -crf 24 -preset fast -x265-params log-level=error -tag:v
+   hvc1 -movflags +use_metadata_tags -progress ...`; sotto la soglia e sotto il 95% dell'originale,
+   altrimenti CRF 28 e 32; durata quella dell'originale entro 1 s (ffprobe), altrimenti errore.
+4. Carica il ricompresso in **`lifetime:video-grandi-dal-pc/<id>.mp4`**
+   (`FOTOTIMELINE_VIDEO_GRANDI_DAL_PC`), fuori dalla cartella automatica, e controlla che sia
+   arrivato intero; se LifetimeCloud lo rifiuta (403/413), CRF più alto e sotto quello rifiutato.
+5. Lo dice al server con un solo `updateOne` sul suo video, che vale solo se è ancora
+   `DA_RICOMPRIMERE_PC`: `stato: RICOMPRESSO_PC`, `hash` (SHA-256 del ricompresso), `crf`,
+   `dimensioneRicompresso`, `sulPc` (la riga per la pagina). Durante il lavoro scrive solo `sulPc`
+   (la fase, ogni 10 minuti la percentuale); per un errore vero (durata diversa, ancora troppo
+   grande col CRF 32) `stato: ERRORE` col motivo, e nell'app **Riprova** lo rimette in coda per il PC.
+6. Il server, entro 5 minuti (o al giro del telefono), **controlla** che `video-grandi-dal-pc/<id>.mp4`
+   ci sia e sia di quella dimensione, più piccolo dell'originale, con uno SHA-256 valido; lo
+   **sposta** lato server (`operations/movefile`, stesso remote) nella cartella automatica col
+   nome dell'originale, lo mette nel registro delle copie con `ricompresso=true` e il video è
+   `CARICATO`, come uno fatto da lui. Se qualcosa non torna il video torna da ricomprimere sul PC
+   col motivo. Da lì i passi 3 e 4 qui sotto sono gli stessi: importazione, poi l'originale spostato.
+
+Perché scrivere direttamente in MongoDB e non un'API: l'app ha solo il login di Keycloak con la
+sessione nel browser, e uno script non ce l'ha; un token per lo script sarebbe un segreto in più
+da custodire. `ssh server2` dà già tutto server2, quindi non apre niente di nuovo, ed è come
+`confronta-tutto.sh` legge le schede. Il PC scrive solo i campi del suo video e solo da
+`DA_RICOMPRIMERE_PC` (un `updateOne` condizionato: un video annullato o già preso non si tocca);
+la destinazione nella cartella automatica, il registro delle copie e lo spostamento
+dell'originale li decide sempre il server, che prima ricontrolla il file. Uno SHA-256 sbagliato
+non fa danni: nessuna scheda lo avrebbe, quindi l'originale non si sposterebbe.
+
+**L'originale è al sicuro**: lo script su pCloud fa solo `copyto` verso il PC; lo sposta il server,
+in `Video originali troppo grandi`, solo quando c'è una scheda con lo SHA-256 del ricompresso.
+Sul PC lo script toglie solo le sue copie in `~/video-grandi/<id>` (dopo il caricamento; con
+`TIENI=si` restano) e un suo caricamento rifiutato in `video-grandi-dal-pc`. Ripresa: in
+`~/video-grandi/<id>` l'originale scaricato, `ricompresso.ok` (CRF, dimensione, SHA-256) e
+`caricato.ok`; il registro è `~/video-grandi/registro.tsv`. Quale video fare lo dice il server, quindi
+un video già consegnato non si rifà. Variabili dello script: `MASSIMO_MB` (20000, come
+`FOTOTIMELINE_VIDEO_MAX_MB`), `RISERVA_GB`, `CRF`, `CRF_MASSIMO`, `PRESET`, `X265_PARAMETRI`,
+`LIFETIME` (`lifetime:`), `DAL_PC`, `FT_SSH` (`server2`), `FT_MONGO`; in testa allo script.
+
+Quando si passa da `server` a `pc` (il rilascio di questa modalità), all'avvio i video in coda,
+rimandati o a metà diventano da ricomprimere sul PC; quelli in **errore** aspettano **Riprova**.
+Tornando a `server`, quelli da ricomprimere sul PC tornano in coda sul server.
+
+#### Sul server (`FOTOTIMELINE_VIDEO_GRANDI_DOVE=server`)
+
+1. Il giro del telefono, come sopra.
 2. **La ricompressione**, un video alla volta su un thread suo (`video-grandi`):
    - controlla lo spazio in `$FOTOTIMELINE_DATI/video-grandi` (montata come `/video-grandi` in
      rclone e nell'app, come `/takeout`): servono originale + ricompresso (al più la soglia) +
@@ -378,8 +453,11 @@ finita?") e non la JVM.
 | `FOTOTIMELINE_VIDEO_GRANDI_CRF`, `_CRF_MASSIMO` | `24`, `32` | primo e ultimo CRF, a passi di 4 |
 | `FOTOTIMELINE_VIDEO_GRANDI_X265` | vedi sopra | parametri di x265 (memoria) |
 | `FOTOTIMELINE_VIDEO_GRANDI_ATTIVA` | `true` | `false`: i video troppo grandi restano errori, come prima |
+| `FOTOTIMELINE_VIDEO_GRANDI_DOVE` | `pc` | `pc`: li ricomprime il PC (`deploy/ricomprimi-video-grandi.sh`), il server niente download né ffmpeg; `server`: li ricomprime server2 |
+| `FOTOTIMELINE_VIDEO_GRANDI_DAL_PC` | `video-grandi-dal-pc` | dove il PC carica i ricompressi, dalla radice del remote del cloud (`DAL_PC` nello script) |
 
-La cartella `$FOTOTIMELINE_DATI/video-grandi` la crea il rilascio (di `marco`, uid 1000: rclone ci
+Le variabili di memoria, CPU, `_RISERVA` e `_CARTELLA` valgono solo con `server`. La cartella
+`$FOTOTIMELINE_DATI/video-grandi` la crea il rilascio (di `marco`, uid 1000: rclone ci
 scrive da root, l'app ci crea una sottocartella per video e la toglie). Lo spazio libero:
 `df -h ~/fototimeline`. Poi il ricompresso passa dalla cache del VFS di rclone quando
 l'importazione lo legge, come ogni video.

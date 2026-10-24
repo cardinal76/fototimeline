@@ -343,6 +343,13 @@ public class Salute {
             return VoceSalute.attenzione(chiave, titolo, quando + "; video troppo grande " + rimandato.nome()
                     + " rimandato: " + rimandato.messaggio(), dettagli);
         }
+        // Video che aspettano il PC: giallo, con il comando da lanciare là (DEPLOY.md, "Video troppo grandi").
+        long sulPc = s.videoGrandi() == null ? 0 : s.videoGrandi().stream()
+                .filter(v -> v.stato() == VideoGrande.Stato.DA_RICOMPRIMERE_PC).count();
+        if (sulPc > 0) {
+            return VoceSalute.attenzione(chiave, titolo, quando + "; " + sulPc + " video da ricomprimere sul PC: "
+                    + VideoGrandi.COMANDO_PC, dettagli);
+        }
         return VoceSalute.ok(chiave, titolo, quando + ": " + ultimo.copiati() + " copiati"
                 + (ultimo.ricompressi() != null && ultimo.ricompressi() > 0
                         ? ", " + ultimo.ricompressi() + " video ricompressi" : ""), dettagli);
@@ -357,12 +364,15 @@ public class Salute {
             case IN_CORSO -> v.fase() != null ? v.fase() + (v.percentuale() != null ? " " + v.percentuale() + "%" : "")
                     : "in ricompressione";
             case RIMANDATO -> "rimandato: " + v.messaggio();
-            case CARICATO -> "ricompresso, aspetta l'importazione";
-            case FATTO -> "ricompresso" + (v.crf() != null ? " (CRF " + v.crf() + ")" : "")
+            case CARICATO -> "ricompresso" + (v.dalPc() ? " sul PC" : "") + ", aspetta l'importazione";
+            case FATTO -> "ricompresso" + (v.dalPc() ? " sul PC" : "") + (v.crf() != null ? " (CRF " + v.crf() + ")" : "")
                     + (v.originaleIn() != null ? ", originale in " + v.originaleIn()
                             : v.messaggio() != null ? ", " + v.messaggio() : "");
             case ERRORE -> "non riuscito: " + v.messaggio();
             case ANNULLATO -> "annullato a mano";
+            case DA_RICOMPRIMERE_PC -> "da ricomprimere sul PC (" + VideoGrandi.COMANDO_PC + ")"
+                    + (v.sulPc() != null ? ", " + v.sulPc() : v.messaggio() != null ? ", " + v.messaggio() : "");
+            case RICOMPRESSO_PC -> "ricompresso sul PC, il server lo porta nella cartella automatica";
         };
         return "Video troppo grande " + v.nome() + " (" + dimensioni + "): " + stato;
     }

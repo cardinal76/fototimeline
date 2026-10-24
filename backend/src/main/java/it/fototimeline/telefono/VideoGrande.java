@@ -30,6 +30,9 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * @param destinazione          il ricompresso nella cartella automatica, relativo al remote
  * @param originaleIn           dove è finito l'originale ({@code pcloud:Video originali troppo grandi/x.mp4})
  * @param messaggio             l'ultimo errore o il perché di un rimando
+ * @param dalPc                 true se l'ha ricompresso il PC ({@code deploy/ricomprimi-video-grandi.sh})
+ * @param sulPc                 quello che il PC sta facendo o ha detto dell'ultima prova
+ *                              (lo scrive lo script), per la pagina
  */
 @Document("video_grandi_telefono")
 @CompoundIndexes({
@@ -39,7 +42,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public record VideoGrande(@Id String id, String sorgente, String idSorgente, String proprietario, String percorso,
         long dimensione, Instant modificatoIl, String cartella, String motivo, Stato stato, Instant creatoIl,
         Instant aggiornatoIl, Instant riprovaIl, int tentativi, Integer crf, Long dimensioneRicompresso, String hash,
-        String destinazione, Instant caricatoIl, String originaleIn, Instant finitoIl, String messaggio) {
+        String destinazione, Instant caricatoIl, String originaleIn, Instant finitoIl, String messaggio,
+        Boolean dalPc, String sulPc) {
 
     public enum Stato {
         /** Aspetta il suo turno. */
@@ -55,7 +59,20 @@ public record VideoGrande(@Id String id, String sorgente, String idSorgente, Str
         /** Non riuscito per un motivo che non passa da solo: si rifà con "Riprova". */
         ERRORE,
         /** Fermato a mano: si rifà con "Riprova". */
-        ANNULLATO
+        ANNULLATO,
+        /**
+         * Aspetta il PC ({@code deploy/ricomprimi-video-grandi.sh}): il server non lo
+         * scarica né lo ricomprime. Il PC lo legge da qui e, finito, lo segna
+         * {@link #RICOMPRESSO_PC} (o {@link #ERRORE} per un errore vero): lo script
+         * scrive solo i video in questo stato.
+         */
+        DA_RICOMPRIMERE_PC,
+        /**
+         * Il PC ha caricato il ricompresso nella cartella dal PC di LifetimeCloud, con
+         * dimensione, CRF e SHA-256: il server lo controlla e lo porta nella cartella
+         * automatica, poi {@link #CARICATO} come uno fatto da lui.
+         */
+        RICOMPRESSO_PC
     }
 
     /** Il nome del file, senza le cartelle. */

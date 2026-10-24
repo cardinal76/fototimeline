@@ -76,6 +76,20 @@ import jakarta.annotation.PreDestroy;
  * cartella.</li>
  * </ol>
  *
+ * <p><b>Sul PC</b> ({@code dove: pc}, il predefinito): server2 non ha lo
+ * spazio per un video da 20 GB (originale, ricompresso e riserva) e la CPU
+ * serve ad altro. Il giro li riconosce e li mette in coda come
+ * {@link Stato#DA_RICOMPRIMERE_PC}, e qui niente si scarica né si
+ * ricomprime. Lo fa {@code deploy/ricomprimi-video-grandi.sh} sul PC, con lo
+ * stesso comando: legge la coda da MongoDB, carica il ricompresso in
+ * {@code cartella-dal-pc} su LifetimeCloud ({@code <id>.mp4}) e segna il video
+ * {@link Stato#RICOMPRESSO_PC} con dimensione, CRF e SHA-256. Il resto lo fa
+ * il server come per i suoi ({@link #prendiDalPc}): controlla che il file ci
+ * sia e sia di quella dimensione, lo sposta nella cartella automatica col
+ * nome dell'originale, lo mette nel registro {@code ricompresso} e da lì
+ * importazione e spostamento dell'originale vanno come sopra. Il PC non tocca
+ * mai pCloud se non per leggere, né il registro delle copie.
+ *
  * <p>Lo stato sta in MongoDB ({@link VideoGrande}): dopo un riavvio il video
  * a metà riparte da capo. Spazio che manca o rclone che non risponde
  * rimandano (si riprova da solo); una durata diversa o un video che resta
@@ -97,6 +111,9 @@ public class VideoGrandi {
     private static final Duration FATTI_DA_MOSTRARE = Duration.ofDays(30);
     private static final int MAX_DA_MOSTRARE = 20;
     private static final String NOME_RICOMPRESSO = "ricompresso.mp4";
+    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
+    /** Il comando da lanciare sul PC, per la Salute e la pagina Telefoni. */
+    public static final String COMANDO_PC = "./deploy/ricomprimi-video-grandi.sh avvia";
 
     /**
      * Le destinazioni nella cartella automatica che qualcuno sta scrivendo:
@@ -147,7 +164,7 @@ public class VideoGrandi {
      */
     public record Vista(String id, String nome, String percorso, Stato stato, String fase, Integer percentuale,
             long dimensione, Long dimensioneRicompresso, Integer crf, String destinazione, String originaleIn,
-            String motivo, String messaggio, Instant creatoIl, Instant aggiornatoIl) {
+            String motivo, String messaggio, Instant creatoIl, Instant aggiornatoIl, boolean dalPc, String sulPc) {
     }
 
     /** Quello che il giro di un telefono dice dei suoi video troppo grandi. */
@@ -156,9 +173,27 @@ public class VideoGrandi {
 
     // ------------------------------------------------------------ riconoscere
 
-    /** True se la ricompressione può girare: accesa, con rclone e con ffmpeg. */
+    /**
+     * True se i video troppo grandi si riconoscono e si mettono in coda: accesa, con
+     * rclone e, per ricomprimere sul server, con ffmpeg (sul PC il server non lo usa).
+     */
     public boolean attiva() {
-        return properties.attiva() && cloud.gestito() && media.videoDisponibile();
+        return properties.attiva() && cloud.gestito() && (sulPc() || media.videoDisponibile());
+    }
+
+    /** True se si ricomprime sul PC: qui niente download né ffmpeg. */
+    public boolean sulPc() {
+        return properties.dove() == VideoGrandiProperties.Dove.PC;
+    }
+
+    /** True se la coda del server ricomprime da sé. */
+    private boolean ricomprimeQui() {
+        return attiva() && !sulPc();
+    }
+
+    /** Lo stato di un video appena trovato, o rimesso in coda con "Riprova". */
+    private Stato daFare() {
+        return sulPc() ? Stato.DA_RICOMPRIMERE_PC : Stato.IN_CODA;
     }
 
     /** True se il cloud ha rifiutato il file perché troppo grande ("File too large", 413). */
@@ -195,7 +230,7 @@ public class VideoGrandi {
     /** True se il video ha (o sta caricando) un ricompresso nella cartella automatica. */
     static boolean haUnRicompresso(VideoGrande v) {
         return v.stato() == Stato.IN_CORSO || v.stato() == Stato.CARICATO || v.stato() == Stato.FATTO
-                || v.destinazione() != null;
+                || v.stato() == Stato.RICOMPRESSO_PC || v.destinazione() != null;
     }
 
     String soglia() {
@@ -219,10 +254,11 @@ public class VideoGrandi {
         Instant adesso = clock.instant();
         try {
             mongo.insert(new VideoGrande(new ObjectId().toHexString(), sorgente.testo(), telefono.id(),
-                    telefono.proprietario(), percorso, dimensione, modificatoIl, cartella, motivo, Stato.IN_CODA,
-                    adesso, adesso, null, 0, null, null, null, null, null, null, null, null));
-            log.info("Telefono {}, {} ({}): troppo grande per il cloud ({}), in coda per la ricompressione",
-                    telefono.nome(), percorso, peso(dimensione), motivo);
+                    telefono.proprietario(), percorso, dimensione, modificatoIl, cartella, motivo, daFare(),
+                    adesso, adesso, null, 0, null, null, null, null, null, null, null, null, null, null));
+            log.info("Telefono {}, {} ({}): troppo grande per il cloud ({}), {}", telefono.nome(), percorso,
+                    peso(dimensione), motivo, sulPc() ? "da ricomprimere sul PC (" + COMANDO_PC + ")"
+                            : "in coda per la ricompressione");
         } catch (DuplicateKeyException e) {
             // Già in coda da un giro di prima.
         }
@@ -242,11 +278,28 @@ public class VideoGrandi {
         for (VideoGrande v : mongo.find(Query.query(Criteria.where("sorgente").is(sorgente.testo()))
                 .with(Sort.by("creatoIl", "_id")), VideoGrande.class)) {
             if (!presenti.contains(chiave(v.percorso(), v.dimensione()))
-                    && List.of(Stato.IN_CODA, Stato.RIMANDATO, Stato.ERRORE, Stato.ANNULLATO).contains(v.stato())) {
+                    && List.of(Stato.IN_CODA, Stato.RIMANDATO, Stato.ERRORE, Stato.ANNULLATO, Stato.DA_RICOMPRIMERE_PC)
+                            .contains(v.stato())) {
                 // Tolto da pCloud (o cambiato) prima della ricompressione: non c'è più niente da fare.
                 if (mongo.remove(Query.query(Criteria.where("_id").is(v.id()).and("stato").is(v.stato())),
                         VideoGrande.class).getDeletedCount() > 0) {
                     log.info("Telefono, {}: non è più su pCloud, tolto dalla coda dei video grandi", v.percorso());
+                }
+                continue;
+            }
+            if (v.stato() == Stato.RICOMPRESSO_PC) {
+                // Il PC l'ha appena finito: si porta nella cartella automatica, poi è come uno fatto qui.
+                try {
+                    String problema = prendiDalPc(v);
+                    VideoGrande ora = mongo.findById(v.id(), VideoGrande.class);
+                    inCorso++;
+                    righe.add(problema != null ? v.nome() + " (" + peso(v.dimensione()) + "): da ricomprimere di"
+                            + " nuovo sul PC, " + problema
+                            : v.nome() + ": ricompresso sul PC (" + peso(v.dimensione()) + " → "
+                                    + peso(ora != null ? ora.dimensioneRicompresso() : v.dimensioneRicompresso())
+                                    + "), aspetta l'importazione");
+                } catch (RuntimeException e) {
+                    errori.add(new String[] {v.percorso(), "ricompresso dal PC non preso: " + e.getMessage()});
                 }
                 continue;
             }
@@ -256,8 +309,9 @@ public class VideoGrandi {
                         VideoGrande fatto = mettiDaParte(sorgente, v);
                         if (fatto == null) {
                             inCorso++;
-                            righe.add(v.nome() + ": ricompresso (" + peso(v.dimensione()) + " → "
-                                    + peso(v.dimensioneRicompresso()) + "), aspetta l'importazione");
+                            righe.add(v.nome() + ": ricompresso" + (Boolean.TRUE.equals(v.dalPc()) ? " sul PC" : "")
+                                    + " (" + peso(v.dimensione()) + " → " + peso(v.dimensioneRicompresso())
+                                    + "), aspetta l'importazione");
                         } else if (fatto.stato() == Stato.FATTO) {
                             ricompressi++;
                             righe.add(riga(fatto));
@@ -281,6 +335,14 @@ public class VideoGrandi {
                 case RIMANDATO -> {
                     inCorso++;
                     righe.add(v.nome() + " (" + peso(v.dimensione()) + "): rimandato, " + v.messaggio());
+                }
+                case DA_RICOMPRIMERE_PC -> {
+                    inCorso++;
+                    righe.add(v.nome() + " (" + peso(v.dimensione()) + "): da ricomprimere sul PC (" + COMANDO_PC + ")"
+                            + (v.sulPc() != null ? ", " + v.sulPc() : v.messaggio() != null ? ", " + v.messaggio() : ""));
+                }
+                case RICOMPRESSO_PC -> {
+                    // Preso sopra.
                 }
                 case ANNULLATO -> righe.add(v.nome() + " (" + peso(v.dimensione()) + "): annullato a mano (Riprova per rifarlo)");
                 case ERRORE -> errori.add(new String[] {v.percorso(), "ricompressione non riuscita: " + v.messaggio()});
@@ -346,7 +408,134 @@ public class VideoGrandi {
                 .and("dimensione").is(v.dimensione())), Update.update("cancellatoIl", adesso), CopiaTelefono.class);
         return new VideoGrande(v.id(), v.sorgente(), v.idSorgente(), v.proprietario(), v.percorso(), v.dimensione(),
                 v.modificatoIl(), v.cartella(), v.motivo(), Stato.FATTO, v.creatoIl(), adesso, null, v.tentativi(),
-                v.crf(), v.dimensioneRicompresso(), v.hash(), v.destinazione(), v.caricatoIl(), dove, adesso, nota);
+                v.crf(), v.dimensioneRicompresso(), v.hash(), v.destinazione(), v.caricatoIl(), dove, adesso, nota,
+                v.dalPc(), v.sulPc());
+    }
+
+    // ------------------------------------------------------------ dal PC
+
+    /** Il ricompresso che il PC carica per questo video, dalla radice del remote del cloud. */
+    String dalPc(String id) {
+        return properties.cartellaDalPc() + "/" + id + ".mp4";
+    }
+
+    /**
+     * Ogni {@code controllo}: i video che il PC ha finito ({@link Stato#RICOMPRESSO_PC})
+     * entrano nella cartella automatica senza aspettare il giro del telefono.
+     */
+    void prendiQuelliDalPc() {
+        if (!properties.attiva() || !cloud.gestito()) {
+            return;
+        }
+        for (VideoGrande v : mongo.find(Query.query(Criteria.where("stato").is(Stato.RICOMPRESSO_PC))
+                .with(Sort.by("creatoIl", "_id")), VideoGrande.class)) {
+            try {
+                prendiDalPc(v);
+            } catch (RuntimeException e) {
+                log.warn("Telefono, {}: ricompresso dal PC non preso (riprovo al prossimo controllo): {}",
+                        v.percorso(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Un video che il PC ha ricompresso: il PC ha caricato {@link #dalPc} e ha
+     * scritto dimensione, CRF e SHA-256 (e niente altro: la destinazione, il
+     * registro e lo spostamento dell'originale li decide il server). Si controlla
+     * che il file ci sia, di quella dimensione e più piccolo dell'originale, poi
+     * si sposta lato server ({@code operations/movefile}, lo stesso remote) nella
+     * cartella automatica col nome dell'originale, nel registro delle copie
+     * {@code ricompresso}, e il video è {@link Stato#CARICATO} come uno fatto qui.
+     * Se qualcosa non torna il video torna {@link Stato#DA_RICOMPRIMERE_PC} col
+     * motivo: nessun file si cancella, l'originale resta su pCloud.
+     *
+     * <p>{@code synchronized}: lo chiamano il giro del telefono e il controllo
+     * periodico; chi arriva secondo trova il video già preso.
+     *
+     * @return null se è stato preso (o lo era già), altrimenti il motivo per cui torna al PC
+     */
+    synchronized String prendiDalPc(VideoGrande letto) {
+        VideoGrande v = mongo.findById(letto.id(), VideoGrande.class);
+        if (v == null || v.stato() != Stato.RICOMPRESSO_PC) {
+            return null;
+        }
+        String dalPc = dalPc(v.id());
+        String voluto = voluto(v);
+        boolean giaArrivato = false;
+        boolean giaImportato = false;
+        String problema = null;
+        if (v.hash() == null || !SHA256.matcher(v.hash()).matches()) {
+            problema = "il PC non ha scritto lo SHA-256 del ricompresso";
+        } else if (v.dimensioneRicompresso() == null || v.dimensioneRicompresso() <= 0
+                || v.dimensioneRicompresso() >= v.dimensione()) {
+            problema = "il ricompresso dal PC (" + peso(v.dimensioneRicompresso()) + ") non è più piccolo dell'originale";
+        } else {
+            Map<?, ?> file = stat(cloud.remoto(), dalPc);
+            if (file == null) {
+                // Uno spostamento di prima la cui risposta si è persa? Allora è già nella cartella automatica.
+                Map<?, ?> arrivato = statSenzaErrori(cloud.remoto(), voluto);
+                if (arrivato != null && numero(arrivato.get("Size")) == v.dimensioneRicompresso()
+                        && !inCopia.contains(voluto)) {
+                    giaArrivato = true;
+                } else if (mongo.exists(Query.query(Criteria.where("hash").is(v.hash())), Foto.class)) {
+                    // Spostato e già importato (l'app si è fermata prima di segnarlo): c'è la scheda.
+                    giaImportato = true;
+                } else {
+                    problema = "il ricompresso non è in " + cloud.remoto() + dalPc;
+                }
+            } else if (numero(file.get("Size")) != v.dimensioneRicompresso()) {
+                problema = "in " + cloud.remoto() + dalPc + " ci sono " + numero(file.get("Size"))
+                        + " byte, il PC ne ha scritti " + v.dimensioneRicompresso() + " (caricato a metà?)";
+            }
+        }
+        if (problema != null) {
+            log.warn("Telefono, {}: {}, di nuovo da ricomprimere sul PC", v.percorso(), problema);
+            aggiorna(v, Stato.RICOMPRESSO_PC, new Update().set("stato", Stato.DA_RICOMPRIMERE_PC)
+                    .set("messaggio", problema).set("sulPc", null).set("hash", null).set("crf", null)
+                    .set("dimensioneRicompresso", null));
+            return problema;
+        }
+        if (giaImportato) {
+            Instant adesso = clock.instant();
+            registra(v, voluto, adesso);
+            aggiorna(v, Stato.RICOMPRESSO_PC, new Update().set("stato", Stato.CARICATO).set("destinazione", voluto)
+                    .set("caricatoIl", adesso).set("dalPc", true).set("messaggio", null).set("tentativi", 0));
+            log.info("Telefono, {}: ricompresso sul PC già importato", v.percorso());
+            return null;
+        }
+        String destinazione = giaArrivato ? voluto : liberoInArrivo(voluto);
+        if (giaArrivato) {
+            inCopia.add(destinazione);
+        }
+        try {
+            if (!giaArrivato) {
+                try {
+                    rclone.chiama("operations/movefile", Map.of(
+                            "srcFs", cloud.remoto(), "srcRemote", dalPc,
+                            "dstFs", cloud.remoto(), "dstRemote", destinazione));
+                } catch (RuntimeException e) {
+                    Map<?, ?> arrivato = statSenzaErrori(cloud.remoto(), destinazione);
+                    if (arrivato == null || numero(arrivato.get("Size")) != v.dimensioneRicompresso()) {
+                        throw e;
+                    }
+                    log.info("Telefono, {}: {}, ma il ricompresso dal PC è arrivato", v.percorso(), e.getMessage());
+                }
+            }
+            Map<?, ?> arrivato = stat(cloud.remoto(), destinazione);
+            if (arrivato == null || numero(arrivato.get("Size")) != v.dimensioneRicompresso()) {
+                throw new IllegalStateException("il ricompresso dal PC non è arrivato intero in " + destinazione);
+            }
+            Instant adesso = clock.instant();
+            registra(v, destinazione, adesso);
+            aggiorna(v, Stato.RICOMPRESSO_PC, new Update().set("stato", Stato.CARICATO)
+                    .set("destinazione", destinazione).set("caricatoIl", adesso).set("dalPc", true)
+                    .set("messaggio", null).set("tentativi", 0));
+            log.info("Telefono, {}: ricompresso sul PC, {} → {} (CRF {}), in {}", v.percorso(), peso(v.dimensione()),
+                    peso(v.dimensioneRicompresso()), v.crf(), destinazione);
+            return null;
+        } finally {
+            inCopia.remove(destinazione);
+        }
     }
 
     /** Il nome se è libero nel remote, altrimenti "nome (2).ext", "nome (3).ext"...: non si sovrascrive mai. */
@@ -404,7 +593,8 @@ public class VideoGrandi {
             boolean questo = l != null && l.id.equals(v.id()) && v.stato() == Stato.IN_CORSO;
             return new Vista(v.id(), v.nome(), v.percorso(), v.stato(), questo ? l.descrizione() : null,
                     questo ? l.percentuale : null, v.dimensione(), v.dimensioneRicompresso(), v.crf(),
-                    v.destinazione(), v.originaleIn(), v.motivo(), v.messaggio(), v.creatoIl(), v.aggiornatoIl());
+                    v.destinazione(), v.originaleIn(), v.motivo(), v.messaggio(), v.creatoIl(), v.aggiornatoIl(),
+                    Boolean.TRUE.equals(v.dalPc()), v.sulPc());
         }).toList();
     }
 
@@ -420,7 +610,7 @@ public class VideoGrandi {
     public boolean annulla(String id) {
         Instant adesso = clock.instant();
         boolean fermato = mongo.updateFirst(Query.query(Criteria.where("_id").is(id)
-                        .and("stato").in(Stato.IN_CODA, Stato.RIMANDATO)),
+                        .and("stato").in(Stato.IN_CODA, Stato.RIMANDATO, Stato.DA_RICOMPRIMERE_PC)),
                 new Update().set("stato", Stato.ANNULLATO).set("aggiornatoIl", adesso), VideoGrande.class)
                 .getModifiedCount() > 0;
         Lavoro l = corrente;
@@ -434,12 +624,13 @@ public class VideoGrandi {
         return fermato;
     }
 
-    /** "Riprova": un video in errore, annullato o rimandato torna in coda da capo. */
+    /** "Riprova": un video in errore, annullato o rimandato torna in coda da capo (sul PC: da ricomprimere lì). */
     public boolean riprova(String id) {
         boolean rimesso = mongo.updateFirst(Query.query(Criteria.where("_id").is(id)
                         .and("stato").in(Stato.ERRORE, Stato.ANNULLATO, Stato.RIMANDATO)),
-                new Update().set("stato", Stato.IN_CODA).set("tentativi", 0).set("riprovaIl", null)
-                        .set("messaggio", null).set("aggiornatoIl", clock.instant()), VideoGrande.class)
+                new Update().set("stato", daFare()).set("tentativi", 0).set("riprovaIl", null)
+                        .set("messaggio", null).set("sulPc", null).set("aggiornatoIl", clock.instant()),
+                VideoGrande.class)
                 .getModifiedCount() > 0;
         if (rimesso) {
             segnala();
@@ -449,13 +640,27 @@ public class VideoGrandi {
 
     // ------------------------------------------------------------ la coda
 
-    /** Dopo un riavvio: il video che era a metà ricomincia, e i file rimasti sul disco si tolgono. */
+    /**
+     * Dopo un riavvio: il video che era a metà ricomincia, e i file rimasti sul disco si tolgono.
+     * Se è cambiato {@code dove}, la coda passa all'altro: sul PC quelli in coda, rimandati o a
+     * metà diventano {@link Stato#DA_RICOMPRIMERE_PC} (gli errori aspettano "Riprova"); sul
+     * server quelli da fare sul PC tornano in coda qui.
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void riprendi() {
         long ripresi = mongo.updateMulti(Query.query(Criteria.where("stato").is(Stato.IN_CORSO)),
                 new Update().set("stato", Stato.IN_CODA), VideoGrande.class).getModifiedCount();
         if (ripresi > 0) {
             log.info("Video grandi ripresi dopo il riavvio: {} rimessi in coda", ripresi);
+        }
+        Query daPassare = Query.query(Criteria.where("stato").in(sulPc()
+                ? List.of(Stato.IN_CODA, Stato.RIMANDATO) : List.of(Stato.DA_RICOMPRIMERE_PC)));
+        long passati = mongo.updateMulti(daPassare, new Update().set("stato", daFare()).set("riprovaIl", null)
+                .set("tentativi", 0).set("messaggio", null).set("aggiornatoIl", clock.instant()), VideoGrande.class)
+                .getModifiedCount();
+        if (passati > 0) {
+            log.info("Video grandi: {} {}", passati, sulPc() ? "da ricomprimere sul PC (" + COMANDO_PC + ")"
+                    : "rimessi in coda sul server");
         }
         if (Files.isDirectory(properties.cartella())) {
             try (Stream<Path> dentro = Files.list(properties.cartella())) {
@@ -473,12 +678,13 @@ public class VideoGrandi {
     @Scheduled(fixedDelayString = "${fototimeline.telefono.video-grandi.controllo:PT5M}",
             initialDelayString = "${fototimeline.telefono.video-grandi.controllo:PT5M}")
     public void controlla() {
+        prendiQuelliDalPc();
         segnala();
     }
 
     /** Fa partire la coda, se non sta già girando. Non blocca. */
     public void segnala() {
-        if (!attiva() || chiuso || !inSottofondo) {
+        if (!ricomprimeQui() || chiuso || !inSottofondo) {
             return;
         }
         if (inGiro.compareAndSet(false, true)) {
@@ -515,6 +721,10 @@ public class VideoGrandi {
 
     /** Il prossimo da fare, dal più vecchio, segnato IN_CORSO nello stesso colpo. */
     private VideoGrande prossimo() {
+        if (!ricomprimeQui()) {
+            // Sul PC: qui niente si scarica né si ricomprime, anche se qualcosa fosse rimasto IN_CODA.
+            return null;
+        }
         Instant adesso = clock.instant();
         Query query = Query.query(new Criteria().orOperator(Criteria.where("stato").is(Stato.IN_CODA),
                 Criteria.where("stato").is(Stato.RIMANDATO).and("riprovaIl").lte(adesso)))
@@ -626,10 +836,7 @@ public class VideoGrandi {
      * {@link #inCopia}: l'importazione non lo legge a metà.
      */
     private void carica(VideoGrande v, Path ricompresso, long dimensione, int crf, String hash, Lavoro l) {
-        String nome = v.percorso().replace("/", " - ");
-        int punto = nome.lastIndexOf('.');
-        String voluto = v.cartella() + "/" + (punto > 0 ? nome.substring(0, punto) : nome) + ".mp4";
-        String destinazione = liberoInArrivo(voluto);
+        String destinazione = liberoInArrivo(voluto(v));
         try {
             try {
                 copia(Map.of("srcFs", properties.cartellaRclone(),
@@ -654,14 +861,7 @@ public class VideoGrandi {
                         + (arrivato == null ? "nessun file" : numero(arrivato.get("Size")) + " byte"));
             }
             Instant adesso = clock.instant();
-            // Upsert: dopo un "Riprova" la voce di un caricamento di prima c'è già (stessa chiave).
-            mongo.upsert(Query.query(Criteria.where("sorgente").is(v.sorgente()).and("percorso").is(v.percorso())
-                            .and("dimensione").is(v.dimensione())),
-                    new Update().setOnInsert("_id", new ObjectId().toHexString()).set("idSorgente", v.idSorgente())
-                            .set("proprietario", v.proprietario()).set("modificatoIl", v.modificatoIl())
-                            .set("destinazione", destinazione).set("copiatoIl", adesso).set("cancellatoIl", null)
-                            .set("ricompresso", true),
-                    CopiaTelefono.class);
+            registra(v, destinazione, adesso);
             aggiorna(v, Stato.IN_CORSO, new Update().set("stato", Stato.CARICATO).set("crf", crf)
                     .set("dimensioneRicompresso", dimensione).set("hash", hash).set("destinazione", destinazione)
                     .set("caricatoIl", adesso).set("messaggio", null).set("tentativi", 0));
@@ -670,6 +870,28 @@ public class VideoGrandi {
         } finally {
             inCopia.remove(destinazione);
         }
+    }
+
+    /** Il nome del ricompresso nella cartella automatica: quello dell'originale, piatto, in {@code .mp4}. */
+    private static String voluto(VideoGrande v) {
+        String nome = v.percorso().replace("/", " - ");
+        int punto = nome.lastIndexOf('.');
+        return v.cartella() + "/" + (punto > 0 ? nome.substring(0, punto) : nome) + ".mp4";
+    }
+
+    /**
+     * Il ricompresso nel registro delle copie, segnato {@code ricompresso}: l'importazione sa di
+     * chi è e la sincronizzazione non cancella mai l'originale. Upsert: dopo un "Riprova" la voce
+     * di un caricamento di prima c'è già (stessa chiave).
+     */
+    private void registra(VideoGrande v, String destinazione, Instant adesso) {
+        mongo.upsert(Query.query(Criteria.where("sorgente").is(v.sorgente()).and("percorso").is(v.percorso())
+                        .and("dimensione").is(v.dimensione())),
+                new Update().setOnInsert("_id", new ObjectId().toHexString()).set("idSorgente", v.idSorgente())
+                        .set("proprietario", v.proprietario()).set("modificatoIl", v.modificatoIl())
+                        .set("destinazione", destinazione).set("copiatoIl", adesso).set("cancellatoIl", null)
+                        .set("ricompresso", true),
+                CopiaTelefono.class);
     }
 
     /** Una copia di rclone (scaricare o caricare), con l'avanzamento in byte; Annulla la ferma. */
@@ -769,12 +991,13 @@ public class VideoGrandi {
         return new VideoGrande(v.id(), v.sorgente(), v.idSorgente(), v.proprietario(), v.percorso(), v.dimensione(),
                 v.modificatoIl(), v.cartella(), v.motivo(), stato, v.creatoIl(), v.aggiornatoIl(), v.riprovaIl(),
                 v.tentativi(), v.crf(), v.dimensioneRicompresso(), v.hash(), v.destinazione(), v.caricatoIl(),
-                v.originaleIn(), v.finitoIl(), messaggio);
+                v.originaleIn(), v.finitoIl(), messaggio, v.dalPc(), v.sulPc());
     }
 
     /** "20260301_195506_293.mp4: ricompresso, 23 552 MB → 6 144 MB (CRF 24), originale in pcloud:...". */
     static String riga(VideoGrande v) {
-        return v.nome() + ": ricompresso, " + peso(v.dimensione()) + " → " + peso(v.dimensioneRicompresso())
+        return v.nome() + ": ricompresso" + (Boolean.TRUE.equals(v.dalPc()) ? " sul PC" : "") + ", "
+                + peso(v.dimensione()) + " → " + peso(v.dimensioneRicompresso())
                 + (v.crf() != null ? " (CRF " + v.crf() + ")" : "")
                 + (v.originaleIn() != null ? ", originale in " + v.originaleIn()
                         : v.messaggio() != null ? ", " + v.messaggio() : "");

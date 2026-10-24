@@ -9,8 +9,10 @@ import org.springframework.util.unit.DataSize;
 /**
  * I video del telefono troppo grandi per il cloud ({@link VideoGrandi}):
  * LifetimeCloud rifiuta i file oltre 20480 MB ("File too large", 403) e il
- * suo nginx a volte anche sotto (413). Si ricomprimono in H.265 sul server e
- * l'originale resta su pCloud, in una cartella sua.
+ * suo nginx a volte anche sotto (413). Si ricomprimono in H.265 e l'originale
+ * resta su pCloud, in una cartella sua. Dove si ricomprimono lo dice
+ * {@code dove}: sul PC di Marco (predefinito: server2 non ha lo spazio per un
+ * video da 20 GB e la CPU serve ad altro) o sul server.
  *
  * @param attiva             false: i video troppo grandi restano errori, come prima
  * @param massimoMb          oltre questi MB (MiB) un video non si prova nemmeno a
@@ -40,15 +42,31 @@ import org.springframework.util.unit.DataSize;
  * @param tentativi          quante volte si rimanda prima di dirlo errore
  * @param attesaImportazione per quanto un ricompresso sparito dalla cartella
  *                           automatica senza una scheda si aspetta, prima di dirlo errore
- * @param controllo          ogni quanto la coda guarda se c'è da fare
+ * @param controllo          ogni quanto la coda guarda se c'è da fare (e se il PC ha
+ *                           lasciato un ricompresso da prendere)
+ * @param dove               {@link Dove#PC}: il server mette in coda e aspetta il PC
+ *                           ({@code deploy/ricomprimi-video-grandi.sh}), niente download né
+ *                           ffmpeg qui; {@link Dove#SERVER}: ricomprime lui, come prima
+ * @param cartellaDalPc      dove il PC carica i ricompressi, dalla radice del remote del
+ *                           cloud ({@code lifetime:video-grandi-dal-pc/<id>.mp4}): fuori dalla
+ *                           cartella automatica, così l'importazione non li legge a metà
  */
 @ConfigurationProperties("fototimeline.telefono.video-grandi")
 public record VideoGrandiProperties(Boolean attiva, Long massimoMb, String cartellaOriginali, Path cartella,
         String cartellaRclone, DataSize riserva, Integer crf, Integer crfMassimo, Integer passoCrf, String preset,
         Integer thread, String parametriX265, DataSize memoriaMassima, Duration tolleranzaDurata, Duration attesaRimandati, Integer tentativi,
-        Duration attesaImportazione, Duration controllo) {
+        Duration attesaImportazione, Duration controllo, Dove dove, String cartellaDalPc) {
+
+    /** Dove si ricomprime. */
+    public enum Dove {
+        /** Sul PC, con {@code deploy/ricomprimi-video-grandi.sh}: il server mette in coda e prende il risultato. */
+        PC,
+        /** Sul server, come prima della ricompressione sul PC. */
+        SERVER
+    }
 
     public static final long MASSIMO_MB = 20_000;
+    public static final String CARTELLA_DAL_PC = "video-grandi-dal-pc";
     public static final String CARTELLA_ORIGINALI = "Video originali troppo grandi";
     public static final String PARAMETRI_X265 = "frame-threads=1:rc-lookahead=5:bframes=2:ref=2:lookahead-slices=0";
 
@@ -108,6 +126,13 @@ public record VideoGrandiProperties(Boolean attiva, Long massimoMb, String carte
         if (controllo == null || controllo.isNegative() || controllo.isZero()) {
             controllo = Duration.ofMinutes(5);
         }
+        if (dove == null) {
+            dove = Dove.PC;
+        }
+        cartellaDalPc = cartellaDalPc == null ? "" : cartellaDalPc.strip().replaceAll("^/+|/+$", "");
+        if (cartellaDalPc.isEmpty()) {
+            cartellaDalPc = CARTELLA_DAL_PC;
+        }
     }
 
     /** {@link #massimoMb} in byte. */
@@ -118,6 +143,6 @@ public record VideoGrandiProperties(Boolean attiva, Long massimoMb, String carte
     /** I valori predefiniti, per i test e dove non c'è configurazione. */
     public static VideoGrandiProperties predefinite() {
         return new VideoGrandiProperties(null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 }

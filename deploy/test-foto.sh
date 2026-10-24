@@ -30,8 +30,14 @@
 #    e già note, documenti per mese, doppioni tra zip, nomi uguali, __MACOSX, un non letto, uno
 #    zip rovinato a metà e uno irrecuperabile; senza ORDINA niente, il rilancio non rifà niente,
 #    ucciso a metà e ripreso come un giro intero, gli zip originali intatti, un giro solo alla volta.
+# 9. ricomprimi-video-grandi.sh con un finto pCloud, un finto LifetimeCloud (cartelle locali) e un
+#    finto mongosh (node, sopra un JSON): elenco in sola lettura, spazio insufficiente, giro completo
+#    con due video veri fatti da ffmpeg, ripresa dopo un caricamento non riuscito (né riscaricato né
+#    ricompresso), rilancio che non rifà niente, durata diversa che va in errore, 413 di LifetimeCloud
+#    con CRF più alto, in sottofondo con stato; mai niente cancellato o spostato su pCloud.
 #
-# Serve: exiftool, rclone, zip, unzip, flock (ffmpeg facoltativo, per un video vero).
+# Serve: exiftool, rclone, zip, unzip, flock (ffmpeg facoltativo, per un video vero; ffmpeg con
+# libx265 e node per la 9, che senza si salta).
 set -uo pipefail
 
 QUI="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -995,6 +1001,186 @@ verifica "ripresa: nomi uguali con un numero"            c_e "$T/intero-p/Da con
 verifica "ripresa: stessi file, nomi e registro"         cmp -s "$T/o8-intero.file" "$T/o8-ripreso.file"
 cmp -s "$T/o8-intero.file" "$T/o8-ripreso.file" || diff "$T/o8-intero.file" "$T/o8-ripreso.file" | head -30
 verifica "ripresa: niente lasciato sul PC"               non_c_e "$l/in-attesa"
+
+# --- 9. ricomprimi-video-grandi.sh: i video troppo grandi, ricompressi sul PC ----------------
+echo "9. ricomprimi-video-grandi.sh"
+if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null || ! ffmpeg -hide_banner -encoders 2>/dev/null | grep libx265 >/dev/null; then
+    echo "  (saltata: serve ffmpeg con libx265)"
+elif ! command -v node >/dev/null; then
+    echo "  (saltata: serve node per il finto mongosh)"
+else
+RV="$QUI/ricomprimi-video-grandi.sh"
+P9="$T/v9-pcloud" LT9="$T/v9-lifetime" L9="$HOME/video-grandi" DB9="$T/v9-db.json"
+CAMERA="$P9/Automatic Upload/Xiaomi 25080RABDG/DCIM/Camera"
+mkdir -p "$CAMERA" "$LT9/telefono"
+# Due video veri, senza perdite (grandi, si comprimono bene), con la data di ripresa.
+ffmpeg -v error -f lavfi -i testsrc2=size=640x480:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 \
+    -t 4 -c:v libx264 -qp 0 -preset ultrafast -c:a aac -metadata creation_time=2026-03-01T18:55:06Z \
+    "$CAMERA/20260301_195506_293.mp4" < /dev/null
+ffmpeg -v error -f lavfi -i mandelbrot=size=320x240:rate=25 -f lavfi -i sine=frequency=880:sample_rate=48000 \
+    -t 3 -c:v libx264 -qp 0 -preset ultrafast -c:a aac -metadata creation_time=2026-03-01T17:26:45Z \
+    "$CAMERA/20260301_182645_998.mp4" < /dev/null
+D1="$(stat -c %s "$CAMERA/20260301_195506_293.mp4")" D2="$(stat -c %s "$CAMERA/20260301_182645_998.mp4")"
+ID1=650000000000000000000001 ID2=650000000000000000000002
+# La coda come la lascia il server con dove=pc: due da ricomprimere, uno fatto, uno in errore.
+coda9() {   # coda9 [solo il primo]
+    node -e '
+const [d1, d2, solo] = process.argv.slice(1);
+const v = (id, stato, nome, dim) => ({_id: id, sorgente: "pcloud:Automatic Upload", percorso: "Xiaomi 25080RABDG/DCIM/Camera/" + nome,
+  dimensione: Number(dim), stato, cartella: "telefono", creatoIl: "2026-03-02T08:00:00Z"});
+const docs = [v("650000000000000000000001", "DA_RICOMPRIMERE_PC", "20260301_195506_293.mp4", d1)];
+if (!solo) docs.push(v("650000000000000000000002", "DA_RICOMPRIMERE_PC", "20260301_182645_998.mp4", d2),
+  v("650000000000000000000003", "FATTO", "VID_3.mp4", 99), v("650000000000000000000004", "ERRORE", "VID_4.mp4", 98));
+console.log(JSON.stringify(docs));' "$D1" "$D2" "${1:-}" > "$DB9"
+}
+# Il finto mongosh: lo script del PC gira con un db che legge e scrive il JSON. Segna ogni script.
+cat > "$T/bin/finto-mongosh" <<'FINE'
+#!/usr/bin/env node
+const fs = require("fs"), vm = require("vm");
+const file = process.env.FINTO_DB, docs = JSON.parse(fs.readFileSync(file, "utf8"));
+fs.appendFileSync(process.env.FINTO_DB_LOG, process.argv[2] + "\n----\n");
+const val = (x) => (x && x.toHexString ? x.toHexString() : x);
+const ok = (d, q) => Object.entries(q).every(([k, c]) => c && typeof c === "object" && !c.toHexString
+  ? ("$in" in c ? c.$in.map(val).includes(val(d[k])) : false) : val(d[k]) === val(c));
+const collezione = {
+  find: (q) => { const r = docs.filter((d) => ok(d, q || {})); const cur = {sort: () => cur, forEach: (f) => r.forEach(f)}; return cur; },
+  updateOne: (q, u) => {
+    const d = docs.find((x) => ok(x, q));
+    if (!d) return {matchedCount: 0, modifiedCount: 0};
+    for (const [k, x] of Object.entries(u.$set)) d[k] = x instanceof Date ? x.toISOString() : x;
+    fs.writeFileSync(file, JSON.stringify(docs, null, 1));
+    return {matchedCount: 1, modifiedCount: 1};
+  }};
+const db = {getSiblingDB: () => db, getCollection: () => collezione};
+vm.runInNewContext(process.argv[2], {db, print: (...a) => console.log(a.join(" ")), Date, String,
+  ObjectId: (s) => ({toHexString: () => s, toString: () => s}), NumberLong: (s) => Number(s), NumberInt: (n) => Number(n)});
+FINE
+# rclone che segna i comandi; FALLISCI_CARICA (un file): il primo caricamento su LifetimeCloud non
+# va; RIFIUTA_OLTRE (byte): LifetimeCloud rifiuta i file più grandi col 413 di nginx.
+cat > "$T/bin/rclone-v9" <<'FINE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$V9_LOG"
+if [ "$1" = copyto ] && [[ "$3" == "$LT9"* ]]; then
+    if [ -n "${FALLISCI_CARICA:-}" ] && [ -f "$FALLISCI_CARICA" ]; then rm -f "$FALLISCI_CARICA"; echo "Failed to copy: connection reset by peer" >&2; exit 1; fi
+    if [ -n "${RIFIUTA_OLTRE:-}" ] && [ "$(stat -c %s "$2")" -gt "$RIFIUTA_OLTRE" ]; then
+        echo "ERROR : Failed to copy: 413 Request Entity Too Large" >&2; exit 1
+    fi
+fi
+exec rclone "$@"
+FINE
+# ffmpeg che segna le ricompressioni; con CORTO taglia il risultato a 1 secondo (durata diversa).
+cat > "$T/bin/ffmpeg-v9" <<'FINE'
+#!/usr/bin/env bash
+[[ " $* " == *" libx265 "* ]] && printf '%s\n' "$*" >> "$V9_FF"
+if [ -n "${CORTO:-}" ] && [[ " $* " == *" libx265 "* ]]; then exec ffmpeg "${@:1:$#-1}" -t 1 "${@: -1}"; fi
+exec ffmpeg "$@"
+FINE
+chmod +x "$T/bin/finto-mongosh" "$T/bin/rclone-v9" "$T/bin/ffmpeg-v9"
+export V9_LOG="$T/v9-rclone.log" V9_FF="$T/v9-ffmpeg.log" FINTO_DB="$DB9" FINTO_DB_LOG="$T/v9-mongosh.log" LT9
+: > "$V9_LOG"; : > "$V9_FF"; : > "$FINTO_DB_LOG"
+RV9=(env FT_MONGOSH="$T/bin/finto-mongosh" RCLONE="$T/bin/rclone-v9" FFMPEG="$T/bin/ffmpeg-v9" PCLOUD="$P9" LIFETIME="$LT9" OGNI=0.2 "$RV")
+campo9() { node -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1])).find((x) => x._id === process.argv[2]); console.log(d[process.argv[3]] ?? "")' "$DB9" "$1" "$2"; }
+sha_p9() { (cd "$P9" && find . -type f -printf '%P %s %T@\n' | LC_ALL=C sort; find . -type f -exec sha256sum {} + | LC_ALL=C sort); }
+coda9
+prima_p9="$(sha_p9)"
+
+"${RV9[@]}" elenco > "$T/v9-elenco.txt" 2>&1
+verifica "elenco: i due da fare"                         contiene "$T/v9-elenco.txt" "2 da ricomprimere sul PC"
+verifica "elenco: col percorso su pCloud"                contiene "$T/v9-elenco.txt" "pcloud:Automatic Upload/Xiaomi 25080RABDG/DCIM/Camera/20260301_195506_293.mp4"
+verifica "elenco: anche fatti ed errori"                 grep -q '^ERRORE ' "$T/v9-elenco.txt"
+verifica "elenco: in sola lettura"                       bash -c '! grep -q updateOne "$1"' _ "$FINTO_DB_LOG"
+
+# Spazio insufficiente: non scarica niente, non cambia stato, dice quanto serve.
+SPAZIO_LIBERO=1000 "${RV9[@]}" ricomprimi > "$T/v9-spazio.txt" 2>&1
+verifica "spazio: esce con errore"                       [ $? -ne 0 ]
+verifica "spazio: lo dice"                               contiene "$T/v9-spazio.txt" "spazio insufficiente in $L9"
+verifica "spazio: niente scaricato"                      bash -c '! grep -q "^copyto $1" "$2"' _ "$P9" "$V9_LOG"
+verifica "spazio: ancora da ricomprimere"                [ "$(campo9 $ID1 stato)" = DA_RICOMPRIMERE_PC ]
+verifica "spazio: la pagina lo sa"                       grep -q "spazio insufficiente" <<< "$(campo9 $ID1 sulPc)"
+
+# Il primo caricamento su LifetimeCloud non va: il primo video resta a metà, il secondo va.
+: > "$T/v9-fallisci"
+FALLISCI_CARICA="$T/v9-fallisci" "${RV9[@]}" ricomprimi > "$T/v9-primo.txt" 2>&1
+verifica "a metà: esce con errore"                       [ $? -ne 0 ]
+verifica "a metà: ricompresso tenuto per il rilancio"    c_e "$L9/$ID1/ricompresso.ok"
+verifica "a metà: primo ancora da ricomprimere"          [ "$(campo9 $ID1 stato)" = DA_RICOMPRIMERE_PC ]
+verifica "a metà: il secondo consegnato"                 [ "$(campo9 $ID2 stato)" = RICOMPRESSO_PC ]
+verifica "a metà: due ricompressioni"                    [ "$(wc -l < "$V9_FF")" -eq 2 ]
+verifica "ffmpeg: il comando del server"                 grep -q -- "-map 0 -map_metadata 0 -c copy -c:v libx265 -crf 24 -preset fast -x265-params log-level=error -tag:v hvc1 -movflags +use_metadata_tags" "$V9_FF"
+verifica "ffmpeg: con -progress, senza -fs"              bash -c 'grep -q -- "-progress" "$1" && ! grep -q -- " -fs " "$1"' _ "$V9_FF"
+# Ripresa: né riscaricato né ricompresso, solo caricato e segnato.
+"${RV9[@]}" ricomprimi > "$T/v9-ripresa.txt" 2>&1
+verifica "ripresa: finisce bene"                         [ $? -eq 0 ]
+verifica "ripresa: non ricomprime"                       [ "$(wc -l < "$V9_FF")" -eq 2 ]
+verifica "ripresa: non riscarica"                        [ "$(grep -c "^copyto $P9/Automatic Upload/Xiaomi 25080RABDG/DCIM/Camera/20260301_195506_293.mp4 " "$V9_LOG")" -eq 1 ]
+verifica "ripresa: lo dice"                              contiene "$T/v9-ripresa.txt" "già ricompresso in un giro di prima"
+for id in $ID1 $ID2; do
+    f="$LT9/video-grandi-dal-pc/$id.mp4"
+    verifica "giro: $id consegnato al server"            [ "$(campo9 $id stato)" = RICOMPRESSO_PC ]
+    verifica "giro: $id in LifetimeCloud, dal PC"        c_e "$f"
+    verifica "giro: $id SHA-256 di quel file"            [ "$(campo9 $id hash)" = "$(sha256sum < "$f" | cut -c1-64)" ]
+    verifica "giro: $id dimensione di quel file"         [ "$(campo9 $id dimensioneRicompresso)" = "$(stat -c %s "$f")" ]
+    verifica "giro: $id CRF 24"                          [ "$(campo9 $id crf)" = 24 ]
+    verifica "giro: $id HEVC"                            [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = hevc ]
+    verifica "giro: $id riga della pagina"               grep -q "ricompresso, .* → " <<< "$(campo9 $id sulPc)"
+    verifica "giro: $id niente lasciato sul PC"          non_c_e "$L9/$id"
+done
+verifica "giro: stessa durata"                           awk -v a="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$LT9/video-grandi-dal-pc/$ID1.mp4")" 'BEGIN { exit !(a > 3.5 && a < 4.5) }'
+verifica "giro: stessa data di ripresa"                  [ "$(ffprobe -v error -show_entries format_tags=creation_time -of csv=p=0 "$LT9/video-grandi-dal-pc/$ID1.mp4")" = 2026-03-01T18:55:06.000000Z ]
+verifica "giro: più piccolo"                             [ "$(stat -c %s "$LT9/video-grandi-dal-pc/$ID1.mp4")" -lt "$D1" ]
+verifica "giro: niente nella cartella automatica"        [ -z "$(ls -A "$LT9/telefono")" ]
+verifica "giro: fatto ed errore non toccati"             [ "$(campo9 650000000000000000000003 stato)/$(campo9 650000000000000000000004 stato)" = FATTO/ERRORE ]
+verifica "registro: due fatti"                           [ "$(grep -c $'\tfatto\t' "$L9/registro.tsv")" -eq 2 ]
+"${RV9[@]}" stato > "$T/v9-stato.txt" 2>&1
+verifica "stato: finito"                                 contiene "$T/v9-stato.txt" "Non sta girando."
+verifica "stato: il registro"                            contiene "$T/v9-stato.txt" "20260301_182645_998.mp4"
+# Rilancio: niente da fare, niente cambiato.
+prima_db9="$(cat "$DB9")"
+"${RV9[@]}" ricomprimi > "$T/v9-ancora.txt" 2>&1
+verifica "rilancio: niente da fare"                      contiene "$T/v9-ancora.txt" "Da fare: niente"
+verifica "rilancio: DB com'era"                          [ "$prima_db9" = "$(cat "$DB9")" ]
+verifica "rilancio: nessuna ricompressione"              [ "$(wc -l < "$V9_FF")" -eq 2 ]
+
+# Durata diversa: errore vero, niente caricato, sul server ERRORE col motivo (si rifà con Riprova).
+rm -rf "$LT9/video-grandi-dal-pc"; coda9 solo
+CORTO=si "${RV9[@]}" ricomprimi > "$T/v9-corto.txt" 2>&1
+verifica "durata: esce con errore"                       [ $? -ne 0 ]
+verifica "durata: in errore sul server"                  [ "$(campo9 $ID1 stato)" = ERRORE ]
+verifica "durata: col motivo"                            grep -q "sul PC: la durata del ricompresso" <<< "$(campo9 $ID1 messaggio)"
+verifica "durata: niente caricato"                       non_c_e "$LT9/video-grandi-dal-pc/$ID1.mp4"
+verifica "durata: nel registro"                          [ "$(grep -c $'\terrore\t' "$L9/registro.tsv")" -eq 1 ]
+rm -rf "${L9:?}/$ID1"
+
+# 413 di LifetimeCloud: il ricompresso col CRF 24 è rifiutato, si rifà col 28 sotto quello rifiutato.
+coda9 solo
+TIENI=si CRF_MASSIMO=24 "${RV9[@]}" ricomprimi > /dev/null 2>&1
+d24="$(stat -c %s "$L9/$ID1/ricompresso.mp4" 2>/dev/null || echo 0)"
+rm -rf "${L9:?}/$ID1" "$LT9/video-grandi-dal-pc"; coda9 solo
+RIFIUTA_OLTRE=$((d24 - 1)) "${RV9[@]}" ricomprimi > "$T/v9-413.txt" 2>&1
+verifica "413: finisce bene"                             [ $? -eq 0 ]
+verifica "413: lo dice"                                  contiene "$T/v9-413.txt" "LifetimeCloud lo rifiuta: riprovo più compresso"
+verifica "413: col CRF 28"                               [ "$(campo9 $ID1 crf)" = 28 ]
+verifica "413: sotto quello rifiutato"                   [ "$(campo9 $ID1 dimensioneRicompresso)" -lt "$d24" ]
+verifica "413: consegnato"                               [ "$(campo9 $ID1 stato)" = RICOMPRESSO_PC ]
+
+# In sottofondo con nohup, seguito con stato.
+rm -rf "$LT9/video-grandi-dal-pc"; coda9 solo
+"${RV9[@]}" avvia > "$T/v9-avvia.txt" 2>&1
+for ((i = 0; i < 600; i++)); do [ -f "$L9/pid" ] && kill -0 "$(cat "$L9/pid")" 2>/dev/null || break; sleep 0.1; done
+"${RV9[@]}" stato > "$T/v9-stato2.txt" 2>&1
+verifica "sottofondo: partito"                           contiene "$T/v9-avvia.txt" "Partito in sottofondo."
+verifica "sottofondo: finito"                            contiene "$T/v9-stato2.txt" "Finito "
+verifica "sottofondo: consegnato"                        [ "$(campo9 $ID1 stato)" = RICOMPRESSO_PC ]
+verifica "sottofondo: il registro"                       contiene "$L9/ricomprimi.log" "Da fare: 1 video"
+
+# Su pCloud niente cancellato né spostato, mai: stessi file, stesse date, stesso contenuto.
+verifica "pCloud com'era"                                [ "$prima_p9" = "$(sha_p9)" ]
+verifica "pCloud: solo letture"                          bash -c '! grep -E "^(delete|deletefile|move|moveto|purge|rmdir|rmdirs|sync) .*$1" "$2"' _ "$P9" "$V9_LOG"
+if [ "$KO" -gt 0 ]; then
+    for f in elenco spazio primo ripresa corto 413 stato2; do echo "--- v9-$f"; cat "$T/v9-$f.txt"; done
+    echo "--- db"; cat "$DB9"
+fi
+fi
 
 echo
 if [ "$KO" -gt 0 ]; then
