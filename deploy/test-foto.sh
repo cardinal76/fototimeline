@@ -25,7 +25,9 @@
 #    foto-da-pcloud.sh, con un finto export del DB: sciolte e negli zip trovate, mai raccolte
 #    (nuove o no), raccolte non indicizzate, zip rovinato, ESCLUDI, "Da controllare", file di
 #    LifetimeCloud senza scheda e schede senza file, il video ricompresso, il "probabile";
-#    tutto in sola lettura, con e senza SHA-256 dal server; fermato a metà e ripreso.
+#    tutto in sola lettura, con e senza SHA-256 dal server; fermato a metà e ripreso; file (e una
+#    cartella) spariti da pCloud dopo l'elenco: "sparito", il giro va avanti, mentre un errore di
+#    rete ferma il passo 3.
 # 8. ordina-da-controllare.sh su un finto "Da controllare": foto nuove (su pCloud e LifetimeCloud)
 #    e già note, documenti per mese, doppioni tra zip, nomi uguali, __MACOSX, un non letto, uno
 #    zip rovinato a metà e uno irrecuperabile; senza ORDINA niente, il rilancio non rifà niente,
@@ -641,6 +643,10 @@ if [ "$1" = hashsum ] && [ -n "${SENZA_SHA:-}" ] && [[ " $* " != *" --download "
     exit "${PIPESTATUS[0]}"
 fi
 [ "$1" = copyto ] && [ -n "${LENTO:-}" ] && sleep "$LENTO"
+# ROTTO: un pezzo di percorso per cui copyto fallisce come una rete che cade (il file c'è).
+if [ "$1" = copyto ] && [ -n "${ROTTO:-}" ] && [[ "$2" == *"$ROTTO"* ]]; then
+    echo "ERROR : $2: Failed to copy: read tcp: connection reset by peer" >&2; exit 1
+fi
 exec rclone "$@"
 FINE
 chmod +x "$T/bin/rclone-conf"
@@ -817,6 +823,66 @@ verifica "ripresa: niente zip contato due volte"         [ "$(grep -c '^F' "$l/c
 verifica "ripresa: stesso rapporto del giro intero"      [ "$(LC_ALL=C sort "$l/confronto-rapporto.tsv" | sed "s|$l|L|g")" = "$(LC_ALL=C sort "$HOME/conf-intero/confronto-rapporto.tsv" | sed "s|$HOME/conf-intero|L|g")" ]
 verifica "ripresa: 24 foto negli zip"                    contiene "$l/confronto-riepilogo.txt" "24 foto e video (0 sciolti, 24 in 8 zip)"
 [ "$KO" -gt 0 ] && { cat "$T/conf-r1.txt" "$l/confronto.log" "$T/conf-dove-r.txt"; }
+
+# Fantasmi di pCloud: file nell'elenco del passo 1 che poi non si scaricano perché pCloud dice
+# che non ci sono (directory not found), loro o la cartella che li contiene. Qui si tolgono fra
+# la stima e i passi 2 e 3: diventano "sparito", il giro va avanti ed esce con 0. Un errore vero
+# (la rete che cade a metà di uno zip) invece ferma il passo 3, come prima.
+r="$T/conf-fant" l="$HOME/conf-fant" dest="$T/conf-fant-lt"
+mkdir -p "$T/z"
+veloce "$T/z/IMG_1.jpg" "$T/vuota.jpg" "fant buona 1" '2019-01-01 10:00'
+mkdir -p "$r/Zip" "$r/Cartella sparita" "$r/Fantasmi"
+(cd "$T/z" && zip -q -X "$r/Zip/buono.zip" IMG_1.jpg)
+rm -rf "$T/z"; mkdir -p "$T/z"
+veloce "$T/z/IMG_2.jpg" "$T/vuota.jpg" "fant sparita 2" '2019-01-02 10:00'
+(cd "$T/z" && zip -q -X "$r/Fantasmi/favicon_package.zip" IMG_2.jpg)
+cp "$r/Fantasmi/favicon_package.zip" "$r/Cartella sparita/foto-pianoterra.zip"
+cp "$r/Fantasmi/favicon_package.zip" "$r/Zip/rete.zip"
+rm -rf "$T/z"
+veloce "$r/Foto/c.jpg" "$T/vuota.jpg" "fant sciolta c" '2019-01-03 10:00'
+veloce "$r/Foto/via.jpg" "$T/vuota.jpg" "fant sciolta via" '2019-01-04 10:00'
+mkdir -p "$dest/2019/01/01" "$dest/2019/01/02" "$dest/2019/01/03"
+unzip -q -o "$r/Zip/buono.zip" -d "$dest/2019/01/01"
+unzip -q -o "$r/Zip/rete.zip" -d "$dest/2019/01/02"
+cp -p "$r/Foto/c.jpg" "$dest/2019/01/03/c.jpg"
+finto_db "$dest" "$T/conf-fant-db.tsv"
+CF=(env RCLONE="$T/bin/rclone-conf" RADICE="$r" PCLOUD="$r" DESTINAZIONE="$dest" FT_DB_FILE="$T/conf-fant-db.tsv" CAMPIONE=0 ZIP_PARALLELI=2 LAVORO="$l" "$CT")
+"${CF[@]}" stima > "$T/conf-f1.txt" 2>&1
+# Dopo l'elenco spariscono: uno zip, una cartella intera con il suo zip, uno sciolto.
+rm -f "$r/Fantasmi/favicon_package.zip" "$r/Foto/via.jpg"
+rm -rf "$r/Cartella sparita"
+: > "$CONF_LOG"
+ROTTO="rete.zip" "${CF[@]}" da 2 >> "$T/conf-f1.txt" 2>&1
+aspetta_fine "$l"
+verifica "fantasmi: errore vero di rete ferma il passo 3"  grep -q '^\[3/5\] zip: ERRORE' "$l/confronto.passo"
+verifica "fantasmi: e dice di rilanciare da 3"            grep -q 'rilancia .*da 3' "$l/confronto.log"
+verifica "fantasmi: lo zip con l'errore vero non è sparito" bash -c '! grep -q "rete.zip" "$1"' _ "$l/confronto/assenti.tsv"
+verifica "fantasmi: gli altri due zip segnati"           [ "$(awk -F'\t' '$1 == "zip"' "$l/confronto/assenti.tsv" | wc -l)" -eq 2 ]
+verifica "fantasmi: lo sciolto segnato al passo 2"       [ "$(awk -F'\t' '$1 == "sciolto" && $4 == "Foto/via.jpg"' "$l/confronto/assenti.tsv" | wc -l)" -eq 1 ]
+verifica "fantasmi: il passo 2 lo dice"                  contiene "$l/confronto.log" "Foto/via.jpg: non più su pCloud (era nell'elenco)"
+verifica "fantasmi: confermato con un lsf del percorso"  grep -q '^lsf --files-only .*/Cartella sparita/foto-pianoterra.zip$' "$CONF_LOG"
+# La rete torna: da 3 riprova una volta i due spariti, rifà rete.zip e arriva in fondo con 0.
+: > "$CONF_LOG"
+"${CF[@]}" da 3 >> "$T/conf-f1.txt" 2>&1
+aspetta_fine "$l"
+RF="$l/confronto-rapporto.tsv"
+verifica "fantasmi: il giro arriva in fondo"             grep -q "^FATTO .*: tutto trovato o mancante per un motivo noto (3 non più su pCloud, erano nell'elenco)" "$l/confronto.passo"
+verifica "fantasmi: rapporto esce con 0"                 "${CF[@]}" rapporto
+verifica "fantasmi: zip sparito nel rapporto"            [ "$(awk -F'\t' -v p="$r/Fantasmi/favicon_package.zip" '$6 == p { print $2 "|" $3 }' "$RF")" = "sparito|non-piu-su-pcloud" ]
+verifica "fantasmi: zip con la cartella sparita"          [ "$(awk -F'\t' -v p="$r/Cartella sparita/foto-pianoterra.zip" '$6 == p { print $2 "|" $3 }' "$RF")" = "sparito|non-piu-su-pcloud" ]
+verifica "fantasmi: sciolto sparito nel rapporto"         [ "$(awk -F'\t' -v p="$r/Foto/via.jpg" '$6 == p { print $2 "|" $3 }' "$RF")" = "sparito|non-piu-su-pcloud" ]
+verifica "fantasmi: gli altri trovati"                    [ "$(awk -F'\t' '$2 == "trovato"' "$RF" | wc -l)" -eq 3 ]
+verifica "fantasmi: riepilogo li conta a parte"           contiene "$l/confronto-riepilogo.txt" "Non più su pCloud: 3 (erano nell'elenco"
+verifica "fantasmi: riepilogo dice come vederli"         contiene "$l/confronto-riepilogo.txt" "\$2 == \"sparito\"' $RF | cut -f6"
+verifica "fantasmi: RISULTATO con il conto"               contiene "$l/confronto-riepilogo.txt" "o manca per un motivo noto (3 non più su pCloud, erano nell'elenco)."
+verifica "fantasmi: riprovati una volta sola"             [ "$(grep -c '^copyto .*\(favicon_package\|foto-pianoterra\)' "$CONF_LOG")" -eq 2 ]
+verifica "fantasmi: buono.zip non riscaricato"           bash -c '! grep -q "^copyto .*buono.zip" "$1"' _ "$CONF_LOG"
+# Il comando del riepilogo funziona davvero.
+verifica "fantasmi: il comando dà i tre percorsi"        [ "$(awk -F'\t' '$2 == "sparito"' "$RF" | cut -f6 | wc -l)" -eq 3 ]
+# Rilanciato di nuovo con l'elenco vecchio: si riprovano ancora una volta e restano spariti.
+"${CF[@]}" stima > "$T/conf-f2.txt" 2>&1
+verifica "fantasmi: la nuova stima rifà l'elenco"         bash -c '! grep -q "Fantasmi/" "$1"' _ "$l/confronto/pcloud.tsv"
+[ "$KO" -gt 0 ] && { cat "$T/conf-f1.txt" "$l/confronto.log" "$l/confronto-riepilogo.txt" "$CONF_LOG"; }
 
 # --- 8. ordina-da-controllare: quello che è in "Da controllare", riordinato -------------
 echo "8. ordina-da-controllare"

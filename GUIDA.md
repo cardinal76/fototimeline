@@ -230,9 +230,18 @@ awk -F'\t' '$2 == "mancante" || $2 == "probabile"' ~/foto-da-pcloud/confronto-ra
 | `ricompresso-h265` | i due video oltre i 20 GB, ricompressi prima di carica | niente: è normale che l'hash sia diverso |
 | `stesso-nome-e-data` (probabile) | stesso nome e giorno di una foto in FotoTimeline, contenuto diverso | guardarle tutte e due |
 | `mai-visto`, `cambiato-dopo-raccogli`, `hash-non-letto` | da capire | guardare il file; `hash-non-letto`: `da 2` |
+| `non-piu-su-pcloud` (esito `sparito`) | era nell'elenco di pCloud, ma pCloud dice che non c'è (lui o la sua cartella): un "fantasma" | guardarlo dal sito di pCloud; se non c'è neanche lì, niente |
 
 Se il riepilogo finisce con "RISULTATO: tutto quello che c'è su pCloud è in FotoTimeline, o manca
 per un motivo noto" (e lo script esce con 0), la prova è fatta.
+
+pCloud a volte mette nell'elenco file che poi non dà: `rclone copyto` e `rclone lsf` di quel percorso
+rispondono `directory not found`, spesso anche per la cartella che li contiene. Lo script li segna
+come **non più su pCloud (erano nell'elenco)** e va avanti senza fermarsi; il riepilogo li conta a
+parte (`Non più su pCloud: N`), dice il comando per vederli e la riga RISULTATO aggiunge "(N non più
+su pCloud, erano nell'elenco)". Sono gli stessi che `metti-da-parte` dice "non c'è più su pCloud".
+Un rilancio li riprova una volta. Se invece si ferma al passo 3 con "rilancia da 3" è un errore vero
+(rete, spazio): sistemato, `./deploy/confronta-tutto.sh da 3`.
 
 ---
 
