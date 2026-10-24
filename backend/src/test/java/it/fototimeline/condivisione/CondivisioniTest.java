@@ -113,7 +113,10 @@ class CondivisioniTest {
     void prepara() throws IOException {
         ip = "10.0.0." + (++ultimoIp);
         repository.deleteAll();
-        fotoRepository.findAll().forEach(f -> fotoService.elimina(f.getId()));
+        fotoRepository.findAll().forEach(f -> {
+            fotoService.elimina(f.getId());
+            fotoService.eliminaPerSempre(f.getId());
+        });
         conExif = fotoService.importa("IMG_0001.JPG", getClass().getResourceAsStream("/con-exif.jpg").readAllBytes(),
                 Instant.parse("2025-01-01T00:00:00Z"), "festa").foto();
         rossa = fotoService.importa("rossa.jpg", jpeg(Color.RED), Instant.parse("2024-05-17T10:00:00Z"), "festa").foto();

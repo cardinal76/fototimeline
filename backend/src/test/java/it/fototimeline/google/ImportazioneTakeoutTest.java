@@ -104,7 +104,10 @@ class ImportazioneTakeoutTest {
         mongo.remove(new Query(), ZipTakeout.class);
         mongo.remove(Query.query(org.springframework.data.mongodb.core.query.Criteria.where("_id")
                 .is(ImpostazioniTakeout.ID)), ImpostazioniTakeout.class);
-        repository.findAll().forEach(f -> fotoService.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            fotoService.elimina(f.getId());
+            fotoService.eliminaPerSempre(f.getId());
+        });
         cartella = lavoro.resolve("takeout");
         drive = Files.createDirectories(lavoro.resolve("drive"));
         orologio = new Orologio(Instant.parse("2026-05-01T10:00:00Z"));

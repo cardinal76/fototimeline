@@ -78,7 +78,10 @@ class LavoriImportazioneTest {
     @BeforeEach
     void svuota() throws Exception {
         aspettaFine();
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         memoria.dimenticaTutti();
         Path telefono = disco.resolve("telefono");
         if (Files.isDirectory(telefono)) {

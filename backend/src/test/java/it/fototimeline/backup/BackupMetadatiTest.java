@@ -56,7 +56,10 @@ class BackupMetadatiTest {
 
     @BeforeEach
     void svuota() throws IOException {
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         for (var c : backup.elenco()) {
             Files.delete(backup.cartella().resolve(c.nome()));
         }

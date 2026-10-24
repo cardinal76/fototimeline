@@ -89,7 +89,10 @@ class SceltaGoogleFotoTest {
     @BeforeEach
     void prepara() {
         mongo.remove(new Query(), TokenGoogle.class);
-        repository.findAll().forEach(f -> fotoService.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            fotoService.elimina(f.getId());
+            fotoService.eliminaPerSempre(f.getId());
+        });
         var builder = RestClient.builder();
         google = MockRestServiceServer.bindTo(builder).build();
         orologio = new Orologio(Instant.parse("2026-05-01T10:00:00Z"));

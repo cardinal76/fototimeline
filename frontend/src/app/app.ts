@@ -36,6 +36,7 @@ import {
 import { daQuanto, durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
+import { Cestino } from './cestino';
 import { QuasiUguali } from './quasi-uguali';
 import { inAttesa } from './condivisi-in-attesa';
 import { RiceviCondivisi } from './ricevi-condivisi';
@@ -52,7 +53,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
+  imports: [Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -91,6 +92,7 @@ export class App {
   protected moduloTelefono: ModificaTelefono = nuovoTelefono();
   private telefoniTimer?: ReturnType<typeof setTimeout>;
   protected readonly dialogoQuasiUguali = signal(false);
+  protected readonly dialogoCestino = signal(false);
   /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
   protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
   protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
@@ -350,6 +352,8 @@ export class App {
       this.chiudiTelefoni();
     } else if (this.dialogoQuasiUguali()) {
       this.dialogoQuasiUguali.set(false);
+    } else if (this.dialogoCestino()) {
+      this.dialogoCestino.set(false);
     } else if (this.dialogoSalute()) {
       this.chiudiSalute();
     } else if (this.selezione()) {
@@ -455,7 +459,7 @@ export class App {
       const r = prompt(`Album per ${n} foto (vuoto per toglierle dall'album)`, this.galleria.filtro().album ?? '');
       if (r === null) return;
       valore = r;
-    } else if (op === 'ELIMINA' && !confirm(`Eliminare ${n} foto? I file vengono cancellati dal disco.`)) {
+    } else if (op === 'ELIMINA' && !confirm(`Eliminare ${n} foto? Vanno nel cestino: si ripristinano da Strumenti → Cestino.`)) {
       return;
     }
     try {

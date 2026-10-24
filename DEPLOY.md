@@ -575,7 +575,9 @@ Come entrano le foto:
    arrivato (prende solo le foto senza indice). Se una miniatura manca la rifà
    dall'originale, e lì serve il cloud montato: con il cloud smontato quelle
    foto restano tra gli errori e le riprende il giro dopo;
-3. una foto eliminata si toglie anche dall'indice.
+3. una foto eliminata per sempre si toglie anche dall'indice; nel cestino il
+   suo vettore resta (la ricerca non la mostra), così ripristinata torna
+   subito cercabile.
 
 Se l'indice di visione va perso (volume cancellato) o si cambia modello,
 **Indicizza contenuto** con tutte le foto già indicizzate chiede se rifarlo
@@ -970,6 +972,51 @@ Un file fallito per la memoria non resta tra i "già falliti" della cartella
 automatica: un errore che parla di memoria (`OutOfMemoryError`, `Java heap
 space`) non è un errore del file, e un ricordo vecchio con quel motivo si
 rilegge da solo al giro dopo. Per gli altri c'è sempre **Riprova tutti**.
+
+## Cestino
+
+"Elimina" (visore, selezione, *Togli le altre* delle quasi uguali) non
+cancella niente: la foto va nel **cestino** (Strumenti → *Cestino*). Lì si
+**ripristina** com'era, o si **elimina per sempre**, file compreso; *Svuota
+cestino* le elimina tutte. Dopo `FOTOTIMELINE_CESTINO_GIORNI` giorni (30; `0`
+= mai) se ne va da sola: ogni ora l'app guarda se ce n'è qualcuna scaduta.
+
+```bash
+# nel .env di server2, poi il rilascio
+FOTOTIMELINE_CESTINO_GIORNI=30
+```
+
+- **Dove resta il file**: dov'era, in `FotoTimeline/AAAA/MM/GG/`. Cambia solo
+  la scheda in MongoDB (`eliminataIl`, la data in cui è finita nel cestino):
+  niente spostamenti su WebDAV, né per eliminare né per ripristinare, e
+  miniatura, vista degli HEIC e video compatibile (`.compatibili/<id>.mp4`)
+  restano anche loro fino all'eliminazione definitiva.
+- **Dove non si vede**: timeline e colonna dei mesi, ricerca (anche per
+  contenuto), mappa, "Accadde oggi" (anche su Telegram), tag, album, luoghi,
+  "Caricate da", quasi uguali, link condivisi (le foto nel cestino rispondono
+  404; ripristinate tornano nel link), numeri della pagina *Salute* (che dice
+  quante sono nel cestino). "Calcola luoghi", "Calcola impronte", "Indicizza
+  contenuto" e "Converti video" le saltano (un video in coda riparte quando
+  lo si ripristina).
+- **Reimportarla** (dal browser, dal telefono, dalla cartella automatica, da
+  Google): lo stesso contenuto (SHA-256) non rientra come nuovo e non si
+  ripristina da solo: risulta "già presente", col messaggio "Nel cestino".
+  Con *sposta* (cartella automatica) la copia arrivata si toglie come ogni
+  doppione: il contenuto è ancora nell'archivio. Per riaverla, *Ripristina*.
+- **Indicizza archivio** la salta: il suo percorso ha già una scheda, e una
+  copia identica messa altrove è "già presente" come sopra.
+- **Backup dei metadati**: le schede nel cestino ci sono, con `eliminataIl`.
+  Apposta: il file è ancora nel cloud, e un ripristino senza la scheda lo
+  farebbe riprendere da *Indicizza archivio* come foto nuova.
+- **Cloud smontato**: il cestino si guarda, ma eliminare, ripristinare ed
+  eliminare per sempre rispondono "archivio smontato", come prima
+  l'eliminazione; la pulizia automatica aspetta il montaggio (entro un'ora).
+- **Eliminare per sempre** cancella prima i file e poi la scheda: se il cloud
+  non risponde la foto resta nel cestino e la pulizia ci riprova, invece di
+  lasciare un file senza scheda che *Indicizza archivio* riprenderebbe.
+- **Permessi**: quelli dell'eliminazione, cioè chiunque usi l'app (non serve
+  `fototimeline-admin`). Le preferite non si tolgono dalle quasi uguali, come
+  prima.
 
 ## Backup
 

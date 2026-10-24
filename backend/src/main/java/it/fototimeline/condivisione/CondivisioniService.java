@@ -132,7 +132,9 @@ public class CondivisioniService {
             c.setDescrizioneOrigine(dal.equals(al) ? dal.toString() : dal + " – " + al);
             criteri = Criteria.where("scattataIl").gte(dal.atStartOfDay()).lt(al.plusDays(1).atStartOfDay());
         }
-        Query query = new Query(criteri).with(Sort.by(Sort.Order.asc("scattataIl"), Sort.Order.asc("_id")));
+        // Mai le foto nel cestino, nemmeno scelte per id.
+        Query query = new Query(criteri).addCriteria(FotoService.nonNelCestino())
+                .with(Sort.by(Sort.Order.asc("scattataIl"), Sort.Order.asc("_id")));
         query.fields().include("_id");
         List<String> foto = mongo.find(query, Foto.class).stream().map(Foto::getId).toList();
         if (foto.isEmpty()) {
@@ -248,9 +250,10 @@ public class CondivisioniService {
         return new Galleria(c.getTitolo(), c.getScadeIl(), c.isDownload(), archivio.disponibile(), foto);
     }
 
-    /** Le foto ancora esistenti della condivisione, nel suo ordine. */
+    /** Le foto ancora esistenti della condivisione, nel suo ordine: quelle nel cestino no (tornano se ripristinate). */
     public List<Foto> foto(Condivisione c) {
-        Map<String, Foto> perId = mongo.find(Query.query(Criteria.where("id").in(c.getFoto())), Foto.class).stream()
+        Map<String, Foto> perId = mongo.find(Query.query(Criteria.where("id").in(c.getFoto())
+                        .and(FotoService.CESTINO).is(null)), Foto.class).stream()
                 .collect(Collectors.toMap(Foto::getId, Function.identity()));
         return c.getFoto().stream().map(perId::get).filter(f -> f != null).toList();
     }
@@ -260,7 +263,8 @@ public class CondivisioniService {
         if (!c.getFoto().contains(id)) {
             throw sconosciuto();
         }
-        return fotoService.trova(id).orElseThrow(CondivisioniService::sconosciuto);
+        // Nel cestino vale come eliminata: 404.
+        return fotoService.trova(id).filter(f -> !f.nelCestino()).orElseThrow(CondivisioniService::sconosciuto);
     }
 
     public Path miniatura(Foto foto) {

@@ -98,6 +98,8 @@ public class ConfigurazioneSicurezza {
             // "Scegli da Google Foto" (/api/google/**, callback compreso) è per chiunque sia entrato.
             a.requestMatchers("/api/google/takeout", "/api/google/takeout/**").hasAuthority("ROLE_" + login.ruoloAdmin());
             // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
+            // Il cestino (/api/cestino/**) come l'eliminazione (DELETE /api/foto/{id}) e le quasi uguali:
+            // basta poter usare l'app, qui sotto.
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {

@@ -90,7 +90,10 @@ class IndiceContenutoTest {
     @BeforeEach
     void svuota() {
         aspettaFine();
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         mongo.remove(Query.query(Criteria.where("_id").is(IndiceContenuto.ID)), "impostazioni");
         // Visione prende tutto quello che riceve.
         when(visione.mettiBlocco(anyMap())).thenAnswer(i -> new EsitoBlocco(
@@ -229,11 +232,17 @@ class IndiceContenutoTest {
     }
 
     @Test
-    void lEliminazioneTogliePureDallIndice() throws IOException {
+    void lEliminazioneDefinitivaTogliePureDallIndice() throws IOException {
         Foto foto = importa("via.png", Color.MAGENTA);
         verify(visione, timeout(5000)).metti(eq(foto.getId()), any());
 
+        // Nel cestino il vettore resta (ripristinata torna cercabile), ma la ricerca non la trova.
         service.elimina(foto.getId());
+        when(visione.cerca(any(), anyInt(), anyDouble())).thenReturn(List.of(new Somiglianza(foto.getId(), 0.3)));
+        assertThat(indice.cerca("viola", NESSUNO, 0, 10).foto()).isEmpty();
+        verify(visione, never()).togli(foto.getId());
+
+        service.eliminaPerSempre(foto.getId());
 
         verify(visione, timeout(5000)).togli(foto.getId());
     }

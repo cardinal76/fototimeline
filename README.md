@@ -76,7 +76,7 @@ Il server: [DEPLOY.md](DEPLOY.md).
   scorrere, `P` preferita, `I` pannello dei dettagli (si ricorda se lo si
   lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
   chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
-  si scarica l'originale o si elimina.
+  si scarica l'originale o si elimina (va nel cestino).
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
 - **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,
@@ -123,12 +123,20 @@ Il server: [DEPLOY.md](DEPLOY.md).
   ricompressa da WhatsApp. Un gruppo alla volta con le miniature affiancate e,
   sotto, risoluzione, peso, data e fotocamera; suggerisce quale tenere (la
   risoluzione più alta, poi il file più grande, poi chi ha l'EXIF, poi la più
-  vecchia; le preferite restano sempre). "Togli le altre" elimina le scartate,
+  vecchia; le preferite restano sempre). "Togli le altre" manda le scartate nel cestino,
   "Non sono doppioni" non le ripropone più. Il confronto usa un'impronta
   percettiva (pHash a 64 bit) calcolata dalla miniatura all'importazione; per le
   foto già in archivio c'è **Calcola impronte** (admin), in sottofondo.
+- **Cestino** (Strumenti → *Cestino*): le foto eliminate, da qualunque punto,
+  non si cancellano subito. Spariscono da timeline, ricerca, mappa, album,
+  ricordi, link condivisi e conteggi, ma scheda e file restano per 30 giorni
+  (`FOTOTIMELINE_CESTINO_GIORNI`), poi se ne vanno da sole. Dal cestino si
+  ripristinano (una o la selezione) o si eliminano per sempre, file compreso;
+  *Svuota cestino* le elimina tutte. Col cloud smontato si guarda e basta.
+  Ricaricare la stessa foto mentre è nel cestino non la fa rientrare: risulta
+  "già presente, nel cestino" e si ripristina da lì. Dettagli in DEPLOY.md, "Cestino".
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
-  tag, sposta in un album, segna preferite, elimina; "seleziona giorno" per
+  tag, sposta in un album, segna preferite, elimina (nel cestino); "seleziona giorno" per
   prendere un giorno intero.
 - **Condividere con un link** (chi non ha un account, per esempio gli amici
   dopo una festa): dalla selezione (*Condividi…*) o da un album aperto
@@ -220,6 +228,7 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_VIDEO_THREAD` | `2`                                   | Thread di ffmpeg per una conversione     |
 | `FOTOTIMELINE_VIDEO_DESTINAZIONE` | `<archivio>/.compatibili`       | Dove vanno i convertiti                  |
 | `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
+| `FOTOTIMELINE_CESTINO_GIORNI` | `30`                                | Giorni nel cestino prima che una foto eliminata se ne vada per sempre, file compreso; `0` = mai |
 | `FOTOTIMELINE_TELEGRAM_TOKEN`, `FOTOTIMELINE_TELEGRAM_CHAT` | (vuoti) | Avvisi su Telegram della pagina "Salute"; vuoti = spenti |
 | `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
 | `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
@@ -278,7 +287,11 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | POST   | `/api/archivio/video/converti` | "Converti video": mette in coda i video già in archivio che ne hanno bisogno, 202 (admin) |
 | POST   | `/api/archivio/video/annulla`  | Ferma quello in corso e svuota la coda (admin)          |
 | GET    | `/api/quasi-uguali`          | Gruppi di foto quasi uguali (`pagina`, `dimensione`), dal più numeroso, con la `suggerita` da tenere |
-| POST   | `/api/quasi-uguali/risolvi`  | `{ tieni: [id], togli: [id] }`: elimina le `togli` come `DELETE /api/foto/{id}` (503 col cloud smontato, 400 per una preferita) |
+| POST   | `/api/quasi-uguali/risolvi`  | `{ tieni: [id], togli: [id] }`: manda le `togli` nel cestino come `DELETE /api/foto/{id}` (503 col cloud smontato, 400 per una preferita) |
+| GET    | `/api/cestino`               | Le foto nel cestino, dall'ultima eliminata (`pagina`, `dimensione`): `{ foto: [{ id, miniatura, nomeOriginale, video, eliminataIl, siEliminaIl, giorniRimasti }], totale, giorni }` |
+| POST   | `/api/cestino/ripristina`    | `{ ids }`: tornano nell'archivio com'erano; `{ fatte }` (503 col cloud smontato) |
+| POST   | `/api/cestino/elimina`       | `{ ids }`: eliminate per sempre, file compreso, solo quelle nel cestino; `{ fatte }` (503 col cloud smontato) |
+| POST   | `/api/cestino/svuota`        | Tutte le foto del cestino per sempre; `{ fatte }` (503 col cloud smontato) |
 | POST   | `/api/quasi-uguali/ignora`   | `{ ids: [id] }`: "non sono doppioni", il gruppo non ricompare |
 | GET    | `/api/quasi-uguali/calcola`  | "Calcola impronte": stato, avanzamento e foto ancora senza impronta |
 | POST   | `/api/quasi-uguali/calcola`  | Lo avvia in sottofondo: 202, 409 se già in corso (ruolo `fototimeline-admin`); `/calcola/annulla` lo ferma |
@@ -291,8 +304,8 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | POST   | `/ricevi-condivisi`          | Action dello `share_target`: la prende il service worker; se arriva al server, 303 verso `/?condivisi=senza-app` senza leggere i file |
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
-| DELETE | `/api/foto/{id}`             | Elimina foto e file                                        |
-| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto                  |
+| DELETE | `/api/foto/{id}`             | Manda la foto nel cestino (204; 404 se non c'è o è già lì; 503 col cloud smontato) |
+| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto (`ELIMINA` = nel cestino; le altre non toccano le foto nel cestino) |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
 | GET    | `/api/foto/{id}/file`        | Il file, con `Range` per i video: la versione compatibile se c'è, altrimenti l'originale; `?originale=true` o `?scarica=true` (allegato) per l'originale |
 | GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
@@ -348,7 +361,8 @@ Link di condivisione (dietro login come il resto):
   salvato in chiaro in `condivisioni`, perché chi ha creato il link possa
   ricopiarlo: chi legge il database può aprire i link.
 - **Le foto sono fissate alla creazione**: un album che cresce dopo non
-  allarga il link; le foto eliminate spariscono. Al massimo 2000 per link.
+  allarga il link; le foto eliminate spariscono (quelle nel cestino tornano
+  se ripristinate). Al massimo 2000 per link.
 - **Una foto che non è nel link risponde 404**, come un token sconosciuto.
 - **Chi ha il link vede** titolo del link, data di scatto, titolo della foto,
   dimensioni e durata dei video. **Non vede** nome del file, percorso nel

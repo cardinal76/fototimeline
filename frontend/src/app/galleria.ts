@@ -33,6 +33,8 @@ export interface StatoCaricamento {
   fatti: number;
   caricate: number;
   duplicate: number;
+  /** Delle duplicate, quante sono nel cestino: non rientrano, si ripristinano da lì. */
+  nelCestino: number;
   errori: string[];
   /** Avanzamento in byte del gruppo in corso, 0..1. */
   gruppo: number;
@@ -445,7 +447,7 @@ export class Galleria {
     const { modificate } = await firstValueFrom(this.api.multipla(ids, operazione, valore));
     if (operazione === 'ELIMINA') {
       this.togliDallaLista(ids);
-      this.avvisa(`${modificate} foto eliminate`);
+      this.avvisa(`${modificate} foto nel cestino`);
     } else {
       this.avvisa(`${modificate} foto aggiornate`);
       this.ricarica();
@@ -493,7 +495,7 @@ export class Galleria {
       this.avvisa('Nessun file supportato (JPEG, PNG, GIF, BMP, WebP, HEIC, MP4, MOV)');
       return;
     }
-    const stato: StatoCaricamento = { totale: immagini.length, fatti: 0, caricate: 0, duplicate: 0, errori: [], gruppo: 0 };
+    const stato: StatoCaricamento = { totale: immagini.length, fatti: 0, caricate: 0, duplicate: 0, nelCestino: 0, errori: [], gruppo: 0 };
     this.caricamento.set({ ...stato });
     for (let i = 0; i < immagini.length; i += FILE_PER_RICHIESTA) {
       const gruppo = immagini.slice(i, i + FILE_PER_RICHIESTA);
@@ -501,7 +503,10 @@ export class Galleria {
         const esiti = await this.caricaGruppo(gruppo, stato);
         for (const e of esiti) {
           if (e.esito === 'CARICATA') stato.caricate++;
-          else if (e.esito === 'DUPLICATA') stato.duplicate++;
+          else if (e.esito === 'DUPLICATA') {
+            stato.duplicate++;
+            if (e.foto?.eliminataIl) stato.nelCestino++;
+          }
           else stato.errori.push(`${e.nome}: ${e.messaggio ?? 'errore'}`);
         }
       } catch (e) {

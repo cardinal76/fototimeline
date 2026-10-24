@@ -51,7 +51,10 @@ class MediaImportTest {
 
     @BeforeEach
     void svuota() {
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
     }
 
     @Test

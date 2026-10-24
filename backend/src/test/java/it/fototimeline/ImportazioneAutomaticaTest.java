@@ -74,7 +74,10 @@ class ImportazioneAutomaticaTest {
 
     @BeforeEach
     void prepara() throws IOException {
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         memoria.dimenticaTutti();
         telefono = Files.createTempDirectory(disco, "telefono");
     }

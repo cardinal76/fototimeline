@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.luoghi.IndiceLuoghi.Trovato;
+import it.fototimeline.service.FotoService;
 
 /** L'elenco dei luoghi per il filtro e "Calcola luoghi" per le foto che non ce l'hanno. */
 @Service
@@ -63,7 +64,7 @@ public class LuoghiService {
     /** Nazioni, regioni e luoghi con quante foto, i più fotografati prima. */
     public ElencoLuoghi elenco() {
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(where("luogo").ne(null)),
+                Aggregation.match(where("luogo").ne(null).and(FotoService.CESTINO).is(null)),
                 Aggregation.group("codiceNazione", "nazione", "regione", "luogo").count().as("conteggio"));
         Map<String, Map<String, List<VoceLuogo>>> albero = new LinkedHashMap<>();
         Map<String, String> nomiNazioni = new LinkedHashMap<>();
@@ -167,8 +168,9 @@ public class LuoghiService {
         return new Calcolo(fatte, conLuogo);
     }
 
+    /** Le foto col GPS da calcolare; quelle nel cestino no (ripristinate, le prende il giro dopo). */
     private static Criteria daCalcolare(boolean tutte) {
-        Criteria c = where("latitudine").ne(null).and("longitudine").ne(null);
+        Criteria c = where("latitudine").ne(null).and("longitudine").ne(null).and(FotoService.CESTINO).is(null);
         return tutte ? c : c.and("luogoCalcolato").ne(true);
     }
 }

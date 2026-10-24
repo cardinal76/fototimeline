@@ -1,0 +1,107 @@
+<div class="velo" (click)="chiudi.emit()">
+  <section
+    #dialogo
+    class="dialogo"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="titolo-cestino"
+    tabindex="-1"
+    (click)="$event.stopPropagation()"
+  >
+    <header>
+      <h2 id="titolo-cestino">Cestino</h2>
+      @if (totale()) {
+        <span class="tenue">{{ totale() }} foto</span>
+      }
+      <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
+    </header>
+
+    <p class="tenue">
+      Le foto eliminate restano qui, file compreso,
+      @if (giorni()) {
+        per {{ giorni() }} giorni; poi si eliminano per sempre da sole.
+      } @else {
+        finché non le elimini per sempre.
+      }
+      Non compaiono nella timeline, nella ricerca, nella mappa, negli album né nei link condivisi.
+    </p>
+    @if (!disponibile()) {
+      <p class="avviso" role="status">Il cloud è smontato: le foto si vedono, ma ripristinarle o eliminarle aspetta il montaggio.</p>
+    }
+
+    @if (foto().length) {
+      <div class="comandi" role="toolbar" aria-label="Azioni sulle foto scelte">
+        <button type="button" [disabled]="occupato()" (click)="commutaTutte()">
+          {{ tutteScelte() ? 'Deseleziona tutte' : 'Seleziona tutte' }}
+        </button>
+        @if (scelte().size) {
+          <b>{{ scelte().size }} scelte</b>
+          <button type="button" [disabled]="occupato() || !disponibile()" (click)="ripristina(scelteIds())">Ripristina</button>
+          <button type="button" class="pericolo" [disabled]="occupato() || !disponibile()" (click)="eliminaPerSempre(scelteIds())">
+            Elimina per sempre
+          </button>
+        }
+        <button type="button" class="pericolo svuota" [disabled]="occupato() || !disponibile()" (click)="svuota()">Svuota cestino</button>
+      </div>
+    }
+
+    @if (caricando() && !foto().length) {
+      <span class="rotella" aria-label="Caricamento"></span>
+    } @else if (foto().length) {
+      <ul class="foto" aria-label="Foto nel cestino">
+        @for (f of foto(); track f.id) {
+          @let scelta = scelte().has(f.id);
+          <li>
+            <button
+              type="button"
+              class="scheda"
+              [class.scelta]="scelta"
+              [attr.aria-pressed]="scelta"
+              [attr.aria-label]="(scelta ? 'Togli dalla scelta ' : 'Scegli ') + f.nomeOriginale"
+              (click)="commuta(f)"
+            >
+              <img [src]="f.miniatura" [style.aspect-ratio]="rapporto(f)" alt="" loading="lazy" />
+              @if (f.video) {
+                <span class="video" aria-label="Video">▶</span>
+              }
+              @if (scelta) {
+                <span class="segno" aria-hidden="true">✓</span>
+              }
+            </button>
+            <dl>
+              <dt class="nascosto">File</dt>
+              <dd class="nome" [title]="f.nomeOriginale">{{ f.nomeOriginale }}</dd>
+              <dt class="nascosto">Eliminata</dt>
+              <dd>Eliminata il {{ f.eliminataIl | date: 'd MMM y, HH:mm' }}</dd>
+              <dt class="nascosto">Giorni rimasti</dt>
+              <dd class="tenue" [title]="f.siEliminaIl ? 'Si elimina da sola il ' + (f.siEliminaIl | date: 'd MMM y') : ''">
+                {{ rimasti(f) }}
+              </dd>
+            </dl>
+            <div class="azioni">
+              <button type="button" [disabled]="occupato() || !disponibile()" (click)="ripristina([f.id])">Ripristina</button>
+              <button
+                type="button"
+                class="pericolo"
+                [disabled]="occupato() || !disponibile()"
+                (click)="eliminaPerSempre([f.id], f.nomeOriginale)"
+              >
+                Elimina per sempre
+              </button>
+            </div>
+          </li>
+        }
+      </ul>
+      @if (altre()) {
+        <div class="piede">
+          <button type="button" [disabled]="caricando()" (click)="carica()">Altre foto</button>
+        </div>
+      }
+    } @else {
+      <p class="vuoto">Il cestino è vuoto.</p>
+      <div class="piede">
+        <button type="button" (click)="chiudi.emit()">Chiudi</button>
+      </div>
+    }
+  </section>
+</div>

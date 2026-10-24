@@ -280,7 +280,7 @@ export class Visore {
   }
 
   protected async elimina(): Promise<void> {
-    if (!confirm(`Eliminare "${this.foto().nomeOriginale}" dall'archivio? Il file viene cancellato dal disco.`)) {
+    if (!confirm(`Eliminare "${this.foto().nomeOriginale}"? Va nel cestino: si ripristina da Strumenti → Cestino.`)) {
       return;
     }
     const lista = this.galleria.foto();

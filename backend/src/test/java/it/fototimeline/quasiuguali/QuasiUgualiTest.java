@@ -59,7 +59,10 @@ class QuasiUgualiTest {
 
     @BeforeEach
     void svuota() {
-        repository.findAll().forEach(f -> fotoService.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            fotoService.elimina(f.getId());
+            fotoService.eliminaPerSempre(f.getId());
+        });
         mongo.dropCollection(QuasiUguali.IGNORATI);
         quasiUguali.invalida();
     }
@@ -141,6 +144,19 @@ class QuasiUgualiTest {
     }
 
     @Test
+    void unaFotoToltaERipristinataTornaNelSuoGruppo() throws IOException {
+        Foto[] f = importaTre();
+        quasiUguali.risolvi(List.of(f[0].getId()), List.of(f[1].getId()));
+        assertThat(quasiUguali.gruppi(0, 20).totale()).isZero();
+
+        // Senza invalida(): le schede sono sempre tre, la cache la rifà il ripristino.
+        assertThat(fotoService.ripristina(f[1].getId())).isTrue();
+        assertThat(quasiUguali.gruppi(0, 20).gruppi()).singleElement()
+                .satisfies(g -> assertThat(g.foto()).extracting(FotoSimile::id)
+                        .containsExactly(f[0].getId(), f[1].getId()));
+    }
+
+    @Test
     void risolviTogliSoloLeFotoDaTogliere() throws IOException {
         Foto[] f = importaTre();
         Path originalePiccola = fotoService.fileOriginale(f[1]);
@@ -149,7 +165,12 @@ class QuasiUgualiTest {
         var esito = quasiUguali.risolvi(List.of(f[0].getId()), List.of(f[1].getId()));
 
         assertThat(esito.eliminate()).isEqualTo(1);
-        assertThat(repository.findAll()).extracting(Foto::getId).containsExactlyInAnyOrder(f[0].getId(), f[2].getId());
+        // Nel cestino, come ogni eliminazione: i file restano finché non la si elimina per sempre.
+        assertThat(repository.findById(f[1].getId()).orElseThrow().getEliminataIl()).isNotNull();
+        assertThat(originalePiccola).exists();
+        assertThat(repository.findAll()).filteredOn(x -> x.getEliminataIl() == null).extracting(Foto::getId)
+                .containsExactlyInAnyOrder(f[0].getId(), f[2].getId());
+        fotoService.eliminaPerSempre(f[1].getId());
         assertThat(originalePiccola).doesNotExist();
         assertThat(miniaturaPiccola).doesNotExist();
         assertThat(fotoService.fileOriginale(f[0])).exists();
@@ -181,7 +202,8 @@ class QuasiUgualiTest {
 
         quasiUguali.invalida();
         assertThat(quasiUguali.gruppi(0, 20).totale()).isZero();
-        assertThat(repository.count()).isEqualTo(3);
+        // La tolta è nel cestino: la scheda resta, fuori dai gruppi.
+        assertThat(repository.findAll()).filteredOn(x -> x.getEliminataIl() == null).hasSize(3);
     }
 
     @Test
