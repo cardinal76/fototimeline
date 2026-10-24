@@ -76,14 +76,10 @@
     <button type="button" class="chiudi-pannello" title="Nascondi i dettagli (I)" aria-label="Nascondi i dettagli" (click)="dettagli()">✕</button>
     <header>
       <p class="quando">{{ foto().scattataIl | date: 'EEEE d MMMM y' }}</p>
-      <p class="ora" [class.con-luogo]="!!luogo()">
+      <p class="ora con-luogo">
         {{ foto().scattataIl | date: 'HH:mm:ss' }} · <span [title]="'Data ' + origine()">{{ origine() }}</span>
       </p>
-      @if (luogo(); as l) {
-        <p class="luogo">
-          <button type="button" title="Mostra le foto di questo luogo" (click)="filtraLuogo()">📍 {{ l }}</button>
-        </p>
-      }
+      <app-luogo-foto [foto]="foto()" (cambiata)="cambia.emit($event)" (filtrata)="chiudi.emit()" />
     </header>
 
     <form (ngSubmit)="salva()" (input)="modificata.set(true)" (change)="modificata.set(true)">
@@ -165,6 +161,6 @@
       <dt>Caricata da</dt>
       <dd>{{ caricataDa() ?? '—' }}</dd>
     </dl>
-    <p class="scorciatoie">← → scorri · P preferita · I dettagli · F schermo intero · Esc chiudi</p>
+    <p class="scorciatoie">← → scorri · P preferita · I dettagli · L luogo · Canc elimina · F schermo intero · Esc chiudi</p>
   </aside>
 }

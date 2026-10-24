@@ -1,0 +1,5 @@
+IT.17.TN	Provincia autonoma di Trento	Provincia autonoma di Trento	3165241
+IT.07.RM	Città metropolitana di Roma Capitale	Citta metropolitana di Roma Capitale	3169069
+IT.07.LT	Provincia di Latina	Provincia di Latina	3175057
+IT.17.BZ	Bolzano	Bolzano	3181912
+GB.ENG.I2	Manchester	Manchester	3333169

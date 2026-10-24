@@ -434,6 +434,20 @@ export class Galleria {
     return aggiornata;
   }
 
+  /**
+   * Il luogo di una foto scelto a mano (chiave di /api/luoghi/cerca, null =
+   * nessun luogo) o di nuovo dal GPS (undefined). La foto resta al suo posto:
+   * cambia solo lei, e l'elenco dei luoghi.
+   */
+  async cambiaLuogo(foto: Foto, chiave: string | null | undefined): Promise<Foto> {
+    const aggiornata = await firstValueFrom(
+      chiave === undefined ? this.api.luogoDaGps(foto.id) : this.api.impostaLuogo(foto.id, chiave),
+    );
+    this.foto.update((lista) => lista.map((f) => (f.id === foto.id ? aggiornata : f)));
+    this.aggiornaLuoghi();
+    return aggiornata;
+  }
+
   async elimina(foto: Foto): Promise<void> {
     await firstValueFrom(this.api.elimina(foto.id));
     this.togliDallaLista([foto.id]);
@@ -451,6 +465,9 @@ export class Galleria {
     } else {
       this.avvisa(`${modificate} foto aggiornate`);
       this.ricarica();
+      if (operazione === 'IMPOSTA_LUOGO' || operazione === 'LUOGO_DA_GPS') {
+        this.aggiornaLuoghi();
+      }
     }
   }
 

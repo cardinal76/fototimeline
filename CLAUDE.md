@@ -117,14 +117,35 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - `IndiceLuoghi` è un k-d tree implicito su vettori unitari 3D: solo array di
   primitivi e i nomi in un `byte[]`, niente oggetti per punto (225 mila punti,
   ~10 MB). Non aggiungere campi per punto senza pensare alla RAM.
-- `FotoService.leggi` chiama `applica`: luogo, regione, nazione, codice nazione
-  e `luogoCalcolato` (true anche in mare aperto, così "Calcola luoghi" non li
-  rifà). "Calcola luoghi" è un lavoro di `LavoriImportazione` (origine
-  `LUOGHI`): `importate` = con un luogo, `duplicate` = senza; non chiede il
-  cloud montato.
-- Il filtro manda `nazione` (codice ISO), `regione`, `luogo`, nell'ordine
-  dell'indice composto `luoghi`. L'attribuzione CC BY 4.0 di GeoNames è nel
-  filtro e nel visore: va lasciata.
+- `FotoService.leggi` chiama `applica`: luogo (città), provincia (solo Italia,
+  da `admin2Codes.txt`), regione (admin1), nazione, codice nazione,
+  `origineLuogo` GPS, `luogoCalcolato` e `versioneLuoghi`
+  (`GeocodificaInversa.VERSIONE`). "Calcola luoghi" rifà le foto con un'altra
+  versione (anche in mare aperto si scrive): se il calcolo cambia, alza
+  `VERSIONE` e le foto di prima si rifanno da sole al primo lancio, a gruppi,
+  ripartendo dopo un'interruzione. È un lavoro di `LavoriImportazione`
+  (origine `LUOGHI`): `importate` = con un luogo, `duplicate` = senza; non
+  chiede il cloud montato.
+- I luoghi sono campi della foto, non tag: `luogo`, `provincia`, `regione`,
+  `nazione`, `codiceNazione`, `origineLuogo`. **MANUALE vince sempre**:
+  `applica`, `calcola` (anche `tutte`) saltano `origineLuogo: MANUALE`; un
+  posto nuovo che scrive il luogo deve fare lo stesso. A mano si sceglie con
+  una chiave di `GeocodificaInversa.cerca` (`citta:<geonameid>`,
+  `provincia:IT.17.TN`, `regione:IT.17`, `nazione:NL`) in
+  `LuoghiService.imposta`; `usaGps` torna al calcolo. Una città a mano scrive
+  `latitudineLuogo`/`longitudineLuogo`: la mappa (`PuntoMappa.approssimativa`)
+  la usa senza GPS o col GPS oltre la distanza dei luoghi. Mai in
+  `FotoCondivisa`.
+- La ricerca per nome (`IndiceLuoghi.cerca`) scorre tutti i punti col nome
+  piegato (`Nomi.piega`, tabella per i caratteri comuni): niente Normalizer per
+  punto, sarebbe dieci volte più lenta.
+- La ricerca libera `q` cerca anche `provincia` e i codici delle nazioni con
+  un altro nome ("Olanda" → NL, `nazioniPerNome`): per questo `FotoService`
+  usa `criteriConNazioni`, mentre `criteri(FiltroFoto)` statico resta per chi
+  non ha `q` (ricerca per contenuto).
+- Il filtro manda `nazione` (codice ISO), `regione`, `provincia`, `luogo`;
+  l'indice composto `luoghi` copre il prefisso nazione e regione. L'attribuzione
+  CC BY 4.0 di GeoNames è nel filtro e nel visore: va lasciata.
 - Nei test: `fototimeline.luoghi.cartella=classpath:geonames` (mini dataset in
   `src/test/resources/geonames`).
 

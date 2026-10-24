@@ -620,12 +620,24 @@ stage `geonames` da `https://download.geonames.org/export/dump/` e mette in
 | File | Cosa | Peso nell'immagine |
 |---|---|---|
 | `cities500.txt` | ~225 mila centri sopra i 500 abitanti (anche molte frazioni italiane), senza la colonna dei nomi alternativi | ~25 MB |
-| `alternateNames-it.txt` | i nomi in italiano (Roma, Parigi, Baviera), filtrati da `alternateNamesV2.zip` (200 MB, scaricato e buttato nello stage) | ~0,9 MB |
+| `alternateNames-it.txt` | i nomi in italiano (Roma, Parigi, Baviera, Provincia di Trento; per le nazioni anche gli altri, come Olanda), filtrati da `alternateNamesV2.zip` (200 MB, scaricato e buttato nello stage) | ~0,9 MB |
 | `admin1CodesASCII.txt`, `countryInfo.txt` | regioni e nazioni | ~0,2 MB |
+| `admin2Codes.txt` | solo le ~110 righe `IT.` (le province) dei 2,3 MB del file di GeoNames | ~8 KB |
 
 In tutto circa **26 MB** in più nell'immagine. All'avvio l'app li legge in un
 paio di secondi in un indice compatto (array di primitivi, k-d tree): circa
-**10 MB di heap**. Oltre 30 km dal centro abitato più vicino
+**12 MB di heap** (10 prima dei luoghi a più livelli: provincia, geonameid e
+abitanti di ogni punto, ~2 MB, per la provincia e la ricerca per nome).
+
+**Livelli**: città o comune, provincia (solo in Italia: admin2, "Provincia di
+Trento"; all'estero admin2 è troppo vario e non si legge), regione (admin1: in
+Italia la regione, "Trentino-Alto Adige"; all'estero il primo livello,
+"Inghilterra", "Olanda Settentrionale", "Baviera") e nazione. I nomi delle
+nazioni sono quelli di Java in italiano ("Paesi Bassi", "Regno Unito"), con gli
+altri nomi italiani di GeoNames per la ricerca ("Olanda", "UK", "USA"). Stanno
+nei campi della foto `luogo`, `provincia`, `regione`, `nazione`,
+`codiceNazione` con `origineLuogo` (GPS o MANUALE), non nei tag: i tag liberi
+restano di chi li scrive, e i luoghi hanno già filtro, indice e mappa. Oltre 30 km dal centro abitato più vicino
 (`FOTOTIMELINE_LUOGHI_DISTANZA`) il luogo resta sconosciuto: mare aperto.
 Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
 "Luoghi spenti").
@@ -634,9 +646,22 @@ Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
 - Per quelle già in archivio: da admin **Calcola luoghi** (`POST
   /api/archivio/luoghi`), in sottofondo con la barra delle importazioni. Legge
   solo MongoDB, non il cloud: va anche da smontato, 150 mila foto in meno di
-  un minuto. Rilanciarlo non rifà quelle già calcolate (anche quelle in mare
-  aperto, segnate con `luogoCalcolato`); se tutte ce l'hanno chiede se
-  ricalcolarle tutte (`?tutte=true`), utile dopo un aggiornamento del dataset.
+  un minuto. Rilanciarlo non rifà quelle già calcolate con la versione attuale
+  del calcolo (`versioneLuoghi`, anche quelle in mare aperto); annullato o
+  interrotto da un riavvio, riparte da dove era rimasto (la versione si scrive
+  ogni 500 foto). Se tutte ce l'hanno chiede se ricalcolarle tutte
+  (`?tutte=true`), utile dopo un aggiornamento del dataset.
+- **Dopo il rilascio dei luoghi a più livelli** (versione 2, con la provincia):
+  le foto calcolate prima contano di nuovo come "da calcolare"; va lanciato una
+  volta **Calcola luoghi** (Strumenti, da admin). Il primo build riscarica lo
+  stage `geonames` (~215 MB, un minuto), perché il Dockerfile è cambiato.
+- **Luoghi scelti a mano** (visore o selezione, `PUT /api/foto/{id}/luogo`,
+  `IMPOSTA_LUOGO`): `origineLuogo` MANUALE, e né il calcolo né `?tutte=true` li
+  toccano; "Usa il GPS" (`DELETE /api/foto/{id}/luogo`, `LUOGO_DA_GPS`) li
+  rimette al calcolo. Una città scelta a mano porta le sue coordinate
+  (`latitudineLuogo`, `longitudineLuogo`): sulla mappa la foto senza GPS (o
+  col GPS a più di `FOTOTIMELINE_LUOGHI_DISTANZA` km) va lì, segnata
+  approssimativa. Quelle coordinate non escono mai dai link condivisi.
 - **Aggiornare il dataset**: lo stage resta nella cache di Docker e non si
   riscarica a ogni rilascio (se la cache viene pulita, si riscarica da sé: ~215
   MB, un minuto). Per prendere quello nuovo, su server2 dal checkout del runner

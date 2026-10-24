@@ -506,6 +506,7 @@
     <button type="button" (click)="operazione('AGGIUNGI_TAG')">+ Tag</button>
     <button type="button" (click)="operazione('TOGLI_TAG')">− Tag</button>
     <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
+    <button type="button" (click)="dialogoLuogo.set(true)">📍 Luogo…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
     <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
@@ -971,6 +972,24 @@
         </div>
       }
     </form>
+  </div>
+}
+
+@if (dialogoLuogo()) {
+  <div class="velo" (click)="dialogoLuogo.set(false)">
+    <div class="dialogo" role="dialog" aria-labelledby="titolo-luogo" (click)="$event.stopPropagation()">
+      <h2 id="titolo-luogo">Luogo di {{ galleria.selezionate().size }} foto</h2>
+      <p class="tenue">
+        Lo stesso luogo a tutte, anche a quelle senza GPS: una città, una provincia, una regione o una nazione. Un
+        luogo scelto a mano resta, "Calcola luoghi" non lo cambia; "Usa il GPS" torna a quello automatico.
+      </p>
+      <app-scegli-luogo (scelto)="luogoSelezione($event.chiave)" />
+      <div class="piede">
+        <button type="button" (click)="luogoSelezione(undefined)">Usa il GPS</button>
+        <button type="button" (click)="luogoSelezione(null)">Nessun luogo</button>
+        <button type="button" (click)="dialogoLuogo.set(false)">Annulla</button>
+      </div>
+    </div>
   </div>
 }
 

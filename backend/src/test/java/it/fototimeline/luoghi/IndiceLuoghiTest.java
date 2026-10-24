@@ -21,7 +21,7 @@ class IndiceLuoghiTest {
         GeocodificaInversa geo = miniDataset();
         assertThat(geo.disponibile()).isTrue();
         // Trastevere è un quartiere (PPLX): non conta, resta Roma.
-        assertThat(geo.punti()).isEqualTo(8);
+        assertThat(geo.punti()).isEqualTo(13);
 
         Trovato roma = geo.trova(41.9, 12.5).orElseThrow();
         assertThat(roma.nome()).isEqualTo("Roma");

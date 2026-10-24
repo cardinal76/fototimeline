@@ -50,6 +50,7 @@ import org.springframework.stereotype.Service;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.luoghi.GeocodificaInversa;
+import it.fototimeline.luoghi.LuoghiService;
 import it.fototimeline.dominio.StatoConversione;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
@@ -282,19 +283,21 @@ public class FotoService {
     private final EstrattoreMetadati estrattore;
     private final StrumentiMedia media;
     private final GeocodificaInversa luoghi;
+    private final LuoghiService luoghiManuali;
     private final ConversioneVideo conversione;
     private final Clock clock;
     private final ApplicationEventPublisher eventi;
 
     public FotoService(FotoRepository repository, MongoTemplate mongo, ArchivioFile archivio,
-            EstrattoreMetadati estrattore, StrumentiMedia media, GeocodificaInversa luoghi, ConversioneVideo conversione,
-            Optional<Clock> clock, ApplicationEventPublisher eventi) {
+            EstrattoreMetadati estrattore, StrumentiMedia media, GeocodificaInversa luoghi, LuoghiService luoghiManuali,
+            ConversioneVideo conversione, Optional<Clock> clock, ApplicationEventPublisher eventi) {
         this.repository = repository;
         this.mongo = mongo;
         this.archivio = archivio;
         this.estrattore = estrattore;
         this.media = media;
         this.luoghi = luoghi;
+        this.luoghiManuali = luoghiManuali;
         this.conversione = conversione;
         this.clock = clock.orElse(Clock.systemDefaultZone());
         this.eventi = eventi;
@@ -771,7 +774,7 @@ public class FotoService {
     // ---------------------------------------------------------------- lettura
 
     public PaginaFoto cerca(FiltroFoto filtro, int pagina, int dimensione) {
-        Query query = new Query(criteri(filtro));
+        Query query = new Query(criteriConNazioni(filtro));
         long totale = mongo.count(query, Foto.class);
         query.with(Sort.by(Sort.Order.desc("scattataIl"), Sort.Order.desc("_id")))
                 .skip((long) pagina * dimensione)
@@ -785,7 +788,7 @@ public class FotoService {
     /** I mesi che hanno foto, dal più recente, con i filtri ma senza il taglio per date. */
     public List<VoceMese> timeline(FiltroFoto filtro) {
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(criteri(filtro.senzaDate())),
+                Aggregation.match(criteriConNazioni(filtro.senzaDate())),
                 Aggregation.project().and(StringOperators.Substr.valueOf("giorno").substring(0, 7)).as("mese"),
                 Aggregation.group("mese").count().as("conteggio"),
                 Aggregation.sort(Sort.Direction.DESC, "_id"));
@@ -801,16 +804,30 @@ public class FotoService {
                 .toList();
     }
 
-    /** Le foto con posizione GPS, con i filtri della timeline. */
+    /**
+     * Le foto con posizione GPS, con i filtri della timeline; e quelle con una
+     * città scelta a mano, alle sue coordinate (approssimativa), se non hanno
+     * il GPS o il GPS è più lontano dalla città della distanza dei luoghi
+     * (GPS sbagliato). Col GPS vicino resta il GPS: è più preciso.
+     */
     public List<PuntoMappa> mappa(FiltroFoto filtro) {
         Query query = new Query(new Criteria().andOperator(
-                criteri(filtro),
-                Criteria.where("latitudine").ne(null),
-                Criteria.where("longitudine").ne(null)));
-        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video", "luogo");
+                criteriConNazioni(filtro),
+                new Criteria().orOperator(
+                        Criteria.where("latitudine").ne(null).and("longitudine").ne(null),
+                        Criteria.where("latitudineLuogo").ne(null).and("longitudineLuogo").ne(null))));
+        query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video", "luogo", "latitudineLuogo",
+                "longitudineLuogo");
         return mongo.find(query, Foto.class).stream()
-                .map(f -> new PuntoMappa(f.getId(), f.getLatitudine(), f.getLongitudine(), f.getGiorno(),
-                        f.getTitolo(), f.isVideo(), f.getLuogo()))
+                .map(f -> {
+                    boolean approssimativa = f.getLatitudineLuogo() != null && f.getLongitudineLuogo() != null
+                            && (f.getLatitudine() == null || f.getLongitudine() == null
+                                    || GeocodificaInversa.distanzaKm(f.getLatitudine(), f.getLongitudine(),
+                                            f.getLatitudineLuogo(), f.getLongitudineLuogo()) > luoghi.distanzaMassimaKm());
+                    return new PuntoMappa(f.getId(), approssimativa ? f.getLatitudineLuogo() : f.getLatitudine(),
+                            approssimativa ? f.getLongitudineLuogo() : f.getLongitudine(), f.getGiorno(), f.getTitolo(),
+                            f.isVideo(), f.getLuogo(), approssimativa);
+                })
                 .toList();
     }
 
@@ -1041,14 +1058,21 @@ public class FotoService {
         return spostate;
     }
 
-    public enum Operazione { ELIMINA, AGGIUNGI_TAG, TOGLI_TAG, IMPOSTA_ALBUM, PREFERITA, NON_PREFERITA }
+    /**
+     * IMPOSTA_LUOGO: {@code valore} è la chiave di un luogo di GeoNames
+     * ("citta:2643123", vedi {@link LuoghiService#imposta}), vuoto per "nessun
+     * luogo"; LUOGO_DA_GPS torna al luogo calcolato dal GPS.
+     */
+    public enum Operazione {
+        ELIMINA, AGGIUNGI_TAG, TOGLI_TAG, IMPOSTA_ALBUM, PREFERITA, NON_PREFERITA, IMPOSTA_LUOGO, LUOGO_DA_GPS
+    }
 
     /** Applica la stessa operazione a più foto; restituisce quante ne ha toccate. */
     public long operazioneMultipla(List<String> ids, Operazione operazione, String valore) {
         if (ids == null || ids.isEmpty()) {
             return 0;
         }
-        // Tag, album e preferite non toccano le foto nel cestino.
+        // Tag, album, preferite e luoghi non toccano le foto nel cestino.
         Query query = Query.query(Criteria.where("_id").in(ids).and(CESTINO).is(null));
         return switch (operazione) {
             case ELIMINA -> ids.stream().filter(this::elimina).count();
@@ -1066,6 +1090,8 @@ public class FotoService {
                     .getModifiedCount();
             case PREFERITA -> mongo.updateMulti(query, new Update().set("preferita", true), Foto.class).getModifiedCount();
             case NON_PREFERITA -> mongo.updateMulti(query, new Update().set("preferita", false), Foto.class).getModifiedCount();
+            case IMPOSTA_LUOGO -> luoghiManuali.imposta(ids, valore);
+            case LUOGO_DA_GPS -> luoghiManuali.usaGps(ids);
         };
     }
 
@@ -1151,16 +1177,29 @@ public class FotoService {
 
     // ---------------------------------------------------------------- utilità
 
+    /** Come {@link #criteri(FiltroFoto)}, e la ricerca libera trova le nazioni anche per gli altri nomi ("Olanda"). */
+    private Criteria criteriConNazioni(FiltroFoto f) {
+        return criteri(f, f.q() == null || f.q().isBlank() ? Set.of() : luoghi.nazioniPerNome(f.q()));
+    }
+
     /**
      * I filtri della timeline come criteri di Mongo (li usa anche la ricerca
      * per contenuto), sempre senza le foto nel cestino.
      */
     public static Criteria criteri(FiltroFoto f) {
+        return criteri(f, Set.of());
+    }
+
+    /**
+     * @param nazioni codici delle nazioni che la ricerca libera {@code q}
+     *                trova per nome (anche con un altro nome: "Olanda" per NL)
+     */
+    public static Criteria criteri(FiltroFoto f, Collection<String> nazioni) {
         List<Criteria> e = new ArrayList<>();
         e.add(nonNelCestino());
         if (f.q() != null && !f.q().isBlank()) {
             Pattern p = Pattern.compile(Pattern.quote(f.q().trim()), Pattern.CASE_INSENSITIVE);
-            e.add(new Criteria().orOperator(
+            List<Criteria> o = new ArrayList<>(List.of(
                     Criteria.where("titolo").regex(p),
                     Criteria.where("descrizione").regex(p),
                     Criteria.where("nomeOriginale").regex(p),
@@ -1168,8 +1207,13 @@ public class FotoService {
                     Criteria.where("fotocamera").regex(p),
                     Criteria.where("tag").regex(p),
                     Criteria.where("luogo").regex(p),
+                    Criteria.where("provincia").regex(p),
                     Criteria.where("regione").regex(p),
                     Criteria.where("nazione").regex(p)));
+            if (!nazioni.isEmpty()) {
+                o.add(Criteria.where("codiceNazione").in(nazioni));
+            }
+            e.add(new Criteria().orOperator(o));
         }
         if (f.tag() != null && !f.tag().isBlank()) {
             e.add(Criteria.where("tag").is(f.tag().trim().toLowerCase(Locale.ROOT)));
@@ -1177,12 +1221,15 @@ public class FotoService {
         if (f.album() != null && !f.album().isBlank()) {
             e.add(Criteria.where("album").is(f.album().trim()));
         }
-        // Il luogo scelto dall'elenco (/api/luoghi): nazione, poi regione e luogo dentro di lei.
+        // Il luogo scelto dall'elenco (/api/luoghi): nazione, poi regione, provincia e luogo dentro di lei.
         if (f.nazione() != null && !f.nazione().isBlank()) {
             e.add(Criteria.where("codiceNazione").is(f.nazione().trim().toUpperCase(Locale.ROOT)));
         }
         if (f.regione() != null && !f.regione().isBlank()) {
             e.add(Criteria.where("regione").is(f.regione().trim()));
+        }
+        if (f.provincia() != null && !f.provincia().isBlank()) {
+            e.add(Criteria.where("provincia").is(f.provincia().trim()));
         }
         if (f.luogo() != null && !f.luogo().isBlank()) {
             e.add(Criteria.where("luogo").is(f.luogo().trim()));

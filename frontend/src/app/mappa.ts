@@ -52,6 +52,11 @@ import { PuntoMappa } from './modelli';
     :host ::ng-deep .segno.video {
       position: relative;
     }
+    /* Senza GPS, al posto della città scelta a mano: bordo tratteggiato, un po' trasparente. */
+    :host ::ng-deep .segno.approssimativa {
+      border-style: dashed;
+      opacity: 0.8;
+    }
     :host ::ng-deep .segno.video::after {
       content: '▶';
       position: absolute;
@@ -119,7 +124,7 @@ export class Mappa implements OnDestroy {
 
   private carica(): void {
     const filtro = this.galleria.filtro();
-    this.filtrata.set(!!(filtro.q || filtro.tag || filtro.album || filtro.preferite || filtro.nazione || filtro.luogo));
+    this.filtrata.set(!!(filtro.q || filtro.tag || filtro.album || filtro.preferite || filtro.nazione || filtro.regione || filtro.luogo));
     this.api.mappa(filtro).subscribe((punti) => this.mostra(punti));
   }
 
@@ -142,11 +147,11 @@ export class Mappa implements OnDestroy {
     const segno = L.marker([p.lat, p.lon], {
       icon: L.divIcon({
         className: '',
-        html: `<div class="segno${p.video ? ' video' : ''}" style="background-image:url('${miniatura}')"></div>`,
+        html: `<div class="segno${p.video ? ' video' : ''}${p.approssimativa ? ' approssimativa' : ''}" style="background-image:url('${miniatura}')"></div>`,
         iconSize: [44, 44],
         iconAnchor: [22, 22],
       }),
-      title: p.titolo ?? p.giorno,
+      title: (p.titolo ?? p.giorno) + (p.approssimativa ? ' (posizione approssimativa)' : ''),
     });
     const contenuto = document.createElement('div');
     const img = document.createElement('img');
@@ -155,7 +160,12 @@ export class Mappa implements OnDestroy {
     img.alt = p.titolo ?? '';
     img.addEventListener('click', () => this.apri.emit(p.id));
     const didascalia = document.createElement('div');
-    didascalia.textContent = [p.video ? '▶ Video' : null, p.titolo, p.luogo, new Date(p.giorno).toLocaleDateString('it-IT', { dateStyle: 'long' })]
+    didascalia.textContent = [
+      p.video ? '▶ Video' : null,
+      p.titolo,
+      p.approssimativa ? `${p.luogo ?? ''} (posizione approssimativa, luogo scelto a mano)` : p.luogo,
+      new Date(p.giorno).toLocaleDateString('it-IT', { dateStyle: 'long' }),
+    ]
       .filter(Boolean)
       .join(' · ');
     contenuto.append(img, didascalia);

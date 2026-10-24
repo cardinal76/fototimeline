@@ -82,11 +82,12 @@ public class FotoController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate al,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String provincia,
             @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa),
+        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa, provincia),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -98,9 +99,10 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String provincia,
             @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa) {
-        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
+        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa, provincia));
     }
 
     @GetMapping("/mappa")
@@ -111,9 +113,10 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String provincia,
             @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa) {
-        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
+        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa, provincia));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */

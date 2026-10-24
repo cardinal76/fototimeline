@@ -4,11 +4,17 @@ import java.time.LocalDate;
 
 /**
  * Filtri della timeline; i campi null non filtrano. {@code nazione} è il
- * codice ISO (IT), {@code regione} e {@code luogo} i nomi come in /api/luoghi;
- * {@code caricataDa} è uno username.
+ * codice ISO (IT), {@code regione}, {@code provincia} (solo Italia) e
+ * {@code luogo} i nomi come in /api/luoghi; {@code caricataDa} è uno username.
  */
 public record FiltroFoto(String q, String tag, String album, Boolean preferite, LocalDate dal, LocalDate al,
-        String nazione, String regione, String luogo, String caricataDa) {
+        String nazione, String regione, String luogo, String caricataDa, String provincia) {
+
+    /** Senza filtro per provincia. */
+    public FiltroFoto(String q, String tag, String album, Boolean preferite, LocalDate dal, LocalDate al,
+            String nazione, String regione, String luogo, String caricataDa) {
+        this(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa, null);
+    }
 
     /** Senza filtro per luogo né per chi l'ha caricata. */
     public FiltroFoto(String q, String tag, String album, Boolean preferite, LocalDate dal, LocalDate al) {
@@ -28,6 +34,6 @@ public record FiltroFoto(String q, String tag, String album, Boolean preferite, 
     }
 
     public FiltroFoto senzaDate() {
-        return new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa);
+        return new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa, provincia);
     }
 }

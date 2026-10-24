@@ -1,5 +1,7 @@
 export type OrigineData = 'EXIF' | 'FILE' | 'CARTELLA' | 'CARICAMENTO' | 'GOOGLE' | 'MANUALE';
 
+export type OrigineLuogo = 'GPS' | 'MANUALE';
+
 export interface Foto {
   id: string;
   nomeOriginale: string;
@@ -20,13 +22,21 @@ export interface Foto {
   fotocamera?: string;
   latitudine?: number;
   longitudine?: number;
-  /** Dal GPS (GeoNames): il centro abitato più vicino, "Sperlonga". */
+  /** Dal GPS (GeoNames) o scelto a mano: la città o il comune, "Sperlonga"; manca se a mano si è scelta solo una regione. */
   luogo?: string;
+  /** Solo in Italia: "Provincia di Latina". */
+  provincia?: string;
+  /** La regione; all'estero il primo livello di GeoNames ("Inghilterra", "Baviera"). */
   regione?: string;
   /** In italiano: "Francia". */
   nazione?: string;
   /** ISO: "FR". */
   codiceNazione?: string;
+  /** GPS o MANUALE (il calcolo automatico non lo tocca); assente senza luogo. */
+  origineLuogo?: OrigineLuogo;
+  /** La città scelta a mano: sulla mappa la foto va lì (approssimativa) se non ha il GPS. */
+  latitudineLuogo?: number;
+  longitudineLuogo?: number;
   /** Dove sta l'originale nell'archivio: "2024/08/15/IMG_0001.jpg". */
   percorso: string;
   /** Un video (MP4, MOV) invece di una foto. */
@@ -90,9 +100,10 @@ export interface Filtro {
   preferite?: boolean;
   /** Username: solo le foto portate da questa persona. */
   caricataDa?: string;
-  /** Codice ISO della nazione ("IT"); con regione e luogo come in /api/luoghi. */
+  /** Codice ISO della nazione ("IT"); con regione, provincia e luogo come in /api/luoghi. */
   nazione?: string;
   regione?: string;
+  provincia?: string;
   luogo?: string;
   /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
   al?: string;
@@ -215,7 +226,16 @@ export interface Modifica {
   scattataIl?: string;
 }
 
-export type Operazione = 'ELIMINA' | 'AGGIUNGI_TAG' | 'TOGLI_TAG' | 'IMPOSTA_ALBUM' | 'PREFERITA' | 'NON_PREFERITA';
+export type Operazione =
+  | 'ELIMINA'
+  | 'AGGIUNGI_TAG'
+  | 'TOGLI_TAG'
+  | 'IMPOSTA_ALBUM'
+  | 'PREFERITA'
+  | 'NON_PREFERITA'
+  /** valore: la chiave di un Luogo, vuoto per "nessun luogo". */
+  | 'IMPOSTA_LUOGO'
+  | 'LUOGO_DA_GPS';
 
 /** Giorno della timeline: le foto scattate quel giorno, in ordine. */
 export interface Giorno {
@@ -234,6 +254,8 @@ export interface PuntoMappa {
   titolo?: string;
   video: boolean;
   luogo?: string;
+  /** Senza GPS (o col GPS lontano): alle coordinate della città scelta a mano. */
+  approssimativa: boolean;
 }
 
 /** I luoghi delle foto con quante ce ne sono (GET /api/luoghi), i più fotografati prima. */
@@ -250,18 +272,43 @@ export interface VoceNazione {
   nome: string;
   conteggio: number;
   regioni: VoceRegione[];
+  /** Altri nomi in italiano, per la ricerca: "Olanda" per i Paesi Bassi. */
+  altriNomi: string[];
 }
 
 export interface VoceRegione {
   /** Assente se GeoNames non la sa. */
   nome?: string;
   conteggio: number;
+  /** In Italia le province della regione; vuote all'estero. */
+  province: VoceProvincia[];
+  /** Le città della regione, anche quelle dentro le province. */
   luoghi: VoceLuogo[];
+}
+
+export interface VoceProvincia {
+  nome: string;
+  conteggio: number;
 }
 
 export interface VoceLuogo {
   nome: string;
+  provincia?: string;
   conteggio: number;
+}
+
+/** Un luogo di GeoNames da scegliere a mano (GET /api/luoghi/cerca): città, provincia, regione o nazione. */
+export interface Luogo {
+  /** "citta:2643123", "provincia:IT.17.TN", "regione:IT.17", "nazione:NL". */
+  chiave: string;
+  livello: 'CITTA' | 'PROVINCIA' | 'REGIONE' | 'NAZIONE';
+  luogo?: string;
+  provincia?: string;
+  regione?: string;
+  nazione?: string;
+  codiceNazione?: string;
+  latitudine?: number;
+  longitudine?: number;
 }
 
 /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */

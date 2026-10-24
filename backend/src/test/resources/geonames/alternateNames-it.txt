@@ -10,3 +10,21 @@
 7825609	3174976	it	Regione Lazio						
 17922002	3012874	it	Île-de-France						
 1894576	2951839	it	Baviera						
+1347438	3165241	it	Trento	1	1				
+2728230	3165241	it	Provincia di Trento	1					
+1347448	3165244	it	Trentino-Alto Adige	1					
+3074814	3165244	it	Trentin						
+3074819	3165244	it	Sudtirol						
+8041896	3165244	it	Regione Autonoma Trentino-Alto Adige						
+1350496	3175057	it	Provincia di Latina	1	1	1	1		
+1555705	2635167	it	UK						
+17126230	2635167	it	Regno Unito	1					
+1626645	6269131	it	Inghilterra						
+6871759	2749879	it	Olanda Settentrionale	1					
+1559989	2750405	it	Paesi Bassi	1					
+2430935	2750405	it	Olanda		1				
+1564152	6252001	it	USA						
+16934725	6252001	it	Stati Uniti	1					
+1348638	3169069	it	Roma						
+7825474	3169069	it	Città metropolitana di Roma Capitale						
+19954281	3169069	it	Provincia di Roma	1	1				

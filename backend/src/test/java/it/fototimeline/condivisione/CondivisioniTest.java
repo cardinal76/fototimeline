@@ -8,6 +8,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -61,6 +62,7 @@ import it.fototimeline.service.FotoService;
         "fototimeline.login.attivo=true",
         "server.address=0.0.0.0",
         "fototimeline.condivisioni.token-sbagliati=40",
+        "fototimeline.luoghi.cartella=classpath:geonames",
         "spring.security.oauth2.client.registration.keycloak.client-id=fototimeline",
         "spring.security.oauth2.client.registration.keycloak.client-secret=segreto",
         "spring.security.oauth2.client.registration.keycloak.authorization-grant-type=authorization_code",
@@ -164,6 +166,31 @@ class CondivisioniTest {
         mvc.perform(get("/api/condivise/" + token).with(da(ip)))
                 .andExpect(jsonPath("$.foto[0].latitudine").value(41.9))
                 .andExpect(jsonPath("$.foto[0].longitudine").value(12.5));
+    }
+
+    /** I luoghi (dal GPS o scelti a mano, con le coordinate della città) non escono dai link, nemmeno con la posizione. */
+    @Test
+    void iLuoghiNonEsconoDalLink() throws Exception {
+        mvc.perform(put("/api/foto/" + rossa.getId() + "/luogo").with(utente("anna")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"chiave\":\"citta:2643123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.luogo").value("Manchester"))
+                .andExpect(jsonPath("$.origineLuogo").value("MANUALE"));
+        assertThat(fotoRepository.findById(conExif.getId()).orElseThrow().getLuogo()).isEqualTo("Roma");
+        for (boolean posizione : List.of(false, true)) {
+            String token = crea(utente("anna"),
+                    Map.of("ids", List.of(conExif.getId(), rossa.getId()), "posizione", posizione));
+            String risposta = mvc.perform(get("/api/condivise/" + token).with(da(ip)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.foto.length()").value(2))
+                    .andExpect(jsonPath("$.foto[1].id").value(rossa.getId()))
+                    .andExpect(jsonPath("$.foto[1].latitudine").doesNotExist())
+                    .andReturn().getResponse().getContentAsString();
+            for (String vietato : List.of("Manchester", "Inghilterra", "Regno Unito", "Roma", "Lazio", "Italia",
+                    "Provincia", "luogo", "regione", "nazione", "53.48", "-2.23")) {
+                assertThat(risposta).as(vietato).doesNotContain(vietato);
+            }
+        }
     }
 
     @Test

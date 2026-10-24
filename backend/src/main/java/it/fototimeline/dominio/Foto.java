@@ -58,8 +58,15 @@ public class Foto {
     private Double latitudine;
     private Double longitudine;
 
-    /** Dal GPS, con GeoNames (GeocodificaInversa): il centro abitato più vicino. */
+    /**
+     * Il luogo, su più livelli: dal GPS con GeoNames (GeocodificaInversa) o
+     * scelto a mano ({@link #origineLuogo}). {@code luogo} è la città o il
+     * comune; manca se a mano si è scelta solo una regione o una nazione.
+     */
     private String luogo;
+    /** Solo in Italia: "Provincia di Trento". */
+    private String provincia;
+    /** La regione in Italia, all'estero il primo livello di GeoNames: "Inghilterra", "Baviera". */
     private String regione;
     /** In italiano: "Francia". */
     private String nazione;
@@ -67,6 +74,20 @@ public class Foto {
     private String codiceNazione;
     /** Luogo già cercato, anche se non trovato (mare aperto): "Calcola luoghi" la salta. */
     private boolean luogoCalcolato;
+    /**
+     * Con quale versione del calcolo ({@code GeocodificaInversa.VERSIONE}):
+     * "Calcola luoghi" rifà le foto calcolate prima (senza la provincia).
+     */
+    private Integer versioneLuoghi;
+    /** GPS o MANUALE; null senza luogo. Un luogo MANUALE il calcolo non lo tocca mai. */
+    private OrigineLuogo origineLuogo;
+    /**
+     * Le coordinate del luogo scelto a mano, se è una città: sulla mappa la
+     * foto va lì (posizione approssimativa) quando non ha il GPS o il GPS è
+     * lontano dal luogo scelto. Mai nei link condivisi.
+     */
+    private Double latitudineLuogo;
+    private Double longitudineLuogo;
 
     /** Percorso dell'originale, relativo alla cartella dell'archivio. */
     @Indexed
@@ -176,6 +197,9 @@ public class Foto {
     public String getLuogo() { return luogo; }
     public void setLuogo(String luogo) { this.luogo = luogo; }
 
+    public String getProvincia() { return provincia; }
+    public void setProvincia(String provincia) { this.provincia = provincia; }
+
     public String getRegione() { return regione; }
     public void setRegione(String regione) { this.regione = regione; }
 
@@ -187,6 +211,18 @@ public class Foto {
 
     public boolean isLuogoCalcolato() { return luogoCalcolato; }
     public void setLuogoCalcolato(boolean luogoCalcolato) { this.luogoCalcolato = luogoCalcolato; }
+
+    public Integer getVersioneLuoghi() { return versioneLuoghi; }
+    public void setVersioneLuoghi(Integer versioneLuoghi) { this.versioneLuoghi = versioneLuoghi; }
+
+    public OrigineLuogo getOrigineLuogo() { return origineLuogo; }
+    public void setOrigineLuogo(OrigineLuogo origineLuogo) { this.origineLuogo = origineLuogo; }
+
+    public Double getLatitudineLuogo() { return latitudineLuogo; }
+    public void setLatitudineLuogo(Double latitudineLuogo) { this.latitudineLuogo = latitudineLuogo; }
+
+    public Double getLongitudineLuogo() { return longitudineLuogo; }
+    public void setLongitudineLuogo(Double longitudineLuogo) { this.longitudineLuogo = longitudineLuogo; }
 
     public String getPercorso() { return percorso; }
     public void setPercorso(String percorso) { this.percorso = percorso; }

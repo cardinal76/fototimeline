@@ -10,12 +10,14 @@ import {
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { durata } from './formati';
+import { LuogoFoto } from './luogo-foto';
 import { Foto } from './modelli';
 
 interface Bozza {
@@ -47,7 +49,7 @@ const SWIPE_PX = 50;
 @Component({
   selector: 'app-visore',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, FormsModule, LuogoFoto],
   host: {
     role: 'dialog',
     'aria-modal': 'true',
@@ -106,13 +108,7 @@ export class Visore {
   protected readonly indice = computed(() => this.galleria.foto().findIndex((f) => f.id === this.foto().id));
   protected readonly album = this.galleria.album;
   protected readonly tagNoti = this.galleria.tag;
-  /** "Sperlonga, Lazio · Italia"; senza ripetere (Tokyo, Tokyo). */
-  protected readonly luogo = computed(() => {
-    const f = this.foto();
-    if (!f.luogo) return null;
-    const dove = f.regione && f.regione !== f.luogo ? `${f.luogo}, ${f.regione}` : f.luogo;
-    return f.nazione ? `${dove} · ${f.nazione}` : dove;
-  });
+  private readonly luogoFoto = viewChild(LuogoFoto);
   protected readonly mappa = computed(() => {
     const f = this.foto();
     return f.latitudine != null && f.longitudine != null
@@ -218,13 +214,6 @@ export class Visore {
     }
   }
 
-  /** Dal luogo della foto al filtro della timeline. */
-  protected filtraLuogo(): void {
-    const f = this.foto();
-    this.galleria.imposta({ nazione: f.codiceNazione, regione: f.regione, luogo: f.luogo });
-    this.chiudi.emit();
-  }
-
   protected vai(passo: number): void {
     const lista = this.galleria.foto();
     const i = this.indice() + passo;
@@ -327,6 +316,11 @@ export class Visore {
         break;
       case 'Delete':
         void this.elimina();
+        break;
+      case 'l':
+        // Il luogo si cambia nel pannello: si apre se è chiuso.
+        this.pannello.set(true);
+        setTimeout(() => this.luogoFoto()?.apri());
         break;
       default:
         return;
