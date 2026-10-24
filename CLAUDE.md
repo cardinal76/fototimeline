@@ -534,8 +534,13 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   (`impostazioni/eventi-calcolo`) e riprende da lì. Il ricalcolo leggero
   (`@Scheduled`, giorni in `eventi_da_rifare` segnati da `FotoAggiunta`,
   `FotoNelCestino`, `FotoRipristinata`) non gira insieme al calcolo.
-- Il posto di una foto lo legge solo `LuogoFoto.di`, il nome del luogo lo
-  sceglie solo `NomiEventi.nomeLuogo`: per altri campi di luogo si cambia lì.
+- Il posto di una foto lo legge solo `LuogoFoto.di` (città, provincia,
+  regione, nazione dei luoghi strutturati; anche un luogo scelto a mano solo
+  come regione o nazione), il nome del luogo lo sceglie solo
+  `NomiEventi.nomeLuogo`: per altri campi di luogo si cambia lì. Dopo un
+  cambio dei luoghi (versione di `GeocodificaInversa`) i nomi automatici si
+  rifanno con "Calcola eventi" (rifà tutto se il calcolo di prima era finito),
+  dopo "Calcola luoghi".
 - Filtro `evento` in `FiltroFoto` (`conEvento`) e in `FotoService.criteri`.
   Mai negli oggetti dei link condivisi (`FotoCondivisa`): test in `CondivisioniTest`.
 

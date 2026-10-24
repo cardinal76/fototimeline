@@ -1330,13 +1330,20 @@ Cambiata una soglia, **Calcola eventi** rifà tutto.
   se il pezzo dopo col GPS lo continua, o se dopo non c'è niente di vicino. Un
   gruppo con almeno `MINIMO_FOTO` foto è un evento. Le foto con data
   sconosciuta e quelle nel cestino non entrano.
-- **Il nome** (`eventi/NomiEventi`): "{luogo}, {date}". Il luogo è quello con
-  almeno metà delle foto; altrimenti in Italia la regione, all'estero la
-  nazione. Le date: un giorno ("12 maggio 2021"), fino a 4 giorni giorno per
-  giorno ("9–11 marzo 2018"), oltre il mese ("agosto 2019", "luglio–agosto
-  2019"). Il luogo viene dai campi `luogo`/`regione`/`nazione` di GeoNames:
-  `LuogoFoto.di` e `NomiEventi.nomeLuogo` sono gli unici punti che li leggono e
-  li scelgono.
+- **Il nome** (`eventi/NomiEventi`): "{luogo}, {date}". Il luogo è la città
+  con almeno metà delle foto ("Sperlonga", "Manchester"); altrimenti in Italia
+  la regione con almeno metà ("Trentino-Alto Adige" per un giro tra Canazei,
+  Moena e Bolzano), all'estero la nazione ("Regno Unito"); se no la città con
+  più foto. Le foto con un luogo scelto a mano solo come regione o nazione
+  contano per la regione e la nazione; se nessuna ha una città, il livello più
+  preciso che c'è. La provincia non dà mai il nome (sta dentro la regione). Le
+  date: un giorno ("12 maggio 2021"), fino a 4 giorni giorno per giorno ("9–11
+  marzo 2018"), oltre il mese ("agosto 2019", "luglio–agosto 2019"). Il luogo
+  viene dai campi strutturati `luogo`/`provincia`/`regione`/`nazione` (vedi
+  "Luoghi dal GPS"): `LuogoFoto.di` e `NomiEventi.nomeLuogo` sono gli unici
+  punti che li leggono e li scelgono. Per avere i nomi con i luoghi nuovi:
+  prima **Calcola luoghi**, poi **Calcola eventi** (se il calcolo di prima era
+  finito rifà tutto l'archivio; i nomi degli eventi toccati a mano restano).
 - **Modifiche a mano** (pagina Eventi, e "Evento…" nella barra della
   selezione): rinominare, unire, dividere da una foto, togliere o aggiungere
   foto, nascondere, creare un evento dalla selezione. Un evento toccato diventa

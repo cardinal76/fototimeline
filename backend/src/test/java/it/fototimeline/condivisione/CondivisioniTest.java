@@ -111,6 +111,8 @@ class CondivisioniTest {
 
     @Autowired
     EventiService eventi;
+
+    @Autowired
     MongoTemplate mongo;
 
     @MockitoSpyBean
