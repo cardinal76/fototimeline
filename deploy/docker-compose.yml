@@ -3,7 +3,7 @@
 #
 #   internet ─▶ caddy (HTTPS) ─▶ app ─┬─▶ mongo
 #                                     ├─▶ rclone (API rc) ─▶ LifetimeCloud via WebDAV
-#                                     └─▶ visione (CLIP: ricerca per contenuto, indice dei vettori)
+#                                     └─▶ visione (CLIP e volti: ricerca per contenuto, persone, indici dei vettori)
 #
 # Le foto stanno nel cloud: il container rclone lo monta in $FOTOTIMELINE_DATI/cloud
 # quando un amministratore preme "Monta" nell'app, e lo smonta con "Smonta".
@@ -46,6 +46,8 @@ services:
       - rclone-cache:/cache
       # Google Takeout: rclone ci scarica uno zip alla volta, l'app lo apre (stesso percorso nei due container).
       - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
+      # Video del telefono troppo grandi per LifetimeCloud: rclone ci scarica l'originale, l'app lo ricomprime.
+      - ${FOTOTIMELINE_DATI:?}/video-grandi:/video-grandi
       # rshared: il montaggio fatto qui dentro si vede sull'host e quindi nell'app.
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
@@ -65,7 +67,7 @@ services:
       TZ: Europe/Rome
       # Heap della JVM e, al primo OutOfMemoryError, un heap dump in /diagnostica (DEPLOY.md, "Memoria").
       # 1,5 GB di heap nei 3 GB del container: il resto è la JVM fuori dall'heap e i processi figli
-      # (ffmpeg della conversione, heif-convert), che contano nella memoria del container.
+      # (ffmpeg della conversione e della ricompressione, heif-convert), che contano nella memoria del container.
       JAVA_TOOL_OPTIONS: "${FOTOTIMELINE_JAVA_OPTS:--Xmx1536m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/diagnostica}"
       MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/fototimeline?authSource=admin
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://presenze.footballer.it/auth/realms/fototimeline}
@@ -93,6 +95,20 @@ services:
       FOTOTIMELINE_VIDEO_ATTIVA: ${FOTOTIMELINE_VIDEO_ATTIVA:-true}
       FOTOTIMELINE_VIDEO_THREAD: ${FOTOTIMELINE_VIDEO_THREAD:-2}
       FOTOTIMELINE_VIDEO_RISOLUZIONE: ${FOTOTIMELINE_VIDEO_RISOLUZIONE:-1080}
+      # Video del telefono troppo grandi per LifetimeCloud (oltre 20480 MB, o 413): ricompressi in H.265 qui,
+      # un video alla volta, originale scaricato in /video-grandi (disco di server2) e poi spostato su pCloud
+      # nella cartella FOTOTIMELINE_VIDEO_GRANDI_PCLOUD (DEPLOY.md, "Video troppo grandi").
+      FOTOTIMELINE_VIDEO_GRANDI_ATTIVA: ${FOTOTIMELINE_VIDEO_GRANDI_ATTIVA:-true}
+      FOTOTIMELINE_VIDEO_MAX_MB: ${FOTOTIMELINE_VIDEO_MAX_MB:-20000}
+      FOTOTIMELINE_VIDEO_GRANDI_PCLOUD: ${FOTOTIMELINE_VIDEO_GRANDI_PCLOUD:-Video originali troppo grandi}
+      FOTOTIMELINE_VIDEO_GRANDI_CARTELLA: /video-grandi
+      FOTOTIMELINE_VIDEO_GRANDI_RISERVA: ${FOTOTIMELINE_VIDEO_GRANDI_RISERVA:-2GB}
+      FOTOTIMELINE_VIDEO_GRANDI_THREAD: ${FOTOTIMELINE_VIDEO_GRANDI_THREAD:-2}
+      FOTOTIMELINE_VIDEO_GRANDI_CRF: ${FOTOTIMELINE_VIDEO_GRANDI_CRF:-24}
+      FOTOTIMELINE_VIDEO_GRANDI_CRF_MASSIMO: ${FOTOTIMELINE_VIDEO_GRANDI_CRF_MASSIMO:-32}
+      FOTOTIMELINE_VIDEO_GRANDI_X265: ${FOTOTIMELINE_VIDEO_GRANDI_X265:-frame-threads=1:rc-lookahead=5:bframes=2:ref=2:lookahead-slices=0}
+      # Quanta memoria può prendere ffmpeg (x265) nel tetto del container: con 3g di tetto, un 4K a 8 bit.
+      FOTOTIMELINE_VIDEO_GRANDI_MEMORIA: ${FOTOTIMELINE_VIDEO_GRANDI_MEMORIA:-1100MB}
       RCLONE_RC_URL: http://rclone:5572
       RCLONE_RC_PASSWORD: ${RCLONE_RC_PASSWORD:?}
       RCLONE_REMOTO: ${RCLONE_REMOTO:-lifetime:}
@@ -119,6 +135,12 @@ services:
       FOTOTIMELINE_GOOGLE_CHIAVE: ${FOTOTIMELINE_GOOGLE_CHIAVE:-}
       VISIONE_URL: http://visione:8000
       VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
+      # Riconoscimento dei volti (pagina "Persone"); false = spento del tutto. Soglie in DEPLOY.md.
+      FOTOTIMELINE_VOLTI: ${FOTOTIMELINE_VOLTI:-true}
+      FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO: ${FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO:-0.5}
+      FOTOTIMELINE_VOLTI_SOGLIA_SICURA: ${FOTOTIMELINE_VOLTI_SOGLIA_SICURA:-0.6}
+      FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA: ${FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA:-0.42}
+      FOTOTIMELINE_VOLTI_LATO_MINIMO: ${FOTOTIMELINE_VOLTI_LATO_MINIMO:-32}
     # Il tetto del container: JVM (heap compreso) più ffmpeg e heif-convert. Oltre, Docker lo uccide (OOM killer).
     mem_limit: ${FOTOTIMELINE_MEMORIA_APP:-3g}
     volumes:
@@ -127,6 +149,8 @@ services:
       # L'heap dump di un OutOfMemoryError (java_pid1.hprof): uno solo, finché non lo si cancella.
       - diagnostica:/diagnostica
       - ${FOTOTIMELINE_DATI:?}/takeout:/takeout
+      # Originale (fino a 20 GB e oltre) e ricompresso di un video troppo grande: sul disco, non in /tmp del container.
+      - ${FOTOTIMELINE_DATI:?}/video-grandi:/video-grandi
       - type: bind
         source: ${FOTOTIMELINE_DATI:?}/cloud
         target: /cloud
@@ -139,20 +163,23 @@ services:
       retries: 3
       start_period: 60s
 
-  # Ricerca per contenuto: CLIP multilingue su CPU (visione/), solo sulla rete interna.
-  # I pesi del modello sono nell'immagine; l'indice dei vettori nel volume visione-dati.
+  # Ricerca per contenuto (CLIP multilingue) e volti (YuNet + SFace) su CPU (visione/), solo sulla rete interna.
+  # I pesi dei modelli sono nell'immagine; gli indici dei vettori nel volume visione-dati (i volti in /dati/volti).
   visione:
     build:
       context: ../visione
     restart: unless-stopped
     environment:
       VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
-      # Thread di torch: pochi, server2 fa anche le build della CI.
+      # Thread di torch e di OpenCV: pochi, server2 fa anche le build della CI.
       VISIONE_THREAD: ${VISIONE_THREAD:-2}
+      # Con FOTOTIMELINE_VOLTI=false il modello dei volti non si carica nemmeno (~120 MB in meno).
+      VISIONE_VOLTI: ${FOTOTIMELINE_VOLTI:-true}
     volumes:
       - visione-dati:/dati
-    # Modello (~0,5 GB) + indice (~150 MB con 150.000 foto) + i picchi del calcolo.
-    mem_limit: 1536m
+    # CLIP (~0,5 GB) + il suo indice (~150 MB con 150.000 foto) + i volti (OpenCV ~120 MB, indice ~40 MB
+    # ogni 100.000 volti) + i picchi del calcolo, uno alla volta: ~1,3 GB. VISIONE_MEMORIA per alzarlo.
+    mem_limit: ${VISIONE_MEMORIA:-1536m}
     cpus: 2.0
     # Peso CPU basso: con le build in corso il calcolo dei vettori aspetta (e nel container gira con nice).
     cpu_shares: 256

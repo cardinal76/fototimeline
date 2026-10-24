@@ -51,6 +51,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import it.fototimeline.cloud.CloudProperties;
 import it.fototimeline.cloud.Rclone;
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.media.StrumentiMedia;
+import it.fototimeline.media.TurnoVideo;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
@@ -91,6 +93,9 @@ class SincronizzazioneTelefonoTest {
     @Autowired
     ImportazioneCartelle importazione;
 
+    @Autowired
+    StrumentiMedia media;
+
     private RestClient.Builder builder;
     private FintoRclone rclone;
     private Orologio orologio;
@@ -103,6 +108,7 @@ class SincronizzazioneTelefonoTest {
         mongo.remove(new Query(), SorgenteTelefono.class);
         mongo.remove(new Query(), ImpostazioniTelefono.class);
         mongo.remove(new Query(), CopiaTelefono.class);
+        mongo.remove(new Query(), VideoGrande.class);
         mongo.remove(new Query(), Utente.class);
         fotoRepository.findAll().forEach(f -> {
             fotoService.elimina(f.getId());
@@ -117,8 +123,11 @@ class SincronizzazioneTelefonoTest {
 
     private SincronizzazioneTelefono nuova(CloudProperties cloud, ImportazioneAutomaticaProperties automatica,
             String proprietarioMigrato) {
+        var videoGrandi = new VideoGrandi(new Rclone(cloud, builder), cloud, mongo, media, new TurnoVideo(),
+                VideoGrandiProperties.predefinite(), Optional.of(orologio));
+        videoGrandi.perTest(Duration.ofMillis(5), Duration.ofSeconds(5), null);
         return new SincronizzazioneTelefono(new Rclone(cloud, builder), cloud, automatica, mongo, proprietarioMigrato,
-                Optional.of(orologio));
+                videoGrandi, Optional.of(orologio));
     }
 
     private SorgenteTelefono sorgente(String id) {
@@ -305,7 +314,8 @@ class SincronizzazioneTelefonoTest {
     /** Una voce del registro del telefono di Marco, come la scrive un giro riuscito. */
     private void registrata(String percorso, long dimensione, String destinazione) {
         mongo.insert(new CopiaTelefono(new org.bson.types.ObjectId().toHexString(), "pcloud:Automatic Upload", marco,
-                "marco", percorso, dimensione, null, destinazione, orologio.instant().minus(Duration.ofDays(1)), null));
+                "marco", percorso, dimensione, null, destinazione, orologio.instant().minus(Duration.ofDays(1)), null,
+                null));
     }
 
     @Test
@@ -709,7 +719,7 @@ class SincronizzazioneTelefonoTest {
     void migrazioneDalTelefonoUnicoSenzaRicopiare() {
         mongo.remove(new Query(), SorgenteTelefono.class);
         var giroVecchio = new Giro(Instant.parse("2026-04-30T08:00:00Z"), Instant.parse("2026-04-30T08:05:00Z"),
-                Esito.OK, "Fatto", 2, 2, 0, 0, 0, 0, List.of());
+                Esito.OK, "Fatto", 2, 2, 0, 0, 0, 0, List.of(), null, null, null);
         // Il documento di prima, senza copieInParallelo (salvato prima che ci fosse).
         mongo.insert(new ImpostazioniTelefono(ImpostazioniTelefono.ID, true, "pcloud:Automatic Upload", 12, 30, null,
                 giroVecchio));
@@ -906,6 +916,13 @@ class SincronizzazioneTelefonoTest {
         /** Chiamato a ogni job/status con la destinazione, mentre la copia "gira". */
         java.util.function.Consumer<String> duranteLaCopia = destinazione -> {
         };
+        /** Il contenuto vero di un file di pCloud, per quando lo si scarica su disco; senza, un file vuoto della sua dimensione. */
+        final Map<String, Path> contenuti = new HashMap<>();
+        /** LifetimeCloud rifiuta i file più grandi di così (null = nessun limite), col messaggio {@link #rifiuto}. */
+        Long rifiutaOltre;
+        String rifiuto = "File too large. Max 20480MB on 2 TB Lifetime.: 403 Forbidden";
+        /** Se c'è, quello che arriva su LifetimeCloud da un disco locale si scrive anche qui (il cloud "montato"). */
+        Path lifetimeSuDisco;
         private final Map<Long, List<String>> job = new HashMap<>();
 
         FintoRclone(RestClient.Builder builder) {
@@ -945,7 +962,8 @@ class SincronizzazioneTelefonoTest {
             chiamate.add(registrata);
             Object risposta = switch (comando) {
                 case "operations/list" -> {
-                    String radice = p.get("remote") + "/";
+                    // La radice del remote ("pcloud:") ha remote vuoto: tutti i file.
+                    String radice = "".equals(p.get("remote")) ? "" : p.get("remote") + "/";
                     List<Map<String, Object>> voci = new ArrayList<>();
                     remoto(p.get("fs")).forEach((percorso, dimensione) -> {
                         if (percorso.startsWith(radice)) {
@@ -966,29 +984,63 @@ class SincronizzazioneTelefonoTest {
                 }
                 case "operations/copyfile" -> {
                     String da = (String) p.get("srcRemote");
+                    String a = (String) p.get("dstRemote");
+                    String srcFs = (String) p.get("srcFs");
+                    String dstFs = (String) p.get("dstFs");
                     if (fallisconoUnaVolta.remove(da)) {
                         throw new IOException("Request cancelled");
                     }
+                    String errore = "";
                     if (!lenti.contains(da)) {
-                        long dimensione = remoto(p.get("srcFs")).get(da);
-                        remoto(p.get("dstFs")).put((String) p.get("dstRemote"),
-                                troncati.contains(da) ? dimensione / 2 : dimensione);
+                        long dimensione = srcFs.startsWith("/") ? Files.size(Path.of(srcFs, da)) : remoto(srcFs).get(da);
+                        if ("lifetime:".equals(dstFs) && rifiutaOltre != null && dimensione > rifiutaOltre) {
+                            errore = rifiuto;
+                        } else if (dstFs.startsWith("/")) {
+                            // Scaricato sul disco del server: il contenuto vero, o un file della sua dimensione.
+                            Path file = Path.of(dstFs, a);
+                            Files.createDirectories(file.getParent());
+                            if (contenuti.containsKey(da)) {
+                                Files.copy(contenuti.get(da), file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            } else {
+                                try (var f = new java.io.RandomAccessFile(file.toFile(), "rw")) {
+                                    f.setLength(dimensione);
+                                }
+                            }
+                        } else {
+                            remoto(dstFs).put(a, troncati.contains(da) ? dimensione / 2 : dimensione);
+                            if (srcFs.startsWith("/") && lifetimeSuDisco != null) {
+                                Path file = lifetimeSuDisco.resolve(a);
+                                Files.createDirectories(file.getParent());
+                                Files.copy(Path.of(srcFs, da), file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            }
+                        }
                     }
                     if (risposteCadute.contains(da)) {
                         throw new IOException("Request cancelled");
                     }
                     if (Boolean.TRUE.equals(p.get("_async"))) {
                         long id = job.size() + 1L;
-                        job.put(id, List.of(da, (String) p.get("dstRemote")));
+                        job.put(id, List.of(da, a, errore));
                         yield Map.of("jobid", id);
                     }
+                    yield Map.of();
+                }
+                case "operations/movefile" -> {
+                    String da = (String) p.get("srcRemote");
+                    String a = (String) p.get("dstRemote");
+                    Long dimensione = remoto(p.get("srcFs")).remove(da);
+                    if (dimensione == null || remoto(p.get("dstFs")).containsKey(a)) {
+                        throw new IOException("movefile " + da + " → " + a + ": origine assente o destinazione già presente");
+                    }
+                    remoto(p.get("dstFs")).put(a, dimensione);
                     yield Map.of();
                 }
                 case "job/status" -> {
                     List<String> copia = job.get(((Number) p.get("jobid")).longValue());
                     String da = copia.get(0);
                     duranteLaCopia.accept(copia.get(1));
-                    yield Map.of("finished", !lenti.contains(da), "success", true, "error", "");
+                    yield Map.of("finished", !lenti.contains(da), "success", copia.get(2).isEmpty(),
+                            "error", copia.get(2));
                 }
                 case "job/stop" -> Map.of();
                 case "core/stats" -> {

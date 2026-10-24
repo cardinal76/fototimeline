@@ -21,17 +21,25 @@ RUN curl -fsSL --retry 3 -o cities500.zip "$GEONAMES/cities500.zip" \
     && unzip -p cities500.zip cities500.txt | awk -F'\t' 'BEGIN { OFS = "\t" } { $4 = ""; print }' > cities500.txt \
     && rm cities500.zip \
     && curl -fsSL --retry 3 -o admin1CodesASCII.txt "$GEONAMES/admin1CodesASCII.txt" \
-    && curl -fsSL --retry 3 -o countryInfo.txt "$GEONAMES/countryInfo.txt"
-# I nomi in italiano (Roma, Parigi, Baviera): da alternateNamesV2 (200 MB compresso,
-# quasi 800 in chiaro) solo le righe "it" dei luoghi e delle regioni qui sopra, ~1 MB.
+    && curl -fsSL --retry 3 -o countryInfo.txt "$GEONAMES/countryInfo.txt" \
+    && curl -fsSL --retry 3 "$GEONAMES/admin2Codes.txt" | grep '^IT\.' > admin2Codes.txt
+# Le province (admin2) servono solo per l'Italia: dei 2,3 MB di admin2Codes restano
+# le ~110 righe "IT.", 8 KB (Provincia di Trento, di Latina...).
+# I nomi in italiano (Roma, Parigi, Baviera, Provincia di Trento, Olanda per i Paesi
+# Bassi): da alternateNamesV2 (200 MB compresso, quasi 800 in chiaro) solo le righe
+# "it" dei luoghi, delle regioni, delle province e delle nazioni qui sopra, ~1 MB.
 RUN curl -fsSL --retry 3 -o alternateNamesV2.zip "$GEONAMES/alternateNamesV2.zip" \
     && unzip -p alternateNamesV2.zip alternateNamesV2.txt \
        | awk -F'\t' '$3 == "it"' \
        | awk -F'\t' 'FILENAME == "cities500.txt" { id[$1] = 1; next }; \
                      FILENAME == "admin1CodesASCII.txt" { id[$4] = 1; next }; \
-                     ($2 in id)' cities500.txt admin1CodesASCII.txt - > alternateNames-it.txt \
+                     FILENAME == "admin2Codes.txt" { id[$4] = 1; next }; \
+                     FILENAME == "countryInfo.txt" { if ($0 !~ /^#/) id[$17] = 1; next }; \
+                     ($2 in id)' cities500.txt admin1CodesASCII.txt admin2Codes.txt countryInfo.txt - \
+       > alternateNames-it.txt \
     && rm alternateNamesV2.zip \
     && test "$(wc -l < cities500.txt)" -gt 100000 && test -s alternateNames-it.txt \
+    && test "$(wc -l < admin2Codes.txt)" -gt 100 \
     && ls -la
 
 FROM maven:3.9-eclipse-temurin-21 AS backend

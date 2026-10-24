@@ -13,11 +13,14 @@ import {
   Condivisione,
   CopiaBackup,
   ElencoTelefoni,
+  ElencoEventi,
   ElencoLuoghi,
+  Evento,
   Filtro,
   Foto,
   Io,
   LavoroContenuto,
+  Luogo,
   FileScartato,
   LavoroImportazione,
   Modifica,
@@ -37,6 +40,14 @@ import {
   StatoConversioni,
   StatoImpronte,
   StatoTelefono,
+  StatoVolti,
+  LavoroVolti,
+  ElencoPersone,
+  PersonaSimile,
+  TipoPersone,
+  VocePersona,
+  VoceVolto,
+  VoltoInFoto,
   Utente,
   VoceMese,
 } from './modelli';
@@ -98,9 +109,77 @@ export class FotoApi {
     return this.http.get<ElencoLuoghi>('/api/luoghi');
   }
 
+  /** Città, province, regioni e nazioni per nome, per scegliere il luogo a mano ("Manch" → Manchester). */
+  cercaLuoghi(q: string): Observable<Luogo[]> {
+    return this.http.get<Luogo[]>('/api/luoghi/cerca', { params: { q } });
+  }
+
+  /** Il luogo scelto a mano (chiave di cercaLuoghi), null per "nessun luogo". */
+  impostaLuogo(id: string, chiave: string | null): Observable<Foto> {
+    return this.http.put<Foto>(`/api/foto/${id}/luogo`, { chiave });
+  }
+
+  /** Torna al luogo calcolato dal GPS. */
+  luogoDaGps(id: string): Observable<Foto> {
+    return this.http.delete<Foto>(`/api/foto/${id}/luogo`);
+  }
+
   /** "Calcola luoghi" in sottofondo (solo admin); tutte = anche quelle che il luogo ce l'hanno. */
   calcolaLuoghi(tutte: boolean): Observable<LavoroImportazione> {
     return this.http.post<LavoroImportazione>('/api/archivio/luoghi', {}, { params: tutte ? { tutte } : {} });
+  }
+
+  // ------------------------------------------------------------ eventi
+
+  /** Gli eventi dal più recente; i nascosti solo se chiesti. */
+  eventi(nascosti = false): Observable<ElencoEventi> {
+    return this.http.get<ElencoEventi>('/api/eventi', { params: nascosti ? { nascosti } : {} });
+  }
+
+  evento(id: string): Observable<Evento> {
+    return this.http.get<Evento>(`/api/eventi/${encodeURIComponent(id)}`);
+  }
+
+  /** I nomi degli eventi non nascosti tra questi id. */
+  nomiEventi(ids: string[]): Observable<Record<string, string>> {
+    return this.http.get<Record<string, string>>('/api/eventi/nomi', { params: { ids: ids.join(',') } });
+  }
+
+  /** Un evento nuovo dalle foto scelte; senza nome, quello automatico. */
+  creaEvento(ids: string[], nome?: string): Observable<Evento> {
+    return this.http.post<Evento>('/api/eventi', { nome, ids });
+  }
+
+  /** nome vuoto = torna quello automatico. */
+  modificaEvento(id: string, modifica: { nome?: string; nascosto?: boolean }): Observable<Evento> {
+    return this.http.put<Evento>(`/api/eventi/${encodeURIComponent(id)}`, modifica);
+  }
+
+  unisciEventi(ids: string[]): Observable<Evento> {
+    return this.http.post<Evento>('/api/eventi/unisci', { ids });
+  }
+
+  /** La foto e quelle dopo vanno in un evento nuovo. */
+  dividiEvento(id: string, foto: string): Observable<Evento[]> {
+    return this.http.post<Evento[]>(`/api/eventi/${encodeURIComponent(id)}/dividi`, { foto });
+  }
+
+  aggiungiAEvento(id: string, ids: string[]): Observable<{ modificate: number }> {
+    return this.http.post<{ modificate: number }>(`/api/eventi/${encodeURIComponent(id)}/foto`, { ids });
+  }
+
+  togliDaEvento(ids: string[]): Observable<{ modificate: number }> {
+    return this.http.post<{ modificate: number }>('/api/eventi/togli', { ids });
+  }
+
+  /** "Torna automatico": l'evento si scioglie, il ricalcolo rifà da sé. */
+  sciogliEvento(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/eventi/${encodeURIComponent(id)}`);
+  }
+
+  /** "Calcola eventi" in sottofondo (solo admin): riprende da dove si era fermato, salvo daCapo. */
+  calcolaEventi(daCapo: boolean): Observable<LavoroImportazione> {
+    return this.http.post<LavoroImportazione>('/api/archivio/eventi', {}, { params: daCapo ? { daCapo } : {} });
   }
 
   carica(file: File[], album?: string): Observable<HttpEvent<Caricamento[]>> {
@@ -202,6 +281,16 @@ export class FotoApi {
 
   sincronizzaTelefono(id: string): Observable<StatoTelefono> {
     return this.http.post<StatoTelefono>(`/api/telefoni/${encodeURIComponent(id)}/sincronizza`, {});
+  }
+
+  /** Ferma la ricompressione di un video troppo grande (admin); l'originale resta su pCloud. */
+  annullaVideoGrande(id: string): Observable<void> {
+    return this.http.post<void>(`/api/telefoni/video-grandi/${encodeURIComponent(id)}/annulla`, {});
+  }
+
+  /** Rimette in coda un video troppo grande in errore, annullato o rimandato (admin). */
+  riprovaVideoGrande(id: string): Observable<void> {
+    return this.http.post<void>(`/api/telefoni/video-grandi/${encodeURIComponent(id)}/riprova`, {});
   }
 
   /** Gruppi di foto quasi uguali, dal più numeroso. */
@@ -337,6 +426,89 @@ export class FotoApi {
 
   annullaContenuto(): Observable<void> {
     return this.http.post<void>('/api/contenuto/annulla', {});
+  }
+
+  // ------------------------------------------------------------ volti e persone
+
+  /** Se il riconoscimento dei volti c'è, e a che punto è. */
+  volti(): Observable<StatoVolti> {
+    return this.http.get<StatoVolti>('/api/volti');
+  }
+
+  /** "Riconosci volti" in sottofondo (solo admin); ricostruisci = prima rifà l'indice dei vicini di visione. */
+  riconosciVolti(ricostruisci = false): Observable<LavoroVolti> {
+    return this.http.post<LavoroVolti>('/api/volti/riconosci', {}, { params: ricostruisci ? { ricostruisci } : {} });
+  }
+
+  annullaVolti(): Observable<void> {
+    return this.http.post<void>('/api/volti/annulla', {});
+  }
+
+  persone(tipo: TipoPersone = 'NOMINATE', limite = 500): Observable<ElencoPersone> {
+    return this.http.get<ElencoPersone>('/api/persone', { params: { tipo, limite } });
+  }
+
+  persona(id: string): Observable<VocePersona> {
+    return this.http.get<VocePersona>(`/api/persone/${encodeURIComponent(id)}`);
+  }
+
+  /** Nome vuoto: torna un gruppo senza nome. 409 se un'altra ha già quel nome (error.persona). */
+  nominaPersona(id: string, nome: string): Observable<VocePersona> {
+    return this.http.put<VocePersona>(`/api/persone/${encodeURIComponent(id)}`, { nome });
+  }
+
+  nascondiPersona(id: string, nascosta: boolean): Observable<VocePersona> {
+    return this.http.post<VocePersona>(`/api/persone/${encodeURIComponent(id)}/nascondi`, { nascosta });
+  }
+
+  /** Le persone "da" passano in "in". */
+  unisciPersone(dentro: string, da: string[]): Observable<VocePersona> {
+    return this.http.post<VocePersona>('/api/persone/unisci', { in: dentro, da });
+  }
+
+  voltiPersona(id: string, pagina = 0, dimensione = 100): Observable<VoceVolto[]> {
+    return this.http.get<VoceVolto[]>(`/api/persone/${encodeURIComponent(id)}/volti`, { params: { pagina, dimensione } });
+  }
+
+  proposte(id: string): Observable<VoceVolto[]> {
+    return this.http.get<VoceVolto[]>(`/api/persone/${encodeURIComponent(id)}/proposte`);
+  }
+
+  confermaProposte(id: string): Observable<{ confermate: number }> {
+    return this.http.post<{ confermate: number }>(`/api/persone/${encodeURIComponent(id)}/proposte/conferma`, {});
+  }
+
+  simili(id: string): Observable<PersonaSimile[]> {
+    return this.http.get<PersonaSimile[]>(`/api/persone/${encodeURIComponent(id)}/simili`);
+  }
+
+  copertina(id: string, volto: string): Observable<void> {
+    return this.http.post<void>(`/api/persone/${encodeURIComponent(id)}/copertina`, { volto });
+  }
+
+  voltiDellaFoto(id: string): Observable<VoltoInFoto[]> {
+    return this.http.get<VoltoInFoto[]>(`/api/foto/${encodeURIComponent(id)}/volti`);
+  }
+
+  togliVolto(id: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/togli`, {});
+  }
+
+  assegnaVolto(id: string, persona: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/assegna`, { persona });
+  }
+
+  /** "Chi è?": una persona che c'è già, il nome al gruppo del volto, o una persona nuova. */
+  nominaVolto(id: string, nome: string): Observable<VocePersona> {
+    return this.http.post<VocePersona>(`/api/volti/${encodeURIComponent(id)}/nome`, { nome });
+  }
+
+  rifiutaProposta(id: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/rifiuta`, {});
+  }
+
+  static ritaglio(voltoId: string): string {
+    return `/api/volti/${encodeURIComponent(voltoId)}/ritaglio`;
   }
 
   modifica(id: string, modifica: Modifica): Observable<Foto> {

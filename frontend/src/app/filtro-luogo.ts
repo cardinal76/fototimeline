@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signal } from '@angular/core';
 
 import { Galleria } from './galleria';
-import { Filtro } from './modelli';
+import { filtroLuogo, semplice } from './luoghi';
+import { Filtro, VoceLuogo, VoceRegione } from './modelli';
 
-type SceltaLuogo = Pick<Filtro, 'nazione' | 'regione' | 'luogo'>;
+type SceltaLuogo = Pick<Filtro, 'nazione' | 'regione' | 'provincia' | 'luogo'>;
 
 interface Risultato {
   chiave: string;
@@ -14,14 +15,10 @@ interface Risultato {
   filtro: SceltaLuogo;
 }
 
-/** Senza maiuscole né accenti: "parigi" trova "Parigi", "ile" trova "Île-de-France". */
-function semplice(testo: string): string {
-  return testo.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-}
-
 /**
- * Il filtro "Luogo" nella barra: nazioni, regioni e luoghi con quante foto
- * (GET /api/luoghi), oppure la ricerca per nome.
+ * Il filtro "Luogo" nella barra: nazioni, regioni (in Italia con le
+ * province) e città con quante foto (GET /api/luoghi), oppure la ricerca per
+ * nome. È anche l'elenco dei luoghi dell'archivio, come i tag.
  */
 @Component({
   selector: 'app-filtro-luogo',
@@ -100,7 +97,45 @@ function semplice(testo: string): string {
                           </div>
                           @if (espansa(chiave)) {
                             <ul>
-                              @for (l of r.luoghi; track l.nome) {
+                              @for (p of r.province; track p.nome) {
+                                @let chiaveProvincia = chiave + '|' + p.nome;
+                                <li>
+                                  <div class="voce">
+                                    <button
+                                      type="button"
+                                      class="espandi"
+                                      [attr.aria-expanded]="espansa(chiaveProvincia)"
+                                      (click)="commuta(chiaveProvincia)"
+                                    >
+                                      {{ espansa(chiaveProvincia) ? '▾' : '▸' }}
+                                    </button>
+                                    <button type="button" class="nome" (click)="scegli({ nazione: n.codice, regione: r.nome, provincia: p.nome })">
+                                      {{ p.nome }}
+                                    </button>
+                                    <span class="conto">{{ p.conteggio }}</span>
+                                  </div>
+                                  @if (espansa(chiaveProvincia)) {
+                                    <ul>
+                                      @for (l of cittaDi(r, p.nome); track l.nome) {
+                                        <li>
+                                          <div class="voce">
+                                            <button
+                                              type="button"
+                                              class="nome"
+                                              (click)="scegli({ nazione: n.codice, regione: r.nome, provincia: l.provincia, luogo: l.nome })"
+                                            >
+                                              {{ l.nome }}
+                                            </button>
+                                            <span class="conto">{{ l.conteggio }}</span>
+                                          </div>
+                                        </li>
+                                      }
+                                    </ul>
+                                  }
+                                </li>
+                              }
+                              <!-- All'estero (e in Italia le città senza provincia) le città stanno sotto la regione. -->
+                              @for (l of cittaDi(r, undefined); track l.nome) {
                                 <li>
                                   <div class="voce">
                                     <button type="button" class="nome" (click)="scegli({ nazione: n.codice, regione: r.nome, luogo: l.nome })">
@@ -297,22 +332,41 @@ export class FiltroLuogo {
   protected readonly etichetta = computed(() => {
     const f = this.galleria.filtro();
     if (f.luogo) return f.luogo;
+    if (f.provincia) return f.provincia;
     if (f.regione) return f.regione;
     if (f.nazione) return this.galleria.luoghi()?.nazioni.find((n) => n.codice === f.nazione)?.nome ?? f.nazione;
     return null;
   });
 
-  /** Ricerca per nome: prima i luoghi, poi regioni e nazioni; i più fotografati prima, al massimo 60. */
+  /** Ricerca per nome: città, province, regioni e nazioni (anche con gli altri nomi: "Olanda"); le più fotografate prima, al massimo 60. */
   protected readonly risultati = computed<Risultato[]>(() => {
     const cercato = semplice(this.testo().trim());
     const elenco = this.galleria.luoghi();
     if (!cercato || !elenco) return [];
     const trovati: Risultato[] = [];
     for (const n of elenco.nazioni) {
-      if (semplice(n.nome).includes(cercato)) {
-        trovati.push({ chiave: n.codice, nome: n.nome, dove: '', conteggio: n.conteggio, filtro: { nazione: n.codice } });
+      const altro = n.altriNomi?.find((a) => semplice(a).includes(cercato));
+      if (semplice(n.nome).includes(cercato) || altro) {
+        trovati.push({
+          chiave: n.codice,
+          nome: n.nome,
+          dove: altro && !semplice(n.nome).includes(cercato) ? altro : '',
+          conteggio: n.conteggio,
+          filtro: { nazione: n.codice },
+        });
       }
       for (const r of n.regioni) {
+        for (const p of r.province ?? []) {
+          if (semplice(p.nome).includes(cercato)) {
+            trovati.push({
+              chiave: `${n.codice}|${r.nome ?? ''}|${p.nome}|`,
+              nome: p.nome,
+              dove: [r.nome, n.nome].filter(Boolean).join(', '),
+              conteggio: p.conteggio,
+              filtro: { nazione: n.codice, regione: r.nome, provincia: p.nome },
+            });
+          }
+        }
         if (r.nome && semplice(r.nome).includes(cercato)) {
           trovati.push({
             chiave: `${n.codice}|${r.nome}`,
@@ -325,11 +379,11 @@ export class FiltroLuogo {
         for (const l of r.luoghi) {
           if (semplice(l.nome).includes(cercato)) {
             trovati.push({
-              chiave: `${n.codice}|${r.nome ?? ''}|${l.nome}`,
+              chiave: `${n.codice}|${r.nome ?? ''}|${l.provincia ?? ''}|${l.nome}`,
               nome: l.nome,
-              dove: [r.nome, n.nome].filter(Boolean).join(', '),
+              dove: [l.provincia, r.nome, n.nome].filter(Boolean).join(', '),
               conteggio: l.conteggio,
-              filtro: { nazione: n.codice, regione: r.nome, luogo: l.nome },
+              filtro: { nazione: n.codice, regione: r.nome, provincia: l.provincia, luogo: l.nome },
             });
           }
         }
@@ -365,8 +419,13 @@ export class FiltroLuogo {
     });
   }
 
+  /** Le città di una provincia, o (provincia assente) quelle che non ne hanno una. */
+  protected cittaDi(r: VoceRegione, provincia: string | undefined): VoceLuogo[] {
+    return r.luoghi.filter((l) => (l.provincia ?? undefined) === provincia);
+  }
+
   protected scegli(f: SceltaLuogo): void {
-    this.galleria.imposta({ nazione: f.nazione, regione: f.regione, luogo: f.luogo });
+    this.galleria.imposta(filtroLuogo(f.nazione, f.regione, f.provincia, f.luogo));
     this.aperto.set(false);
     this.testo.set('');
   }

@@ -6,6 +6,15 @@ export function daQuanto(secondi: number): string {
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
 
+/** Byte in base 1024, come li conta LifetimeCloud: 850 MB, 23,1 GB. */
+export function peso(byte?: number | null): string {
+  if (byte == null) return '?';
+  const mb = byte / 1_048_576;
+  return mb >= 1024
+    ? `${(mb / 1024).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB`
+    : `${Math.round(mb).toLocaleString('it-IT')} MB`;
+}
+
 /** 75 → "1:15", 3725 → "1:02:05". */
 export function durata(secondi?: number): string {
   if (secondi == null) return '';

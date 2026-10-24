@@ -91,6 +91,24 @@
           <span>Luogo</span>
           <app-filtro-luogo />
         </div>
+        <div class="campo">
+          <span>Evento</span>
+          <app-filtro-evento (scegli)="chiudiMenu(); dialogoEventi.set(true)" />
+        </div>
+        @if (galleria.volti()?.attiva && (galleria.personeNominate().length || galleria.filtro().persona)) {
+          <label class="campo">
+            <span>Persona</span>
+            <select aria-label="Persona" [ngModel]="galleria.filtro().persona ?? ''" (ngModelChange)="scegliPersona($event)">
+              <option value="">Tutte le persone</option>
+              @if (galleria.personaScelta(); as g) {
+                <option [value]="g.id">{{ g.nome ?? 'Gruppo senza nome' }}</option>
+              }
+              @for (p of galleria.personeNominate(); track p.id) {
+                <option [value]="p.id">{{ p.nome }} ({{ p.volti }})</option>
+              }
+            </select>
+          </label>
+        }
         <button
           type="button"
           class="interruttore"
@@ -124,6 +142,19 @@
     }
   }
 
+  <!-- "Riconosci volti" in corso, come il contenuto: un clic apre "Persone". -->
+  @if (galleria.io()?.admin) {
+    @if (galleria.volti(); as v) {
+      @if (v.attiva && v.lavoro?.stato === 'IN_CORSO') {
+        <span class="lavoro-contenuto" role="status" [title]="v.lavoro!.fatte + ' foto su ' + v.lavoro!.daFare + ', ' + v.lavoro!.volti + ' volti'">
+          <button type="button" class="link" (click)="dialogoPersone.set(true)">Volti {{ percentualeVolti() }}%</button>
+          <progress [value]="percentualeVolti()" max="100"></progress>
+          <button type="button" class="link" (click)="galleria.annullaVolti()">Annulla</button>
+        </span>
+      }
+    }
+  }
+
   <!-- L'importazione ridotta: un indicatore che riapre il riquadro. Il lavoro continua. -->
   @if (galleria.importazione(); as l) {
     @if (galleria.importazioneRidotta()) {
@@ -139,7 +170,7 @@
             Cerco i file: {{ l.trovate | number }}
           } @else if (l.stato === 'IN_CORSO') {
             <span class="girello" aria-hidden="true"></span>
-            {{ l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
+            {{ l.origine === 'EVENTI' ? 'Eventi' : l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
             {{ percentualeImportazione() }}%
           } @else {
             {{ nomeLavoro(l) }} {{ l.stato === 'FALLITA' ? 'non riuscita' : l.stato === 'ANNULLATA' ? 'annullata' : 'finita' }}
@@ -249,6 +280,16 @@
                 Calcola luoghi
               </button>
             }
+            <button
+              type="button"
+              class="voce"
+              role="menuitem"
+              [disabled]="galleria.lavoroOccupato()"
+              title="Raggruppa le foto in eventi (viaggi, feste); riprende da dove si era fermato"
+              (click)="chiudiMenu(); calcolaEventi()"
+            >
+              Calcola eventi
+            </button>
             @if (galleria.archivioDisponibile()) {
               <button
                 type="button"
@@ -259,6 +300,26 @@
                 (click)="chiudiMenu(); convertiVideo()"
               >
                 Converti video
+              </button>
+            }
+          }
+          <button type="button" class="voce" role="menuitem" title="Le foto raggruppate per tempo e posto: viaggi, feste, giornate" (click)="chiudiMenu(); dialogoEventi.set(true)">
+            Eventi
+          </button>
+          @if (galleria.volti()?.attiva) {
+            <button type="button" class="voce" role="menuitem" title="I volti riconosciuti: dai un nome, unisci, nascondi; clic su un volto per le sue foto" (click)="chiudiMenu(); dialogoPersone.set(true)">
+              Persone
+            </button>
+            @if (galleria.io()?.admin && galleria.volti()?.lavoro?.stato !== 'IN_CORSO' && galleria.volti()?.mancanti) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [class.errore]="galleria.volti()?.lavoro?.stato === 'FALLITO'"
+                [title]="galleria.volti()?.lavoro?.stato === 'FALLITO' ? 'Ultimo giro non riuscito: ' + (galleria.volti()?.lavoro?.errore ?? '') : 'Cerca i volti nelle foto che non sono ancora state guardate'"
+                (click)="chiudiMenu(); riconosciVolti()"
+              >
+                Riconosci volti ({{ galleria.volti()?.mancanti }})
               </button>
             }
           }
@@ -394,6 +455,9 @@
     @if (!filtriAttivi()) {
       <app-ricordi (apri)="aperta.set($event)" />
     }
+    @if (galleria.filtro().evento) {
+      <p class="salto"><app-filtro-evento [riga]="true" /></p>
+    }
     @if (galleria.filtro().al; as al) {
       <p class="salto">
         Foto fino a {{ al | date: 'MMMM y' }}
@@ -506,8 +570,10 @@
     <button type="button" (click)="operazione('AGGIUNGI_TAG')">+ Tag</button>
     <button type="button" (click)="operazione('TOGLI_TAG')">− Tag</button>
     <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
+    <button type="button" (click)="dialogoLuogo.set(true)">📍 Luogo…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
     <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
+    <button type="button" title="Nuovo evento, aggiungi, togli, dividi" (click)="dialogoSceltaEvento.set(true)">Evento…</button>
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
     <button type="button" class="link" (click)="galleria.deseleziona()">Deseleziona</button>
   </div>
@@ -545,13 +611,14 @@
   @if (!galleria.importazioneRidotta()) {
   <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
     <div class="riga">
-      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : 'Importazione';
+      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : l.origine === 'EVENTI' ? 'Calcolo degli eventi' : 'Importazione';
       <b>
         @switch (l.stato) {
           @case ('IN_CORSO') {
             @switch (l.origine) {
               @case ('INDICIZZAZIONE') { Indicizzazione dell'archivio… }
               @case ('LUOGHI') { Calcolo dei luoghi… }
+              @case ('EVENTI') { Calcolo degli eventi… }
               @case ('AUTOMATICA') { Importazione automatica da {{ l.cartella }}… }
               @default { Importo da {{ l.cartella }}… }
             }
@@ -594,6 +661,13 @@
       </p>
     } @else if (l.origine === 'LUOGHI') {
       <p>{{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} con un luogo · {{ l.duplicate }} senza (mare aperto)</p>
+    } @else if (l.origine === 'EVENTI') {
+      <p>
+        {{ l.fatte }} / {{ l.trovate }} foto · {{ l.importate }} in un evento · {{ l.duplicate }} fuori
+        @if (l.stato === 'ANNULLATA') {
+          · riprende da qui al prossimo <b>Calcola eventi</b>
+        }
+      </p>
     } @else {
       <p>
         {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
@@ -826,6 +900,12 @@
                   @if (g.aMetaTolte) {
                     · {{ g.aMetaTolte }} copie a metà tolte
                   }
+                  @if (g.ricompressi) {
+                    · {{ g.ricompressi }} video ricompressi
+                  }
+                  @if (g.inRicompressione) {
+                    · {{ g.inRicompressione }} in ricompressione
+                  }
                   @if (g.errori) {
                     · <span class="errore">{{ g.errori }} errori</span>
                   }
@@ -839,6 +919,41 @@
                 }
               } @else if (!t.inCorso) {
                 <p class="tenue">Nessun giro finora.</p>
+              }
+              @if (t.videoGrandi?.length) {
+                <h4>Video troppo grandi per il cloud</h4>
+                <p class="tenue">
+                  Ricompressi in H.265 sul server, uno alla volta; l'originale resta su pCloud, nella sua cartella.
+                </p>
+                <ul class="video-grandi">
+                  @for (v of t.videoGrandi; track v.id) {
+                    <li>
+                      <b [title]="v.percorso">{{ v.nome }}</b>
+                      · {{ peso(v.dimensione) }}
+                      @if (v.dimensioneRicompresso) {
+                        → {{ peso(v.dimensioneRicompresso) }}
+                        @if (v.crf != null) {
+                          (CRF {{ v.crf }})
+                        }
+                      }
+                      · <span [class.errore]="v.stato === 'ERRORE'">{{ statoVideoGrande(v) }}</span>
+                      @if (v.stato === 'IN_CORSO') {
+                        <span class="rotella piccola" aria-hidden="true"></span>
+                      }
+                      @if (v.originaleIn) {
+                        <br /><span class="tenue">Originale in <code>{{ v.originaleIn }}</code></span>
+                      }
+                      @if (galleria.io()?.admin) {
+                        @if (v.stato === 'IN_CODA' || v.stato === 'IN_CORSO' || v.stato === 'RIMANDATO') {
+                          <button type="button" class="piccolo" (click)="annullaVideoGrande(v)">Annulla</button>
+                        }
+                        @if (v.stato === 'ERRORE' || v.stato === 'ANNULLATO' || v.stato === 'RIMANDATO') {
+                          <button type="button" class="piccolo" (click)="riprovaVideoGrande(v)">Riprova</button>
+                        }
+                      }
+                    </li>
+                  }
+                </ul>
               }
               @if (prossimoGiro(t); as p) {
                 <p class="tenue">Prossimo giro: {{ p }}</p>
@@ -974,6 +1089,24 @@
   </div>
 }
 
+@if (dialogoLuogo()) {
+  <div class="velo" (click)="dialogoLuogo.set(false)">
+    <div class="dialogo" role="dialog" aria-labelledby="titolo-luogo" (click)="$event.stopPropagation()">
+      <h2 id="titolo-luogo">Luogo di {{ galleria.selezionate().size }} foto</h2>
+      <p class="tenue">
+        Lo stesso luogo a tutte, anche a quelle senza GPS: una città, una provincia, una regione o una nazione. Un
+        luogo scelto a mano resta, "Calcola luoghi" non lo cambia; "Usa il GPS" torna a quello automatico.
+      </p>
+      <app-scegli-luogo (scelto)="luogoSelezione($event.chiave)" />
+      <div class="piede">
+        <button type="button" (click)="luogoSelezione(undefined)">Usa il GPS</button>
+        <button type="button" (click)="luogoSelezione(null)">Nessun luogo</button>
+        <button type="button" (click)="dialogoLuogo.set(false)">Annulla</button>
+      </div>
+    </div>
+  </div>
+}
+
 @if (dialogoCondivisioni()) {
   <div class="velo" (click)="dialogoCondivisioni.set(false)">
     <div class="dialogo" role="dialog" aria-labelledby="titolo-condivisioni" (click)="$event.stopPropagation()">
@@ -1040,8 +1173,19 @@
   />
 }
 
+@if (dialogoPersone()) {
+  <app-persone [admin]="!!galleria.io()?.admin" (chiudi)="dialogoPersone.set(false)" />
+}
+
 @if (dialogoCestino()) {
   <app-cestino [disponibile]="galleria.archivioDisponibile()" (chiudi)="dialogoCestino.set(false)" />
+}
+
+@if (dialogoEventi()) {
+  <app-eventi (chiudi)="dialogoEventi.set(false)" />
+}
+@if (dialogoSceltaEvento()) {
+  <app-scelta-evento (chiudi)="dialogoSceltaEvento.set(false)" />
 }
 
 @if (dialogoSalute()) {

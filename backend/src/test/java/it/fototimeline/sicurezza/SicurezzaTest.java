@@ -137,6 +137,35 @@ class SicurezzaTest {
     }
 
     @Test
+    void personeEVolti() throws Exception {
+        var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        // Senza login niente, nemmeno i ritagli dei volti.
+        for (String privato : new String[] {"/api/volti", "/api/persone", "/api/persone/x", "/api/foto/x/volti",
+                "/api/volti/x/ritaglio"}) {
+            mvc.perform(get(privato)).andExpect(status().isUnauthorized());
+        }
+        mvc.perform(get("/api/foto").param("persona", "x")).andExpect(status().isUnauthorized());
+        // Chi usa l'app vede lo stato (qui senza visione: spento) e il filtro per persona.
+        mvc.perform(get("/api/volti").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.attiva").value(false));
+        mvc.perform(get("/api/foto").param("persona", "x").with(oidcLogin())).andExpect(status().isOk());
+        // Nominare, unire e nascondere passano la sicurezza (qui 409 perché la funzione è spenta, non 403)...
+        mvc.perform(get("/api/persone").with(oidcLogin())).andExpect(status().isConflict());
+        mvc.perform(put("/api/persone/x").with(oidcLogin()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Anna\"}")).andExpect(status().isConflict());
+        mvc.perform(post("/api/persone/unisci").with(oidcLogin()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"in\":\"a\",\"da\":[\"b\"]}")).andExpect(status().isConflict());
+        mvc.perform(post("/api/volti/x/togli").with(oidcLogin()).with(csrf())).andExpect(status().isConflict());
+        // ...ma col CSRF, come tutto il resto.
+        mvc.perform(post("/api/volti/x/togli").with(oidcLogin())).andExpect(status().isForbidden());
+        // "Riconosci volti" è da admin.
+        mvc.perform(post("/api/volti/riconosci").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/volti/annulla").with(oidcLogin()).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/volti/riconosci").with(admin).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(post("/api/volti/annulla").with(admin).with(csrf())).andExpect(status().isNoContent());
+    }
+
+    @Test
     void ilDumpDeiThreadLoVedeSoloLAmministratore() throws Exception {
         mvc.perform(get("/api/diagnostica/thread")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/diagnostica/thread").with(oidcLogin())).andExpect(status().isForbidden());

@@ -54,6 +54,8 @@ import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 import it.fototimeline.telefono.SincronizzazioneTelefono;
 import it.fototimeline.telefono.SorgenteTelefono;
 import it.fototimeline.telefono.SorgenteTelefono.Giro;
+import it.fototimeline.telefono.VideoGrande;
+import it.fototimeline.telefono.VideoGrandi;
 
 /**
  * La pagina "Salute": rclone, cloud, backup, telefoni, importazioni, spazio
@@ -301,8 +303,17 @@ public class Salute {
         }
         if (ultimo != null) {
             dettagli.add(ultimo.trovati() + " su pCloud · " + ultimo.copiati() + " copiati · "
-                    + ultimo.cancellati() + " tolti da pCloud · " + ultimo.errori() + " errori");
+                    + ultimo.cancellati() + " tolti da pCloud · "
+                    + (ultimo.ricompressi() != null && ultimo.ricompressi() > 0
+                            ? ultimo.ricompressi() + " video ricompressi · " : "")
+                    + (ultimo.inRicompressione() != null && ultimo.inRicompressione() > 0
+                            ? ultimo.inRicompressione() + " in ricompressione · " : "")
+                    + ultimo.errori() + " errori");
             ultimo.messaggiErrori().stream().limit(5).forEach(dettagli::add);
+        }
+        // I video troppo grandi per il cloud, com'è messo ognuno adesso (non solo all'ultimo giro).
+        if (s.videoGrandi() != null) {
+            s.videoGrandi().stream().limit(5).map(Salute::videoGrande).forEach(dettagli::add);
         }
         if (s.prossimoGiroIl() != null) {
             dettagli.add("Prossimo giro: " + data(s.prossimoGiroIl()));
@@ -325,7 +336,35 @@ public class Salute {
             return VoceSalute.errore(chiave, titolo,
                     "Non gira da più di " + durata(limite) + ": " + quando.toLowerCase(Locale.ITALIAN), dettagli);
         }
-        return VoceSalute.ok(chiave, titolo, quando + ": " + ultimo.copiati() + " copiati", dettagli);
+        // Un video troppo grande che non può partire (spazio sul disco, rclone): giallo, col motivo.
+        var rimandato = s.videoGrandi() == null ? null : s.videoGrandi().stream()
+                .filter(v -> v.stato() == VideoGrande.Stato.RIMANDATO).findFirst().orElse(null);
+        if (rimandato != null) {
+            return VoceSalute.attenzione(chiave, titolo, quando + "; video troppo grande " + rimandato.nome()
+                    + " rimandato: " + rimandato.messaggio(), dettagli);
+        }
+        return VoceSalute.ok(chiave, titolo, quando + ": " + ultimo.copiati() + " copiati"
+                + (ultimo.ricompressi() != null && ultimo.ricompressi() > 0
+                        ? ", " + ultimo.ricompressi() + " video ricompressi" : ""), dettagli);
+    }
+
+    /** "VID_1.mp4: ricompresso, 23 552 MB → 6 144 MB (CRF 24), originale in pcloud:...". */
+    private static String videoGrande(VideoGrandi.Vista v) {
+        String dimensioni = VideoGrandi.peso(v.dimensione())
+                + (v.dimensioneRicompresso() != null ? " → " + VideoGrandi.peso(v.dimensioneRicompresso()) : "");
+        String stato = switch (v.stato()) {
+            case IN_CODA -> "in coda per la ricompressione";
+            case IN_CORSO -> v.fase() != null ? v.fase() + (v.percentuale() != null ? " " + v.percentuale() + "%" : "")
+                    : "in ricompressione";
+            case RIMANDATO -> "rimandato: " + v.messaggio();
+            case CARICATO -> "ricompresso, aspetta l'importazione";
+            case FATTO -> "ricompresso" + (v.crf() != null ? " (CRF " + v.crf() + ")" : "")
+                    + (v.originaleIn() != null ? ", originale in " + v.originaleIn()
+                            : v.messaggio() != null ? ", " + v.messaggio() : "");
+            case ERRORE -> "non riuscito: " + v.messaggio();
+            case ANNULLATO -> "annullato a mano";
+        };
+        return "Video troppo grande " + v.nome() + " (" + dimensioni + "): " + stato;
     }
 
     /** "Invalid 'access_token' (2094)", "empty token found": pCloud non accetta più le credenziali. */
@@ -363,6 +402,7 @@ public class Salute {
             case AUTOMATICA -> "Importazione automatica";
             case INDICIZZAZIONE -> "Indicizzazione";
             case LUOGHI -> "Calcolo dei luoghi";
+            case EVENTI -> "Calcolo degli eventi";
             case MANUALE -> "Importazione";
         };
         dettagli.add(0, cosa + " di " + l.cartella() + ": " + l.importate() + " nuove · " + l.duplicate()

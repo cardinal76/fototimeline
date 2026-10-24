@@ -84,7 +84,7 @@ public class ConfigurazioneSicurezza {
                     .permitAll();
             a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**",
                     "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**", "/api/contenuto/**",
-                    "/api/importazioni/scartati/**")
+                    "/api/importazioni/scartati/**", "/api/volti/riconosci", "/api/volti/annulla")
                     .hasAuthority("ROLE_" + login.ruoloAdmin());
             // Chi è entrato nell'app: email e ruoli, solo per gli admin.
             a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
@@ -100,6 +100,8 @@ public class ConfigurazioneSicurezza {
             // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
             // Il cestino (/api/cestino/**) come l'eliminazione (DELETE /api/foto/{id}) e le quasi uguali:
             // basta poter usare l'app, qui sotto.
+            // Persone e volti (/api/persone/**, /api/volti/**, /api/foto/{id}/volti): vederle e dare i nomi
+            // come i tag, a chi usa l'app; "Riconosci volti" qui sopra, da admin. Mai tra i path pubblici.
             if (autorizzazioneApi != null) {
                 a.anyRequest().hasAuthority(autorizzazioneApi);
             } else {
