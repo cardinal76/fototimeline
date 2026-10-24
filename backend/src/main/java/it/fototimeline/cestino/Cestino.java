@@ -72,7 +72,8 @@ public class Cestino {
         query.with(Sort.by(Sort.Order.desc(FotoService.CESTINO), Sort.Order.desc("_id")))
                 .skip((long) pagina * dimensione)
                 .limit(dimensione);
-        query.fields().include("nomeOriginale", "video", "larghezza", "altezza", "scattataIl", FotoService.CESTINO);
+        query.fields().include("nomeOriginale", "video", "larghezza", "altezza", "rotazione", "scattataIl",
+                FotoService.CESTINO);
         Instant adesso = clock.instant();
         List<VoceCestino> foto = mongo.find(query, Foto.class).stream().map(f -> voce(f, adesso)).toList();
         return new PaginaCestino(foto, totale, pagina, (long) (pagina + 1) * dimensione < totale, properties.giorni());
@@ -81,7 +82,7 @@ public class Cestino {
     private VoceCestino voce(Foto f, Instant adesso) {
         Instant scade = scadenza(f.getEliminataIl());
         Long rimasti = scade == null ? null : Math.max(0, (Duration.between(adesso, scade).toHours() + 23) / 24);
-        return new VoceCestino(f.getId(), "/api/foto/" + f.getId() + "/miniatura", f.getNomeOriginale(), f.isVideo(),
+        return new VoceCestino(f.getId(), FotoService.indirizzoMiniatura(f), f.getNomeOriginale(), f.isVideo(),
                 f.getLarghezza(), f.getAltezza(), f.getScattataIl(), f.getEliminataIl(), scade, rimasti);
     }
 

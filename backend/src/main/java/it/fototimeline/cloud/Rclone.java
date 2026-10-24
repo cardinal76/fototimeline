@@ -3,6 +3,8 @@ package it.fototimeline.cloud;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
+import java.util.function.LongConsumer;
 
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -80,6 +82,18 @@ public class Rclone {
      * {@code job/status} senza risposta si tollera: la copia intanto va avanti.
      */
     public void copiaFile(Map<String, ?> parametri, Duration attesa, Duration limite) {
+        copiaFile(parametri, attesa, limite, null, () -> false);
+    }
+
+    /**
+     * Come {@link #copiaFile(Map, Duration, Duration)}, e a ogni giro dice a
+     * {@code byteFatti} quanti byte sono già passati ({@code core/stats} del
+     * job, solo per l'avanzamento: se non risponde non importa). Se
+     * {@code annullata} diventa true, {@code job/stop} e {@link RcloneNonRiesce}:
+     * senza interrompere il thread, che potrebbe impedire proprio il job/stop.
+     */
+    public void copiaFile(Map<String, ?> parametri, Duration attesa, Duration limite, LongConsumer byteFatti,
+            BooleanSupplier annullata) {
         Map<String, Object> asincrona = new HashMap<>(parametri);
         asincrona.put("_async", true);
         Map<String, Object> risposta = chiama("operations/copyfile", asincrona);
@@ -106,6 +120,19 @@ public class Rclone {
                             && !s.isBlank() ? s : "errore di rclone"));
                 }
                 return;
+            }
+            if (byteFatti != null) {
+                try {
+                    if (chiama("core/stats", Map.of("group", "job/" + jobid)).get("bytes") instanceof Number b) {
+                        byteFatti.accept(b.longValue());
+                    }
+                } catch (RcloneNonRiesce e) {
+                    // Solo per l'avanzamento.
+                }
+            }
+            if (annullata.getAsBoolean()) {
+                ferma(jobid);
+                throw new RcloneNonRiesce("operations/copyfile: annullata");
             }
             if (System.nanoTime() - scadenza > 0) {
                 ferma(jobid);

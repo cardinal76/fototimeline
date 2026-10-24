@@ -21,6 +21,13 @@ public final class EventiFoto {
     public record FotoRipristinata(String id) {
     }
 
+    /**
+     * Una foto è stata girata a mano: miniatura e impronta sono già quelle
+     * nuove, l'indice del contenuto va rifatto.
+     */
+    public record FotoRuotata(String id) {
+    }
+
     /** Una foto è stata eliminata per sempre, scheda e file. */
     public record FotoEliminata(String id) {
     }

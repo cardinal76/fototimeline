@@ -13,6 +13,8 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
+import { Eventi } from './eventi';
+import { FiltroEvento } from './filtro-evento';
 import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
@@ -29,17 +31,21 @@ import {
   StatoContenuto,
   StatoSalute,
   StatoTelefono,
+  VideoGrande,
   Utente,
   FileScartato,
   LavoroImportazione,
 } from './modelli';
-import { daQuanto, durata } from './formati';
+import { daQuanto, durata, peso } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { Cestino } from './cestino';
+import { Persone } from './persone';
 import { QuasiUguali } from './quasi-uguali';
 import { inAttesa } from './condivisi-in-attesa';
 import { RiceviCondivisi } from './ricevi-condivisi';
+import { ScegliLuogo } from './scegli-luogo';
+import { SceltaEvento } from './scelta-evento';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -53,7 +59,11 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
+  imports: [
+    Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore,
+    Eventi, FiltroEvento, SceltaEvento,
+    Persone,
+  ],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -93,12 +103,18 @@ export class App {
   private telefoniTimer?: ReturnType<typeof setTimeout>;
   protected readonly dialogoQuasiUguali = signal(false);
   protected readonly dialogoCestino = signal(false);
+  /** La pagina Eventi e, dalla barra della selezione, "Evento…". */
+  protected readonly dialogoEventi = signal(false);
+  protected readonly dialogoSceltaEvento = signal(false);
+  protected readonly dialogoPersone = signal(false);
   /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
   protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
   protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
   protected readonly creandoLink = signal(false);
   protected readonly linkCreato = signal<string | null>(null);
   protected readonly dialogoCondivisioni = signal(false);
+  /** "Luogo…" sulla selezione: lo stesso luogo a tutte le foto scelte, anche senza GPS. */
+  protected readonly dialogoLuogo = signal(false);
   protected readonly condivisioni = signal<Condivisione[] | null>(null);
   protected readonly dialogoSalute = signal(false);
   protected readonly controlloSalute = signal(false);
@@ -119,7 +135,7 @@ export class App {
   /** Quanti filtri sono attivi, per il numerino sul pulsante Filtri (la ricerca ha il suo campo). */
   protected readonly quantiFiltri = computed(() => {
     const f = this.galleria.filtro();
-    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.luogo, f.preferite].filter(Boolean).length;
+    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.provincia || f.luogo, f.persona, f.preferite, f.evento].filter(Boolean).length;
   });
   /** Un problema da vedere a colpo d'occhio sul pulsante Strumenti: cloud smontato o salute non a posto. */
   protected readonly avvisoSistema = computed<{ stato: StatoSalute; testo: string } | null>(() => {
@@ -298,10 +314,16 @@ export class App {
     this.galleria.imposta({ caricataDa: username || undefined });
   }
 
+  protected scegliPersona(id: string): void {
+    const scelta = this.galleria.personeNominate().find((p) => p.id === id) ?? this.galleria.personaScelta();
+    this.galleria.filtraPersona(id && scelta?.id === id ? scelta : null);
+  }
+
   protected azzera(): void {
     this.ricerca = '';
     // L'interruttore "per contenuto" è un modo di cercare, non un filtro: resta com'è.
     this.galleria.filtro.set({ contenuto: this.galleria.filtro().contenuto });
+    this.galleria.personaScelta.set(null);
     this.galleria.ricarica();
   }
 
@@ -317,7 +339,7 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.luogo);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.provincia || f.luogo || f.evento || f.persona);
   }
 
   // ------------------------------------------------------------ selezione
@@ -344,6 +366,8 @@ export class App {
       this.dialogoCondividi.set(null);
     } else if (this.dialogoCondivisioni()) {
       this.dialogoCondivisioni.set(false);
+    } else if (this.dialogoLuogo()) {
+      this.dialogoLuogo.set(false);
     } else if (this.dialogoImporta()) {
       this.chiudiImporta();
     } else if (this.telefonoInModifica()) {
@@ -354,6 +378,12 @@ export class App {
       this.dialogoQuasiUguali.set(false);
     } else if (this.dialogoCestino()) {
       this.dialogoCestino.set(false);
+    } else if (this.dialogoSceltaEvento()) {
+      this.dialogoSceltaEvento.set(false);
+    } else if (this.dialogoEventi()) {
+      this.dialogoEventi.set(false);
+    } else if (this.dialogoPersone()) {
+      this.dialogoPersone.set(false);
     } else if (this.dialogoSalute()) {
       this.chiudiSalute();
     } else if (this.selezione()) {
@@ -448,6 +478,16 @@ export class App {
     this.galleria.deseleziona();
   }
 
+  /** "↻ Ruota" sulla selezione: 90 a destra, -90 a sinistra. */
+  protected async ruota(gradi: number): Promise<void> {
+    try {
+      await this.galleria.ruotaSelezionate(gradi);
+      this.selezione.set(false);
+    } catch {
+      this.galleria.avvisa('Rotazione non riuscita');
+    }
+  }
+
   protected async operazione(op: 'AGGIUNGI_TAG' | 'TOGLI_TAG' | 'IMPOSTA_ALBUM' | 'PREFERITA' | 'ELIMINA'): Promise<void> {
     const n = this.galleria.selezionate().size;
     let valore: string | undefined;
@@ -467,6 +507,20 @@ export class App {
       this.selezione.set(false);
     } catch {
       this.galleria.avvisa('Operazione non riuscita');
+    }
+  }
+
+  /**
+   * Il luogo per tutte le foto selezionate: chiave di un luogo di GeoNames,
+   * null per "nessun luogo", undefined per tornare al GPS.
+   */
+  protected async luogoSelezione(chiave: string | null | undefined): Promise<void> {
+    try {
+      await this.galleria.operazione(chiave === undefined ? 'LUOGO_DA_GPS' : 'IMPOSTA_LUOGO', chiave ?? '');
+      this.dialogoLuogo.set(false);
+      this.selezione.set(false);
+    } catch {
+      this.galleria.avvisa('Luogo non salvato');
     }
   }
 
@@ -578,6 +632,34 @@ export class App {
     }
   }
 
+  // ------------------------------------------------------------ volti
+
+  protected async riconosciVolti(): Promise<void> {
+    const v = this.galleria.volti();
+    if (!v?.mancanti) {
+      this.dialogoPersone.set(true);
+      return;
+    }
+    if (
+      !confirm(
+        `Cerca i volti in ${v.mancanti} foto (dalle miniature, niente video). Con tante foto ci vogliono ore; ` +
+          'va avanti in sottofondo e, se il server riparte, riprende da dove era arrivato.',
+      )
+    ) {
+      return;
+    }
+    try {
+      await this.galleria.avviaVolti();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? '"Riconosci volti" non partito');
+    }
+  }
+
+  protected percentualeVolti(): number {
+    const l = this.galleria.volti()?.lavoro;
+    return l && l.daFare ? Math.round(((l.fatte + l.errori) / l.daFare) * 100) : 0;
+  }
+
   protected percentualeContenuto(): number {
     const l = this.galleria.contenuto()?.lavoro;
     return l && l.daFare ? Math.round(((l.fatte + l.errori) / l.daFare) * 100) : 0;
@@ -613,6 +695,18 @@ export class App {
       await this.galleria.avviaLuoghi(tutte);
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Calcolo dei luoghi non partito');
+    }
+  }
+
+  /** "Calcola eventi": riprende se il calcolo di prima si era fermato a metà. */
+  protected async calcolaEventi(): Promise<void> {
+    if (!confirm('Raggruppa in eventi le foto di tutto l\'archivio (gli eventi toccati a mano restano come sono).' + this.fermaAutomatica())) {
+      return;
+    }
+    try {
+      await this.galleria.avviaEventi(false);
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Calcolo degli eventi non partito');
     }
   }
 
@@ -691,6 +785,8 @@ export class App {
         return 'Indicizzazione';
       case 'LUOGHI':
         return 'Luoghi';
+      case 'EVENTI':
+        return 'Eventi';
       default:
         return 'Importazione';
     }
@@ -731,6 +827,9 @@ export class App {
         this.telefoni.set(t);
         if (t.telefoni.some((s) => s.inCorso)) {
           this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 3000);
+        } else if (t.telefoni.some((s) => s.videoGrandi?.some((v) => v.stato === 'IN_CORSO'))) {
+          // Una ricompressione dura ore: basta guardarla ogni tanto.
+          this.telefoniTimer = setTimeout(() => this.aggiornaTelefoni(), 10000);
         }
       },
       error: (e: unknown) => {
@@ -811,6 +910,47 @@ export class App {
       this.aggiornaTelefoni();
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Sincronizzazione non partita');
+    }
+  }
+
+  protected readonly peso = peso;
+
+  /** Com'è messo un video troppo grande, a parole. */
+  protected statoVideoGrande(v: VideoGrande): string {
+    switch (v.stato) {
+      case 'IN_CODA':
+        return 'in coda per la ricompressione';
+      case 'IN_CORSO':
+        return (v.fase ?? 'in ricompressione') + (v.percentuale != null ? ` ${v.percentuale}%` : '');
+      case 'RIMANDATO':
+        return `rimandato: ${v.messaggio ?? ''}`;
+      case 'CARICATO':
+        return "ricompresso, aspetta l'importazione";
+      case 'FATTO':
+        return 'ricompresso e importato';
+      case 'ERRORE':
+        return `non riuscito: ${v.messaggio ?? ''}`;
+      case 'ANNULLATO':
+        return 'annullato';
+    }
+  }
+
+  protected async annullaVideoGrande(v: VideoGrande): Promise<void> {
+    if (!confirm(`Fermare la ricompressione di ${v.nome}? L'originale resta su pCloud.`)) return;
+    try {
+      await firstValueFrom(this.api.annullaVideoGrande(v.id));
+      this.aggiornaTelefoni();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non annullato');
+    }
+  }
+
+  protected async riprovaVideoGrande(v: VideoGrande): Promise<void> {
+    try {
+      await firstValueFrom(this.api.riprovaVideoGrande(v.id));
+      this.aggiornaTelefoni();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non rimesso in coda');
     }
   }
 

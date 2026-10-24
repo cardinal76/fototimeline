@@ -1,12 +1,17 @@
 export type OrigineData = 'EXIF' | 'FILE' | 'CARTELLA' | 'CARICAMENTO' | 'GOOGLE' | 'MANUALE';
 
+export type OrigineLuogo = 'GPS' | 'MANUALE';
+
 export interface Foto {
   id: string;
   nomeOriginale: string;
   contentType: string;
   dimensione: number;
+  /** Come si vede: con l'orientamento EXIF e la rotazione. */
   larghezza?: number;
   altezza?: number;
+  /** Rotazione scelta a mano, in senso orario: 0, 90, 180, 270. Il file non cambia. */
+  rotazione: number;
   /** Ora locale di scatto, "2024-05-17T14:03:22". */
   scattataIl: string;
   giorno: string;
@@ -17,16 +22,28 @@ export interface Foto {
   tag: string[];
   album?: string;
   preferita: boolean;
+  /** L'evento della foto (Eventi), se ne ha uno. */
+  evento?: string;
+  /** True se l'evento (o il non averne) l'ha deciso qualcuno: il ricalcolo non la tocca. */
+  eventoFisso?: boolean;
   fotocamera?: string;
   latitudine?: number;
   longitudine?: number;
-  /** Dal GPS (GeoNames): il centro abitato più vicino, "Sperlonga". */
+  /** Dal GPS (GeoNames) o scelto a mano: la città o il comune, "Sperlonga"; manca se a mano si è scelta solo una regione. */
   luogo?: string;
+  /** Solo in Italia: "Provincia di Latina". */
+  provincia?: string;
+  /** La regione; all'estero il primo livello di GeoNames ("Inghilterra", "Baviera"). */
   regione?: string;
   /** In italiano: "Francia". */
   nazione?: string;
   /** ISO: "FR". */
   codiceNazione?: string;
+  /** GPS o MANUALE (il calcolo automatico non lo tocca); assente senza luogo. */
+  origineLuogo?: OrigineLuogo;
+  /** La città scelta a mano: sulla mappa la foto va lì (approssimativa) se non ha il GPS. */
+  latitudineLuogo?: number;
+  longitudineLuogo?: number;
   /** Dove sta l'originale nell'archivio: "2024/08/15/IMG_0001.jpg". */
   percorso: string;
   /** Un video (MP4, MOV) invece di una foto. */
@@ -45,6 +62,8 @@ export interface Foto {
   erroreConversione?: string;
   /** Quando è finita nel cestino; assente per le foto nell'archivio. */
   eliminataIl?: string;
+  /** Persone e gruppi di volti di questa foto (solo id). */
+  persone?: string[];
 }
 
 export type StatoConversione = 'IN_CODA' | 'IN_CORSO' | 'FATTA' | 'ERRORE';
@@ -90,14 +109,19 @@ export interface Filtro {
   preferite?: boolean;
   /** Username: solo le foto portate da questa persona. */
   caricataDa?: string;
-  /** Codice ISO della nazione ("IT"); con regione e luogo come in /api/luoghi. */
+  /** Codice ISO della nazione ("IT"); con regione, provincia e luogo come in /api/luoghi. */
   nazione?: string;
   regione?: string;
+  provincia?: string;
   luogo?: string;
+  /** Id di un evento: solo le sue foto. */
+  evento?: string;
   /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
   al?: string;
   /** Cerca q in quello che c'è nella foto ("spiaggia", "cane"), non nei testi. */
   contenuto?: boolean;
+  /** Id di una persona o di un gruppo di volti senza nome: solo le sue foto. */
+  persona?: string;
 }
 
 export type Esito = 'CARICATA' | 'DUPLICATA' | 'ERRORE';
@@ -142,7 +166,7 @@ export type StatoImportazione = 'IN_CORSO' | 'FINITA' | 'ANNULLATA' | 'FALLITA';
 export interface LavoroImportazione {
   id: string;
   cartella: string;
-  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE' | 'LUOGHI';
+  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE' | 'LUOGHI' | 'EVENTI';
   stato: StatoImportazione;
   iniziatoIl: string;
   finitoIl?: string;
@@ -215,7 +239,16 @@ export interface Modifica {
   scattataIl?: string;
 }
 
-export type Operazione = 'ELIMINA' | 'AGGIUNGI_TAG' | 'TOGLI_TAG' | 'IMPOSTA_ALBUM' | 'PREFERITA' | 'NON_PREFERITA';
+export type Operazione =
+  | 'ELIMINA'
+  | 'AGGIUNGI_TAG'
+  | 'TOGLI_TAG'
+  | 'IMPOSTA_ALBUM'
+  | 'PREFERITA'
+  | 'NON_PREFERITA'
+  /** valore: la chiave di un Luogo, vuoto per "nessun luogo". */
+  | 'IMPOSTA_LUOGO'
+  | 'LUOGO_DA_GPS';
 
 /** Giorno della timeline: le foto scattate quel giorno, in ordine. */
 export interface Giorno {
@@ -234,6 +267,10 @@ export interface PuntoMappa {
   titolo?: string;
   video: boolean;
   luogo?: string;
+  /** Senza GPS (o col GPS lontano): alle coordinate della città scelta a mano. */
+  approssimativa: boolean;
+  /** Rotazione scelta a mano: va nell'indirizzo della miniatura. */
+  rotazione: number;
 }
 
 /** I luoghi delle foto con quante ce ne sono (GET /api/luoghi), i più fotografati prima. */
@@ -250,18 +287,43 @@ export interface VoceNazione {
   nome: string;
   conteggio: number;
   regioni: VoceRegione[];
+  /** Altri nomi in italiano, per la ricerca: "Olanda" per i Paesi Bassi. */
+  altriNomi: string[];
 }
 
 export interface VoceRegione {
   /** Assente se GeoNames non la sa. */
   nome?: string;
   conteggio: number;
+  /** In Italia le province della regione; vuote all'estero. */
+  province: VoceProvincia[];
+  /** Le città della regione, anche quelle dentro le province. */
   luoghi: VoceLuogo[];
+}
+
+export interface VoceProvincia {
+  nome: string;
+  conteggio: number;
 }
 
 export interface VoceLuogo {
   nome: string;
+  provincia?: string;
   conteggio: number;
+}
+
+/** Un luogo di GeoNames da scegliere a mano (GET /api/luoghi/cerca): città, provincia, regione o nazione. */
+export interface Luogo {
+  /** "citta:2643123", "provincia:IT.17.TN", "regione:IT.17", "nazione:NL". */
+  chiave: string;
+  livello: 'CITTA' | 'PROVINCIA' | 'REGIONE' | 'NAZIONE';
+  luogo?: string;
+  provincia?: string;
+  regione?: string;
+  nazione?: string;
+  codiceNazione?: string;
+  latitudine?: number;
+  longitudine?: number;
 }
 
 /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */
@@ -295,6 +357,35 @@ export interface GiroTelefono {
   aMetaTolte?: number;
   errori: number;
   messaggiErrori: string[];
+  /** Video troppo grandi per il cloud ricompressi e importati, con l'originale spostato, in questo giro. */
+  ricompressi?: number;
+  /** Video troppo grandi ancora da finire (in coda, in corso, rimandati, in attesa dell'importazione). */
+  inRicompressione?: number;
+  /** Una riga per video troppo grande: prima e dopo, dove è l'originale. */
+  videoGrandi?: string[];
+}
+
+/** Un video del telefono troppo grande per il cloud, ricompresso in H.265 sul server. */
+export interface VideoGrande {
+  id: string;
+  nome: string;
+  percorso: string;
+  stato: 'IN_CODA' | 'IN_CORSO' | 'RIMANDATO' | 'CARICATO' | 'FATTO' | 'ERRORE' | 'ANNULLATO';
+  /** Solo per quello in corso: "ricomprimo in H.265 (CRF 24)". */
+  fase?: string;
+  percentuale?: number;
+  dimensione: number;
+  dimensioneRicompresso?: number;
+  crf?: number;
+  /** Il ricompresso nella cartella automatica. */
+  destinazione?: string;
+  /** Dove è finito l'originale su pCloud. */
+  originaleIn?: string;
+  /** Perché si ricomprime: la soglia o l'errore del cloud. */
+  motivo?: string;
+  messaggio?: string;
+  creatoIl: string;
+  aggiornatoIl: string;
 }
 
 /** Un telefono della famiglia (pCloud → cartella automatica). */
@@ -320,6 +411,8 @@ export interface StatoTelefono {
   prossimoGiroIl?: string;
   /** I contatori del giro che sta girando (esito ancora vuoto). */
   giroInCorso?: GiroTelefono;
+  /** I video troppo grandi: in corso, andati male e quelli fatti negli ultimi 30 giorni. */
+  videoGrandi?: VideoGrande[];
 }
 
 /** "Indicizza contenuto": manda a visione le foto che non sono ancora nell'indice. */
@@ -345,6 +438,79 @@ export interface StatoContenuto {
   /** Vettori nell'indice di visione; assente se visione non risponde. */
   nellIndice?: number;
   lavoro?: LavoroContenuto;
+}
+
+export interface LavoroVolti {
+  id: string;
+  stato: 'IN_CORSO' | 'FINITO' | 'ANNULLATO' | 'FALLITO';
+  iniziatoIl: string;
+  finitoIl?: string;
+  /** Le foto senza volti cercati quando è partito. */
+  daFare: number;
+  fatte: number;
+  volti: number;
+  errori: number;
+  messaggi: string[];
+  errore?: string;
+  ricostruisci: boolean;
+}
+
+/** Riconoscimento dei volti: se c'è e a che punto è. */
+export interface StatoVolti {
+  attiva: boolean;
+  foto: number;
+  cercate: number;
+  mancanti: number;
+  volti: number;
+  /** Volti nell'indice di visione; assente se visione non risponde. */
+  nellIndice?: number;
+  /** Le persone con un nome. */
+  persone: number;
+  lavoro?: LavoroVolti;
+}
+
+export type TipoPersone = 'NOMINATE' | 'GRUPPI' | 'NASCOSTE';
+
+/** Una persona (con nome) o un gruppo di volti senza nome. */
+export interface VocePersona {
+  id: string;
+  nome?: string;
+  nascosta: boolean;
+  volti: number;
+  proposte: number;
+  /** Id del volto da mostrare: /api/volti/{copertina}/ritaglio. */
+  copertina?: string;
+}
+
+export interface ElencoPersone {
+  persone: VocePersona[];
+  totale: number;
+}
+
+export interface VoceVolto {
+  id: string;
+  fotoId: string;
+  punteggio: number;
+  /** Con la persona (o con la proposta): da -1 a 1. */
+  somiglianza?: number;
+  manuale: boolean;
+}
+
+export interface PersonaSimile {
+  persona: VocePersona;
+  somiglianza: number;
+  vicini: number;
+}
+
+/** Un volto nel visore; il riquadro è in frazioni dell'immagine. */
+export interface VoltoInFoto {
+  id: string;
+  riquadro: { x: number; y: number; larghezza: number; altezza: number };
+  personaId?: string;
+  nome?: string;
+  nascosta: boolean;
+  proposta?: string;
+  nomeProposta?: string;
 }
 
 /** I telefoni visibili (l'admin tutti, gli altri il proprio) e quello che vale per tutti. */
@@ -396,6 +562,8 @@ export interface FotoCondivisa {
   /** Solo se chi ha creato il link ha scelto "includi posizione". */
   latitudine?: number;
   longitudine?: number;
+  /** Rotazione scelta a mano (0, 90, 180, 270): i video si girano col CSS. */
+  rotazione: number;
 }
 
 /** La galleria pubblica di un link (/c/<token>). */
@@ -648,4 +816,42 @@ export interface ModificaTakeout {
   sorgente: string;
   proprietario: string;
   giorniPrimaDiCancellare: number;
+}
+
+/** Un evento: foto vicine nel tempo (e nel posto) con un nome. */
+export interface Evento {
+  id: string;
+  nome: string;
+  /** "2019-08-10T10:00:00". */
+  inizio: string;
+  fine: string;
+  /** "2019-08-10". */
+  primoGiorno: string;
+  ultimoGiorno: string;
+  conteggio: number;
+  /** La foto della copertina (id). */
+  copertina?: string;
+  luogo?: string;
+  /** Toccato a mano: il ricalcolo non lo cambia. */
+  manuale: boolean;
+  nascosto: boolean;
+}
+
+/** Dove è arrivato "Calcola eventi". */
+export interface StatoCalcoloEventi {
+  /** La fine dell'ultimo gruppo fatto, se il calcolo si è fermato a metà. */
+  fattoFinoA?: string;
+  /** Fermato a metà: il prossimo riprende da fattoFinoA. */
+  interrotto: boolean;
+  iniziatoIl?: string;
+  finitoIl?: string;
+}
+
+export interface ElencoEventi {
+  eventi: Evento[];
+  /** Assente se "Calcola eventi" non è mai partito. */
+  calcolo?: StatoCalcoloEventi;
+  /** Giorni con foto nuove o tolte che aspettano il ricalcolo leggero. */
+  giorniDaRifare: number;
+  minimoFoto: number;
 }

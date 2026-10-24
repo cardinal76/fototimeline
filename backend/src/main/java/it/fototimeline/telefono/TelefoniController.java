@@ -30,10 +30,13 @@ import it.fototimeline.telefono.SincronizzazioneTelefono.Stato;
 public class TelefoniController {
 
     private final SincronizzazioneTelefono sincronizzazione;
+    private final VideoGrandi videoGrandi;
     private final UtenteCorrente corrente;
 
-    public TelefoniController(SincronizzazioneTelefono sincronizzazione, UtenteCorrente corrente) {
+    public TelefoniController(SincronizzazioneTelefono sincronizzazione, VideoGrandi videoGrandi,
+            UtenteCorrente corrente) {
         this.sincronizzazione = sincronizzazione;
+        this.videoGrandi = videoGrandi;
         this.corrente = corrente;
     }
 
@@ -74,6 +77,38 @@ public class TelefoniController {
                 .filter(s -> chi.puo(s.proprietario()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Nessun telefono " + id));
         return ResponseEntity.accepted().body(sincronizzazione.avvia(sorgente.id()));
+    }
+
+    /**
+     * Ferma la ricompressione di un video troppo grande (in coda o in corso);
+     * l'originale resta su pCloud com'era. Solo admin; 404 se non c'è, 409
+     * se non c'era niente da fermare.
+     */
+    @PostMapping("/video-grandi/{id}/annulla")
+    public ResponseEntity<Void> annullaVideoGrande(@PathVariable String id) {
+        soloAdmin();
+        trovaVideoGrande(id);
+        if (!videoGrandi.annulla(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Questo video non è in coda né in corso");
+        }
+        return ResponseEntity.accepted().build();
+    }
+
+    /** "Riprova": un video troppo grande in errore, annullato o rimandato torna in coda. Solo admin. */
+    @PostMapping("/video-grandi/{id}/riprova")
+    public ResponseEntity<Void> riprovaVideoGrande(@PathVariable String id) {
+        soloAdmin();
+        trovaVideoGrande(id);
+        if (!videoGrandi.riprova(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Questo video non è in errore, annullato o rimandato");
+        }
+        return ResponseEntity.accepted().build();
+    }
+
+    private void trovaVideoGrande(String id) {
+        if (videoGrandi.video(id).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Nessun video " + id);
+        }
     }
 
     private void soloAdmin() {

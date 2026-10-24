@@ -10,13 +10,17 @@ import {
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { EventoFoto } from './evento-foto';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { durata } from './formati';
+import { LuogoFoto } from './luogo-foto';
 import { Foto } from './modelli';
+import { PersoneFoto } from './persone-foto';
 
 interface Bozza {
   titolo: string;
@@ -47,7 +51,7 @@ const SWIPE_PX = 50;
 @Component({
   selector: 'app-visore',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, EventoFoto, FormsModule, LuogoFoto, PersoneFoto],
   host: {
     role: 'dialog',
     'aria-modal': 'true',
@@ -96,6 +100,8 @@ export class Visore {
     return f.video && f.compatibile === false && f.conversione !== 'FATTA';
   });
   protected readonly scarica = computed(() => FotoApi.originale(this.foto(), true));
+  /** Girata a mano: il ⤓ dà la copia girata (solo i JPEG, senza perdita); qui i byte dell'archivio. */
+  protected readonly scaricaNonRuotata = computed(() => FotoApi.originaleNonRuotato(this.foto()));
   protected readonly anteprima = computed(() => FotoApi.miniatura(this.foto()));
   protected readonly origine = computed(() => ORIGINI[this.foto().origineData]);
   /** "Anna": il nome di chi l'ha portata; null per le foto di prima. */
@@ -106,13 +112,7 @@ export class Visore {
   protected readonly indice = computed(() => this.galleria.foto().findIndex((f) => f.id === this.foto().id));
   protected readonly album = this.galleria.album;
   protected readonly tagNoti = this.galleria.tag;
-  /** "Sperlonga, Lazio · Italia"; senza ripetere (Tokyo, Tokyo). */
-  protected readonly luogo = computed(() => {
-    const f = this.foto();
-    if (!f.luogo) return null;
-    const dove = f.regione && f.regione !== f.luogo ? `${f.luogo}, ${f.regione}` : f.luogo;
-    return f.nazione ? `${dove} · ${f.nazione}` : dove;
-  });
+  private readonly luogoFoto = viewChild(LuogoFoto);
   protected readonly mappa = computed(() => {
     const f = this.foto();
     return f.latitudine != null && f.longitudine != null
@@ -218,13 +218,6 @@ export class Visore {
     }
   }
 
-  /** Dal luogo della foto al filtro della timeline. */
-  protected filtraLuogo(): void {
-    const f = this.foto();
-    this.galleria.imposta({ nazione: f.codiceNazione, regione: f.regione, luogo: f.luogo });
-    this.chiudi.emit();
-  }
-
   protected vai(passo: number): void {
     const lista = this.galleria.foto();
     const i = this.indice() + passo;
@@ -279,6 +272,20 @@ export class Visore {
     this.cambia.emit(aggiornata);
   }
 
+  /** Le rotazioni una dopo l'altra, nell'ordine dei tasti: R R fa 180 anche se il server è lento. */
+  private rotazioni: Promise<void> = Promise.resolve();
+
+  /** Ruota a destra (90) o a sinistra (-90): si salva subito, miniatura e vista arrivano girate. */
+  protected ruota(gradi: number): void {
+    this.rotazioni = this.rotazioni.then(async () => {
+      try {
+        this.cambia.emit(await this.galleria.ruota(this.foto(), gradi));
+      } catch {
+        this.galleria.avvisa('Rotazione non riuscita');
+      }
+    });
+  }
+
   protected async elimina(): Promise<void> {
     if (!confirm(`Eliminare "${this.foto().nomeOriginale}"? Va nel cestino: si ripristina da Strumenti → Cestino.`)) {
       return;
@@ -324,6 +331,20 @@ export class Visore {
         break;
       case 'p':
         void this.preferita();
+        break;
+      case 'Delete':
+        void this.elimina();
+        break;
+      case 'r':
+        this.ruota(90);
+        break;
+      case 'R':
+        this.ruota(-90);
+        break;
+      case 'l':
+        // Il luogo si cambia nel pannello: si apre se è chiuso.
+        this.pannello.set(true);
+        setTimeout(() => this.luogoFoto()?.apri());
         break;
       default:
         return;

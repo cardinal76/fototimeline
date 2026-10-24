@@ -53,8 +53,14 @@ public record SorgenteTelefono(@Id String id, String nome, String proprietario, 
      * @param cancellati tolti dalla sorgente perché importati
      * @param aMetaTolte copie a metà di giri vecchi tolte dalla cartella automatica (null nei giri salvati prima che ci fosse)
      * @param messaggiErrori i primi errori, file per file
+     * @param ricompressi   video troppo grandi ricompressi e importati, con l'originale spostato nella
+     *                      cartella dedicata in questo giro (null nei giri salvati prima che ci fosse)
+     * @param inRicompressione video troppo grandi ancora da finire: in coda, in corso, rimandati, in
+     *                      attesa dell'importazione
+     * @param videoGrandi   una riga per video troppo grande: dimensione prima e dopo, dove è l'originale
      */
     public record Giro(Instant iniziatoIl, Instant finitoIl, Esito esito, String messaggio, int trovati,
-            int copiati, int giaCopiati, int cancellati, Integer aMetaTolte, int errori, List<String> messaggiErrori) {
+            int copiati, int giaCopiati, int cancellati, Integer aMetaTolte, int errori, List<String> messaggiErrori,
+            Integer ricompressi, Integer inRicompressione, List<String> videoGrandi) {
     }
 }

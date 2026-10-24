@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 import it.fototimeline.cloud.Cloud;
+import it.fototimeline.eventi.EventiService;
 import it.fototimeline.luoghi.LuoghiService;
 import it.fototimeline.service.LavoriImportazione.Stato;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
@@ -211,7 +212,8 @@ class FileAppesiTest {
         Mockito.when(importazione.relativo(Mockito.any())).thenAnswer(inv -> inv.getArgument(0).toString());
         LavoriImportazione lavori = new LavoriImportazione(importazione, new ImportazioneAutomaticaProperties(null, null,
                 null), Mockito.mock(MemoriaImportazione.class), archivio(foto), List.of(), Mockito.mock(LuoghiService.class),
-                new IndicizzazioneProperties(1, Duration.ofMillis(1), null, null, Duration.ofMillis(200)), Optional.empty());
+                new IndicizzazioneProperties(1, Duration.ofMillis(1), null, null, Duration.ofMillis(200)), Optional.empty(),
+                Mockito.mock(EventiService.class));
 
         lavori.avviaIndicizzazione();
         assertThat(dentro.await(10, TimeUnit.SECONDS)).isTrue();
@@ -248,7 +250,8 @@ class FileAppesiTest {
     private LavoriImportazione lavori(ImportazioneCartelle importazione) {
         return new LavoriImportazione(importazione, new ImportazioneAutomaticaProperties(null, null, null),
                 Mockito.mock(MemoriaImportazione.class), archivio(disco.resolve("cloud/FotoTimeline")), List.of(),
-                Mockito.mock(LuoghiService.class), IndicizzazioneProperties.PREDEFINITE, Optional.empty());
+                Mockito.mock(LuoghiService.class), IndicizzazioneProperties.PREDEFINITE, Optional.empty(),
+                Mockito.mock(EventiService.class));
     }
 
     private ArchivioFile archivio(Path foto) {

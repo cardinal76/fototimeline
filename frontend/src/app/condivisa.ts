@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, signal } from '@angular/core';
 
-import { durata } from './formati';
+import { durata, rotazione } from './formati';
 import { FotoCondivisa, GalleriaCondivisa } from './modelli';
 
 /**
@@ -68,15 +68,15 @@ export class Condivisa {
   }
 
   protected miniatura(f: FotoCondivisa): string {
-    return `${this.base}/foto/${f.id}/miniatura`;
+    return `${this.base}/foto/${f.id}/miniatura${rotazione(f, '?')}`;
   }
 
   protected vista(f: FotoCondivisa): string {
-    return `${this.base}/foto/${f.id}/${f.video ? 'video' : 'vista'}`;
+    return `${this.base}/foto/${f.id}/${f.video ? 'video' : 'vista' + rotazione(f, '?')}`;
   }
 
   protected originale(f: FotoCondivisa): string {
-    return `${this.base}/foto/${f.id}/originale`;
+    return `${this.base}/foto/${f.id}/originale${rotazione(f, '?')}`;
   }
 
   protected rapporto(f: FotoCondivisa): number {

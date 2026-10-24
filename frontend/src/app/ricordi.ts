@@ -25,11 +25,14 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
               <p>
                 <b>{{ r.anniFa === 1 ? 'Un anno fa' : r.anniFa + ' anni fa' }}</b>
                 <span>{{ r.anno }}</span>
+                @if (nomeEvento(r); as nome) {
+                  <span class="evento" [title]="nome">· {{ nome }}</span>
+                }
               </p>
               <div class="striscia">
                 @for (f of r.foto; track f.id) {
                   <button type="button" [attr.aria-label]="f.titolo || f.nomeOriginale" (click)="apri.emit(f)">
-                    <img [src]="'/api/foto/' + f.id + '/miniatura'" alt="" loading="lazy" />
+                    <img [src]="miniatura(f)" alt="" loading="lazy" />
                   </button>
                 }
               </div>
@@ -87,6 +90,12 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
     .anno p span {
       color: var(--testo-tenue);
     }
+    .anno p .evento {
+      max-width: 14rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .striscia {
       display: flex;
       gap: 4px;
@@ -118,6 +127,8 @@ export class Ricordi {
 
   protected readonly ricordi = signal<Ricordo[]>([]);
   protected readonly caricati = signal(false);
+  /** I nomi degli eventi dei ricordi (non nascosti). */
+  private readonly nomiEventi = signal<Record<string, string>>({});
   /** Aperti dal link di Telegram: si vedono anche se chiusi per oggi. */
   protected readonly richiesti = signal(dalLink());
   protected readonly chiusi = signal(!this.richiesti() && chiusiOggi());
@@ -127,9 +138,23 @@ export class Ricordi {
       next: (r) => {
         this.ricordi.set(r);
         this.caricati.set(true);
+        const eventi = [...new Set(r.map((x) => eventoDi(x)).filter((e): e is string => !!e))];
+        if (eventi.length) {
+          this.api.nomiEventi(eventi).subscribe({ next: (n) => this.nomiEventi.set(n), error: () => {} });
+        }
       },
       error: () => {},
     });
+  }
+
+  /** Il nome dell'evento della maggior parte delle foto di quell'anno, se ne hanno uno. */
+  protected miniatura(f: Foto): string {
+    return FotoApi.miniatura(f);
+  }
+
+  protected nomeEvento(r: Ricordo): string | undefined {
+    const e = eventoDi(r);
+    return e ? this.nomiEventi()[e] : undefined;
   }
 
   protected chiudi(): void {
@@ -140,6 +165,16 @@ export class Ricordi {
       // senza localStorage si richiude solo per questa visita
     }
   }
+}
+
+/** L'evento più frequente tra le foto di un anno (almeno la metà), o niente. */
+function eventoDi(r: Ricordo): string | undefined {
+  const conti = new Map<string, number>();
+  for (const f of r.foto) {
+    if (f.evento) conti.set(f.evento, (conti.get(f.evento) ?? 0) + 1);
+  }
+  const [primo] = [...conti.entries()].sort((a, b) => b[1] - a[1]);
+  return primo && primo[1] * 2 >= r.foto.length ? primo[0] : undefined;
 }
 
 /** True se l'indirizzo ha `?ricordi`; lo toglie, così un ricaricamento non lo riapre. */

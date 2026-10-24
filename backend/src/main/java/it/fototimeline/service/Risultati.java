@@ -12,9 +12,13 @@ public final class Risultati {
     public record PaginaFoto(List<Foto> foto, long totale, int pagina, boolean altre) {
     }
 
-    /** Una foto sulla mappa: solo quello che serve al marker e al popup. */
+    /**
+     * Una foto sulla mappa: solo quello che serve al marker e al popup.
+     * {@code approssimativa}: senza GPS (o col GPS lontano), al posto del luogo
+     * scelto a mano. {@code rotazione}: quella scelta a mano, per l'indirizzo della miniatura.
+     */
     public record PuntoMappa(String id, double lat, double lon, String giorno, String titolo, boolean video,
-            String luogo) {
+            String luogo, boolean approssimativa, int rotazione) {
     }
 
     /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */

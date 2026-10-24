@@ -90,6 +90,29 @@ fototimeline:
     # A chi dare il telefono migrato da quando era uno solo (username Keycloak);
     # vuoto = al primo amministratore che entra.
     proprietario: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:}
+    # Video troppo grandi per LifetimeCloud (oltre 20480 MB, o rifiutati con
+    # "File too large"/413): si ricomprimono in H.265 sul server, uno alla
+    # volta, e l'originale va su pCloud in una cartella sua (DEPLOY.md).
+    video-grandi:
+      attiva: ${FOTOTIMELINE_VIDEO_GRANDI_ATTIVA:true}
+      # Oltre questi MB non si prova nemmeno a copiare; è anche il tetto del ricompresso.
+      massimo-mb: ${FOTOTIMELINE_VIDEO_MAX_MB:20000}
+      # Dalla radice del remote del telefono (pcloud:...): la sincronizzazione la salta.
+      cartella-originali: ${FOTOTIMELINE_VIDEO_GRANDI_PCLOUD:Video originali troppo grandi}
+      # Originale scaricato e ricompresso, sul disco del server (vista dall'app e da rclone).
+      cartella: ${FOTOTIMELINE_VIDEO_GRANDI_CARTELLA:${java.io.tmpdir}/fototimeline-video-grandi}
+      cartella-rclone: ${FOTOTIMELINE_VIDEO_GRANDI_CARTELLA_RCLONE:}
+      riserva: ${FOTOTIMELINE_VIDEO_GRANDI_RISERVA:2GB}
+      crf: ${FOTOTIMELINE_VIDEO_GRANDI_CRF:24}
+      crf-massimo: ${FOTOTIMELINE_VIDEO_GRANDI_CRF_MASSIMO:32}
+      preset: ${FOTOTIMELINE_VIDEO_GRANDI_PRESET:fast}
+      thread: ${FOTOTIMELINE_VIDEO_GRANDI_THREAD:2}
+      # Quanti fotogrammi x265 tiene in memoria: con questi un 4K a 8 bit sta sotto 1 GB.
+      parametri-x265: ${FOTOTIMELINE_VIDEO_GRANDI_X265:frame-threads=1:rc-lookahead=5:bframes=2:ref=2:lookahead-slices=0}
+      # Quanta memoria può prendere ffmpeg nel container (stima per risoluzione e bit): oltre, errore che lo dice.
+      memoria-massima: ${FOTOTIMELINE_VIDEO_GRANDI_MEMORIA:1100MB}
+      tolleranza-durata: PT1S
+      attesa-rimandati: PT1H
   # Il nome del luogo dal GPS, offline: i file di GeoNames (CC BY 4.0) in
   # questa cartella (cities500.txt, admin1CodesASCII.txt, ...; nel container
   # li scarica il Dockerfile in /app/geonames). Vuota = niente luoghi.
@@ -116,6 +139,20 @@ fototimeline:
     soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
     finestra-raffica: PT10S
     soglia-raffica: 12
+  # Eventi automatici: foto vicine nel tempo (e nel posto) raggruppate con un
+  # nome. Soglie in DEPLOY.md, "Eventi".
+  eventi:
+    # Tra due scatti più lontani di così l'evento si spezza (salvo i viaggi).
+    pausa: ${FOTOTIMELINE_EVENTI_PAUSA:PT4H}
+    # Meno foto di così non fanno un evento (i giorni normali con poche foto).
+    minimo-foto: ${FOTOTIMELINE_EVENTI_MINIMO_FOTO:12}
+    # In un viaggio (giorni di fila lontano da casa) quanti giorni senza foto
+    # possono stare in mezzo; 0 = solo giorni consecutivi.
+    giorni-vuoti: ${FOTOTIMELINE_EVENTI_GIORNI_VUOTI:1}
+    # Il luogo di casa ("Roma"): lì i giorni di fila non sono un viaggio. Vuoto = il luogo con più foto.
+    casa: ${FOTOTIMELINE_EVENTI_CASA:}
+    # Ogni quanto rifare gli eventi dei giorni toccati (foto nuove, cestino).
+    ricalcolo: ${FOTOTIMELINE_EVENTI_RICALCOLO:PT10M}
   # Avvisi su Telegram quando una voce della pagina "Salute" cambia stato.
   # Token del bot (BotFather) e chat id: vuoti = avvisi spenti, la pagina c'è lo stesso.
   telegram:
@@ -169,6 +206,25 @@ fototimeline:
     margine: ${FOTOTIMELINE_VISIONE_MARGINE:0.06}
     massimo: 500
     blocco: 16
+    attesa: PT20S
+  # Riconoscimento dei volti, nello stesso servizio visione (YuNet + SFace):
+  # serve anche visione.url. false = spento del tutto (niente lavoro, niente
+  # pagina "Persone", niente nomi nel visore).
+  volti:
+    attiva: ${FOTOTIMELINE_VOLTI:true}
+    # Volti più piccoli di così (lato corto, in pixel della miniatura da 480)
+    # non si tengono: troppo pochi pixel per riconoscerli.
+    lato-minimo: ${FOTOTIMELINE_VOLTI_LATO_MINIMO:32}
+    punteggio-minimo: 0.8
+    # Coseno tra i vettori di SFace: sopra soglia-gruppo un volto entra nel
+    # gruppo senza nome dei suoi vicini; in una persona con nome solo sopra
+    # soglia-sicura, e fra soglia-proposta e soglia-sicura resta una proposta.
+    soglia-gruppo: ${FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO:0.5}
+    soglia-sicura: ${FOTOTIMELINE_VOLTI_SOGLIA_SICURA:0.6}
+    soglia-proposta: ${FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA:0.42}
+    vicini: 10
+    blocco: 8
+    minimo-gruppo: 2
     attesa: PT20S
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}

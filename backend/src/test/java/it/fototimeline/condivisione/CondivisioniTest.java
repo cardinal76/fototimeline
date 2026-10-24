@@ -8,6 +8,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -38,6 +39,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -52,8 +57,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import it.fototimeline.cloud.ArchivioNonDisponibile;
 import it.fototimeline.cloud.Cloud;
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.eventi.EventiService;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.volti.Persona;
+import it.fototimeline.volti.Volto;
 
 /** I link pubblici con il login acceso, come su server2 (vedi SicurezzaTest). */
 @SpringBootTest(properties = {
@@ -61,6 +69,7 @@ import it.fototimeline.service.FotoService;
         "fototimeline.login.attivo=true",
         "server.address=0.0.0.0",
         "fototimeline.condivisioni.token-sbagliati=40",
+        "fototimeline.luoghi.cartella=classpath:geonames",
         "spring.security.oauth2.client.registration.keycloak.client-id=fototimeline",
         "spring.security.oauth2.client.registration.keycloak.client-secret=segreto",
         "spring.security.oauth2.client.registration.keycloak.authorization-grant-type=authorization_code",
@@ -99,6 +108,12 @@ class CondivisioniTest {
 
     @Autowired
     CondivisioniService service;
+
+    @Autowired
+    EventiService eventi;
+
+    @Autowired
+    MongoTemplate mongo;
 
     @MockitoSpyBean
     Cloud cloud;
@@ -159,11 +174,88 @@ class CondivisioniTest {
     }
 
     @Test
+    void gliEventiNonEsconoDaiLink() throws Exception {
+        var evento = eventi.crea("Compleanno segreto", List.of(conExif.getId(), rossa.getId()));
+        String token = crea(utente("anna"), Map.of("ids", List.of(conExif.getId(), rossa.getId())));
+
+        String risposta = mvc.perform(get("/api/condivise/" + token).with(da(ip)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.foto.length()").value(2))
+                .andReturn().getResponse().getContentAsString();
+        for (String vietato : List.of("evento", "Evento", evento.id(), "Compleanno segreto")) {
+            assertThat(risposta).as(vietato).doesNotContain(vietato);
+        }
+        // Gli eventi stanno dietro login: senza, niente elenco né evento.
+        mvc.perform(get("/api/eventi").with(da(ip))).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/eventi/" + evento.id()).with(da(ip))).andExpect(status().isUnauthorized());
+        eventi.sciogli(evento.id());
+    }
+
+    @Test
+    void chiHaIlLinkNonVedeNomiNeVoltiDellePersone() throws Exception {
+        // Una persona con nome riconosciuta nella foto rossa (come la lascia "Riconosci volti").
+        Persona zia = new Persona();
+        zia.setNome("Zia Pina");
+        zia = mongo.insert(zia);
+        Volto volto = new Volto();
+        volto.setFotoId(rossa.getId());
+        volto.setRiquadro(new Volto.Riquadro(0.1, 0.1, 0.3, 0.3));
+        volto.setPersonaId(zia.getId());
+        volto = mongo.insert(volto);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(rossa.getId())),
+                new Update().set("persone", List.of(zia.getId())), Foto.class);
+        try {
+            String token = crea(utente("anna"), Map.of("ids", List.of(rossa.getId())));
+            String base = "/api/condivise/" + token;
+            String risposta = mvc.perform(get(base).with(da(ip))).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.foto.length()").value(1))
+                    .andReturn().getResponse().getContentAsString();
+            for (String vietato : List.of("Zia Pina", zia.getId(), volto.getId(), "persone", "volti", "riquadro")) {
+                assertThat(risposta).as(vietato).doesNotContain(vietato);
+            }
+            // Nessuna strada per i volti dal link: né sotto /api/condivise, né le API private senza login.
+            mvc.perform(get(base + "/foto/" + rossa.getId() + "/volti").with(da(ip))).andExpect(status().isNotFound());
+            mvc.perform(get("/api/foto/" + rossa.getId() + "/volti").with(da(ip))).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/persone").with(da(ip))).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/volti/" + volto.getId() + "/ritaglio").with(da(ip))).andExpect(status().isUnauthorized());
+            mvc.perform(get("/api/foto").param("persona", zia.getId()).with(da(ip))).andExpect(status().isUnauthorized());
+        } finally {
+            mongo.remove(new Query(), Volto.class);
+            mongo.remove(new Query(), Persona.class);
+        }
+    }
+
+    @Test
     void laPosizioneSoloSeScelta() throws Exception {
         String token = crea(utente("anna"), Map.of("ids", List.of(conExif.getId()), "posizione", true));
         mvc.perform(get("/api/condivise/" + token).with(da(ip)))
                 .andExpect(jsonPath("$.foto[0].latitudine").value(41.9))
                 .andExpect(jsonPath("$.foto[0].longitudine").value(12.5));
+    }
+
+    /** I luoghi (dal GPS o scelti a mano, con le coordinate della città) non escono dai link, nemmeno con la posizione. */
+    @Test
+    void iLuoghiNonEsconoDalLink() throws Exception {
+        mvc.perform(put("/api/foto/" + rossa.getId() + "/luogo").with(utente("anna")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"chiave\":\"citta:2643123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.luogo").value("Manchester"))
+                .andExpect(jsonPath("$.origineLuogo").value("MANUALE"));
+        assertThat(fotoRepository.findById(conExif.getId()).orElseThrow().getLuogo()).isEqualTo("Roma");
+        for (boolean posizione : List.of(false, true)) {
+            String token = crea(utente("anna"),
+                    Map.of("ids", List.of(conExif.getId(), rossa.getId()), "posizione", posizione));
+            String risposta = mvc.perform(get("/api/condivise/" + token).with(da(ip)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.foto.length()").value(2))
+                    .andExpect(jsonPath("$.foto[1].id").value(rossa.getId()))
+                    .andExpect(jsonPath("$.foto[1].latitudine").doesNotExist())
+                    .andReturn().getResponse().getContentAsString();
+            for (String vietato : List.of("Manchester", "Inghilterra", "Regno Unito", "Roma", "Lazio", "Italia",
+                    "Provincia", "luogo", "regione", "nazione", "53.48", "-2.23")) {
+                assertThat(risposta).as(vietato).doesNotContain(vietato);
+            }
+        }
     }
 
     @Test

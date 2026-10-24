@@ -110,6 +110,21 @@ footer {
   max-height: 100vh;
   object-fit: contain;
 }
+/* Video girato a mano: solo a vederlo, come nel visore. */
+video.immagine[data-rotazione='90'],
+video.immagine[data-rotazione='270'] {
+  max-width: 100vh;
+  max-height: 100vw;
+}
+video.immagine[data-rotazione='90'] {
+  rotate: 90deg;
+}
+video.immagine[data-rotazione='180'] {
+  rotate: 180deg;
+}
+video.immagine[data-rotazione='270'] {
+  rotate: 270deg;
+}
 .segnaposto {
   width: min(100vw, 900px);
   filter: blur(2px);

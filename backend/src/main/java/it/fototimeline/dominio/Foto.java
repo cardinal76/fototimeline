@@ -25,8 +25,15 @@ public class Foto {
     private String nomeOriginale;
     private String contentType;
     private long dimensione;
+    /** Come si vede: con l'orientamento EXIF e la {@link #rotazione}. */
     private Integer larghezza;
     private Integer altezza;
+    /**
+     * La rotazione scelta a mano, in senso orario: 0, 90, 180 o 270 gradi,
+     * sopra l'orientamento EXIF. Sta solo qui: il file non si tocca (il suo
+     * SHA-256 è {@link #hash}); miniature, viste e download la applicano.
+     */
+    private int rotazione;
 
     /** Ora locale di scatto, come la scrive la fotocamera (senza fuso). */
     private LocalDateTime scattataIl;
@@ -50,6 +57,17 @@ public class Foto {
     @Indexed
     private String album;
     private boolean preferita;
+    /**
+     * L'evento della foto (collezione {@code eventi}); null fuori da ogni
+     * evento. Lo scrivono il calcolo degli eventi e le modifiche a mano.
+     */
+    @Indexed(sparse = true)
+    private String evento;
+    /**
+     * True se l'evento della foto (o il suo non averne, se l'hanno tolta) è
+     * stato deciso a mano: il ricalcolo automatico la salta.
+     */
+    private boolean eventoFisso;
 
     /** SHA-256 del file: la stessa foto non entra due volte. */
     @Indexed(unique = true)
@@ -58,8 +76,15 @@ public class Foto {
     private Double latitudine;
     private Double longitudine;
 
-    /** Dal GPS, con GeoNames (GeocodificaInversa): il centro abitato più vicino. */
+    /**
+     * Il luogo, su più livelli: dal GPS con GeoNames (GeocodificaInversa) o
+     * scelto a mano ({@link #origineLuogo}). {@code luogo} è la città o il
+     * comune; manca se a mano si è scelta solo una regione o una nazione.
+     */
     private String luogo;
+    /** Solo in Italia: "Provincia di Trento". */
+    private String provincia;
+    /** La regione in Italia, all'estero il primo livello di GeoNames: "Inghilterra", "Baviera". */
     private String regione;
     /** In italiano: "Francia". */
     private String nazione;
@@ -67,6 +92,20 @@ public class Foto {
     private String codiceNazione;
     /** Luogo già cercato, anche se non trovato (mare aperto): "Calcola luoghi" la salta. */
     private boolean luogoCalcolato;
+    /**
+     * Con quale versione del calcolo ({@code GeocodificaInversa.VERSIONE}):
+     * "Calcola luoghi" rifà le foto calcolate prima (senza la provincia).
+     */
+    private Integer versioneLuoghi;
+    /** GPS o MANUALE; null senza luogo. Un luogo MANUALE il calcolo non lo tocca mai. */
+    private OrigineLuogo origineLuogo;
+    /**
+     * Le coordinate del luogo scelto a mano, se è una città: sulla mappa la
+     * foto va lì (posizione approssimativa) quando non ha il GPS o il GPS è
+     * lontano dal luogo scelto. Mai nei link condivisi.
+     */
+    private Double latitudineLuogo;
+    private Double longitudineLuogo;
 
     /** Percorso dell'originale, relativo alla cartella dell'archivio. */
     @Indexed
@@ -102,6 +141,20 @@ public class Foto {
     @Indexed
     private Instant contenutoIndicizzato;
     /**
+     * Quando "Riconosci volti" ha guardato la miniatura (anche senza trovare
+     * volti); null = non ancora. Solo foto, mai video.
+     */
+    @Indexed
+    private Instant voltiCercati;
+    /**
+     * Le persone e i gruppi senza nome dei volti di questa foto (id della
+     * collezione {@code persone}): li tiene aggiornati {@code volti.Persone},
+     * servono al filtro "persona" come gli altri campi della timeline. Solo
+     * id, mai nomi; null se non ce ne sono.
+     */
+    @Indexed
+    private Set<String> persone;
+    /**
      * Quando è finita nel cestino; null = nell'archivio. Nel cestino la scheda
      * resta (hash compreso, così la stessa foto non rientra come nuova) e il
      * file resta dov'è: sparisce da tutti gli elenchi ({@code FotoService.nonNelCestino()})
@@ -127,6 +180,9 @@ public class Foto {
 
     public Integer getAltezza() { return altezza; }
     public void setAltezza(Integer altezza) { this.altezza = altezza; }
+
+    public int getRotazione() { return rotazione; }
+    public void setRotazione(int rotazione) { this.rotazione = rotazione; }
 
     public LocalDateTime getScattataIl() { return scattataIl; }
     public void setScattataIl(LocalDateTime scattataIl) {
@@ -161,6 +217,12 @@ public class Foto {
     public boolean isPreferita() { return preferita; }
     public void setPreferita(boolean preferita) { this.preferita = preferita; }
 
+    public String getEvento() { return evento; }
+    public void setEvento(String evento) { this.evento = evento; }
+
+    public boolean isEventoFisso() { return eventoFisso; }
+    public void setEventoFisso(boolean eventoFisso) { this.eventoFisso = eventoFisso; }
+
     public String getHash() { return hash; }
     public void setHash(String hash) { this.hash = hash; }
 
@@ -176,6 +238,9 @@ public class Foto {
     public String getLuogo() { return luogo; }
     public void setLuogo(String luogo) { this.luogo = luogo; }
 
+    public String getProvincia() { return provincia; }
+    public void setProvincia(String provincia) { this.provincia = provincia; }
+
     public String getRegione() { return regione; }
     public void setRegione(String regione) { this.regione = regione; }
 
@@ -187,6 +252,18 @@ public class Foto {
 
     public boolean isLuogoCalcolato() { return luogoCalcolato; }
     public void setLuogoCalcolato(boolean luogoCalcolato) { this.luogoCalcolato = luogoCalcolato; }
+
+    public Integer getVersioneLuoghi() { return versioneLuoghi; }
+    public void setVersioneLuoghi(Integer versioneLuoghi) { this.versioneLuoghi = versioneLuoghi; }
+
+    public OrigineLuogo getOrigineLuogo() { return origineLuogo; }
+    public void setOrigineLuogo(OrigineLuogo origineLuogo) { this.origineLuogo = origineLuogo; }
+
+    public Double getLatitudineLuogo() { return latitudineLuogo; }
+    public void setLatitudineLuogo(Double latitudineLuogo) { this.latitudineLuogo = latitudineLuogo; }
+
+    public Double getLongitudineLuogo() { return longitudineLuogo; }
+    public void setLongitudineLuogo(Double longitudineLuogo) { this.longitudineLuogo = longitudineLuogo; }
 
     public String getPercorso() { return percorso; }
     public void setPercorso(String percorso) { this.percorso = percorso; }
@@ -217,6 +294,12 @@ public class Foto {
 
     public Instant getContenutoIndicizzato() { return contenutoIndicizzato; }
     public void setContenutoIndicizzato(Instant contenutoIndicizzato) { this.contenutoIndicizzato = contenutoIndicizzato; }
+
+    public Instant getVoltiCercati() { return voltiCercati; }
+    public void setVoltiCercati(Instant voltiCercati) { this.voltiCercati = voltiCercati; }
+
+    public Set<String> getPersone() { return persone; }
+    public void setPersone(Set<String> persone) { this.persone = persone; }
 
     public Instant getEliminataIl() { return eliminataIl; }
     public void setEliminataIl(Instant eliminataIl) { this.eliminataIl = eliminataIl; }

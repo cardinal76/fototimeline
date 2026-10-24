@@ -19,7 +19,9 @@ import {
   StatoCloud,
   StatoContenuto,
   StatoConversioni,
+  StatoVolti,
   VoceMese,
+  VocePersona,
 } from './modelli';
 
 const DIMENSIONE_PAGINA = 80;
@@ -91,6 +93,12 @@ export class Galleria {
   });
   /** Ricerca per contenuto: null finché non si sa, attiva=false se il servizio visione non c'è. */
   readonly contenuto = signal<StatoContenuto | null>(null);
+  /** Riconoscimento dei volti: null finché non si sa, attiva=false se è spento. */
+  readonly volti = signal<StatoVolti | null>(null);
+  /** Le persone con un nome, per il filtro "Persona". */
+  readonly personeNominate = signal<VocePersona[]>([]);
+  /** La persona o il gruppo del filtro, se non è tra quelle con nome (un gruppo scelto da "Persone"). */
+  readonly personaScelta = signal<VocePersona | null>(null);
   /** I risultati sono in ordine di somiglianza, non di data: niente giorni né timeline. */
   readonly perContenuto = computed(() => !!(this.filtro().contenuto && this.filtro().q));
   /** Coda delle versioni compatibili dei video (solo admin); null quando non c'è niente da mostrare. */
@@ -140,6 +148,7 @@ export class Galleria {
   private richiesta?: Subscription;
   private avvisoTimer?: ReturnType<typeof setTimeout>;
   private contenutoTimer?: ReturnType<typeof setTimeout>;
+  private voltiTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
     this.api.io().subscribe((io) => {
@@ -150,6 +159,7 @@ export class Galleria {
         this.seguiSalute();
       }
       this.seguiContenuto();
+      this.seguiVolti();
     });
     this.aggiornaCloud();
     this.ricarica();
@@ -181,6 +191,13 @@ export class Galleria {
   /** "Calcola luoghi": stessa barra delle importazioni. */
   async avviaLuoghi(tutte: boolean): Promise<void> {
     const lavoro = await firstValueFrom(this.api.calcolaLuoghi(tutte));
+    this.mostraImportazione(lavoro);
+    this.seguiImportazione();
+  }
+
+  /** "Calcola eventi": stessa barra; riprende da dove si era fermato, salvo daCapo. */
+  async avviaEventi(daCapo: boolean): Promise<void> {
+    const lavoro = await firstValueFrom(this.api.calcolaEventi(daCapo));
     this.mostraImportazione(lavoro);
     this.seguiImportazione();
   }
@@ -266,6 +283,46 @@ export class Galleria {
       },
       error: () => this.contenuto.set(null),
     });
+  }
+
+  // ------------------------------------------------------------ volti e persone
+
+  async avviaVolti(ricostruisci = false): Promise<void> {
+    await firstValueFrom(this.api.riconosciVolti(ricostruisci));
+    this.seguiVolti();
+  }
+
+  annullaVolti(): void {
+    this.api.annullaVolti().subscribe(() => this.seguiVolti());
+  }
+
+  /** Lo stato: agli admin ogni 3 secondi mentre "Riconosci volti" gira, ogni minuto altrimenti. */
+  private seguiVolti(): void {
+    clearTimeout(this.voltiTimer);
+    this.api.volti().subscribe({
+      next: (v) => {
+        const prima = this.volti();
+        this.volti.set(v);
+        if (v.attiva && (!prima || prima.persone !== v.persone)) {
+          this.aggiornaPersone();
+        }
+        if (v.attiva && this.io()?.admin) {
+          this.voltiTimer = setTimeout(() => this.seguiVolti(), v.lavoro?.stato === 'IN_CORSO' ? 3000 : 60000);
+        }
+      },
+      error: () => this.volti.set(null),
+    });
+  }
+
+  /** Le persone con nome per il filtro (dopo un nome dato o un'unione). */
+  aggiornaPersone(): void {
+    this.api.persone('NOMINATE').subscribe({ next: (e) => this.personeNominate.set(e.persone), error: () => {} });
+  }
+
+  /** Solo le foto di questa persona (o gruppo), con gli altri filtri. */
+  filtraPersona(p: VocePersona | null): void {
+    this.personaScelta.set(p && !this.personeNominate().some((n) => n.id === p.id) ? p : null);
+    this.imposta({ persona: p?.id });
   }
 
   // ------------------------------------------------------------ conversioni dei video
@@ -434,9 +491,41 @@ export class Galleria {
     return aggiornata;
   }
 
+  /**
+   * Il luogo di una foto scelto a mano (chiave di /api/luoghi/cerca, null =
+   * nessun luogo) o di nuovo dal GPS (undefined). La foto resta al suo posto:
+   * cambia solo lei, e l'elenco dei luoghi.
+   */
+  async cambiaLuogo(foto: Foto, chiave: string | null | undefined): Promise<Foto> {
+    const aggiornata = await firstValueFrom(
+      chiave === undefined ? this.api.luogoDaGps(foto.id) : this.api.impostaLuogo(foto.id, chiave),
+    );
+    this.foto.update((lista) => lista.map((f) => (f.id === foto.id ? aggiornata : f)));
+    this.aggiornaLuoghi();
+    return aggiornata;
+  }
+
   async elimina(foto: Foto): Promise<void> {
     await firstValueFrom(this.api.elimina(foto.id));
     this.togliDallaLista([foto.id]);
+  }
+
+  /** Gira una foto (90 a destra, -90 a sinistra): la scheda nuova prende il suo posto nella lista. */
+  async ruota(foto: Foto, gradi: number): Promise<Foto> {
+    const girata = await firstValueFrom(this.api.ruota(foto.id, gradi));
+    this.foto.update((lista) => lista.map((f) => (f.id === foto.id ? girata : f)));
+    return girata;
+  }
+
+  /** "Ruota" sulla selezione: miniature e proporzioni nuove, quindi si ricarica. */
+  async ruotaSelezionate(gradi: number): Promise<void> {
+    const ids = [...this.selezionate()];
+    if (!ids.length) {
+      return;
+    }
+    const { modificate } = await firstValueFrom(this.api.ruotaMultiple(ids, gradi));
+    this.avvisa(`${modificate} foto ruotate`);
+    this.ricarica();
   }
 
   async operazione(operazione: Operazione, valore?: string): Promise<void> {
@@ -451,6 +540,9 @@ export class Galleria {
     } else {
       this.avvisa(`${modificate} foto aggiornate`);
       this.ricarica();
+      if (operazione === 'IMPOSTA_LUOGO' || operazione === 'LUOGO_DA_GPS') {
+        this.aggiornaLuoghi();
+      }
     }
   }
 

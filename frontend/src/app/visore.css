@@ -35,6 +35,31 @@
 .immagine.segnaposto {
   opacity: 1;
 }
+/*
+ * Video girato a mano: solo a vederlo (il file non cambia). A 90° e 270° il
+ * riquadro prende i lati scambiati della scena (unità del contenitore), poi gira.
+ * Le foto no: arrivano già girate dal server.
+ */
+.scena {
+  container-type: size;
+}
+video.immagine[data-rotazione] {
+  place-self: center;
+}
+video.immagine[data-rotazione='90'],
+video.immagine[data-rotazione='270'] {
+  width: 100cqh;
+  height: 100cqw;
+}
+video.immagine[data-rotazione='90'] {
+  rotate: 90deg;
+}
+video.immagine[data-rotazione='180'] {
+  rotate: 180deg;
+}
+video.immagine[data-rotazione='270'] {
+  rotate: 270deg;
+}
 .segnaposto {
   filter: blur(2px);
 }

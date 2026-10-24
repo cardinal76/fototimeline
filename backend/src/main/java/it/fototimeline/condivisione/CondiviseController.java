@@ -122,7 +122,7 @@ public class CondiviseController {
                 .contentType(MediaType.parseMediaType(foto.getContentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename(nome, StandardCharsets.UTF_8).build().toString())
-                .body(new FileSystemResource(service.originale(foto)));
+                .body(service.daScaricare(foto));
     }
 
     /**

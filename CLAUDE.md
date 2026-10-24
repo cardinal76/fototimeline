@@ -117,14 +117,35 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
 - `IndiceLuoghi` è un k-d tree implicito su vettori unitari 3D: solo array di
   primitivi e i nomi in un `byte[]`, niente oggetti per punto (225 mila punti,
   ~10 MB). Non aggiungere campi per punto senza pensare alla RAM.
-- `FotoService.leggi` chiama `applica`: luogo, regione, nazione, codice nazione
-  e `luogoCalcolato` (true anche in mare aperto, così "Calcola luoghi" non li
-  rifà). "Calcola luoghi" è un lavoro di `LavoriImportazione` (origine
-  `LUOGHI`): `importate` = con un luogo, `duplicate` = senza; non chiede il
-  cloud montato.
-- Il filtro manda `nazione` (codice ISO), `regione`, `luogo`, nell'ordine
-  dell'indice composto `luoghi`. L'attribuzione CC BY 4.0 di GeoNames è nel
-  filtro e nel visore: va lasciata.
+- `FotoService.leggi` chiama `applica`: luogo (città), provincia (solo Italia,
+  da `admin2Codes.txt`), regione (admin1), nazione, codice nazione,
+  `origineLuogo` GPS, `luogoCalcolato` e `versioneLuoghi`
+  (`GeocodificaInversa.VERSIONE`). "Calcola luoghi" rifà le foto con un'altra
+  versione (anche in mare aperto si scrive): se il calcolo cambia, alza
+  `VERSIONE` e le foto di prima si rifanno da sole al primo lancio, a gruppi,
+  ripartendo dopo un'interruzione. È un lavoro di `LavoriImportazione`
+  (origine `LUOGHI`): `importate` = con un luogo, `duplicate` = senza; non
+  chiede il cloud montato.
+- I luoghi sono campi della foto, non tag: `luogo`, `provincia`, `regione`,
+  `nazione`, `codiceNazione`, `origineLuogo`. **MANUALE vince sempre**:
+  `applica`, `calcola` (anche `tutte`) saltano `origineLuogo: MANUALE`; un
+  posto nuovo che scrive il luogo deve fare lo stesso. A mano si sceglie con
+  una chiave di `GeocodificaInversa.cerca` (`citta:<geonameid>`,
+  `provincia:IT.17.TN`, `regione:IT.17`, `nazione:NL`) in
+  `LuoghiService.imposta`; `usaGps` torna al calcolo. Una città a mano scrive
+  `latitudineLuogo`/`longitudineLuogo`: la mappa (`PuntoMappa.approssimativa`)
+  la usa senza GPS o col GPS oltre la distanza dei luoghi. Mai in
+  `FotoCondivisa`.
+- La ricerca per nome (`IndiceLuoghi.cerca`) scorre tutti i punti col nome
+  piegato (`Nomi.piega`, tabella per i caratteri comuni): niente Normalizer per
+  punto, sarebbe dieci volte più lenta.
+- La ricerca libera `q` cerca anche `provincia` e i codici delle nazioni con
+  un altro nome ("Olanda" → NL, `nazioniPerNome`): per questo `FotoService`
+  usa `criteriConNazioni`, mentre `criteri(FiltroFoto)` statico resta per chi
+  non ha `q` (ricerca per contenuto).
+- Il filtro manda `nazione` (codice ISO), `regione`, `provincia`, `luogo`;
+  l'indice composto `luoghi` copre il prefisso nazione e regione. L'attribuzione
+  CC BY 4.0 di GeoNames è nel filtro e nel visore: va lasciata.
 - Nei test: `fototimeline.luoghi.cartella=classpath:geonames` (mini dataset in
   `src/test/resources/geonames`).
 
@@ -353,6 +374,22 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   possono avere la stessa cartella né una dentro l'altra (`Sorgente.sovrapposta`). Dopo
   `giorniPrimaDiCancellare` si toglie dalla sorgente (solo le copie di quella
   sorgente) se non è più nella cartella automatica.
+- **Video troppo grandi per LifetimeCloud** (oltre 20480 MB "File too large", o 413 di
+  nginx): `VideoGrandi` (collezione `video_grandi_telefono`). Il giro non copia i video oltre
+  `fototimeline.telefono.video-grandi.massimo-mb` e mette in coda quelli rifiutati per la
+  dimensione (`VideoGrandi.rifiutatoPerDimensione`, niente seconda prova): non sono errori. Un
+  thread `video-grandi` alla volta: rclone scarica l'originale in `cartella` (sul server
+  `/video-grandi`, condivisa con rclone come `/takeout`; spazio controllato prima, se manca
+  RIMANDATO), `StrumentiMedia.ricomprimi` (x265, `nice`, `-fs`, `oom_score_adj` 1000), durata
+  controllata, CRF più alto se ancora grande, poi nella cartella automatica col nome
+  dell'originale e nel registro con `ricompresso=true`. Il giro dopo, **solo se c'è una scheda
+  con lo SHA-256 del ricompresso**, l'originale si sposta (`operations/movefile`, nome libero) in
+  `cartella-originali` su pCloud, che `copia` salta. `cancella` non tocca mai le copie
+  `ricompresso`, e nessun percorso cancella l'originale: tenere così. I lavori lunghi di ffmpeg
+  (questa e `ConversioneVideo`) prendono il `TurnoVideo`, uno alla volta; la memoria stimata
+  (`FormatoVideo.memoriaX265`) oltre `memoria-massima` è un errore che lo dice.
+  `inCopia` (le destinazioni in scrittura) è di `VideoGrandi` e condiviso col giro: un nome si
+  prenota lì prima di scriverci.
 - **Di chi è un file importato**: `LavoriImportazione` passa all'importazione
   automatica i `ProvenienzaFile` (oggi solo `SincronizzazioneTelefono.caricataDa`):
   si cerca nel registro la copia con quella `destinazione` (la più recente) e
@@ -430,6 +467,70 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   stesso documento non si uniscono più tra loro (risolvi lo fa per le tenute,
   se più d'una). Le preferite: `tieni` sempre vero e `risolvi` le rifiuta (400).
 
+## Volti e persone
+
+- Pacchetto `volti`, nel servizio `visione` (`visione/app/volti.py`): YuNet
+  (rilevamento, MIT) + SFace (vettore di 128, Apache 2.0) con `cv2.dnn`, niente
+  torch; pesi scaricati nel Dockerfile a revisione fissa con SHA-256. Senza
+  OpenCV (CI) o con `VISIONE_VOLTI=false` le `/volti/...` rispondono 503: i
+  pytest usano un modello finto. L'indice dei vicini dei volti è un
+  `IndiceVettori` suo in `/dati/volti` (`cerca_molti`: un blocco di domande
+  per una lettura dell'indice).
+- `RiconoscimentoVolti` ("Riconosci volti", thread `riconosci-volti`; foto
+  nuove ed eventi del cestino sul thread `volti`): solo foto, dalla
+  **miniatura**, mai originali né video. `Foto.voltiCercati` segna le foto
+  fatte (anche senza volti); riparte da `impostazioni/riconosci-volti`.
+  `elaborazione` tiene un blocco alla volta fra lavoro e foto nuove.
+- `Persone`: tutte le modifiche (assegnazione dei volti nuovi, nomi, unioni,
+  "non è lei", proposte, cestino) passano da lì e sono `synchronized`.
+  `Foto.persone` (solo id, anche dei gruppi senza nome) va tenuto allineato
+  ai `volti`: `aggiornaFoto` o, per le unioni, `addToSet`/`pull`. È il campo
+  del filtro `persona` in `FotoService.criteri`.
+- Gli id dei volti sono ObjectId (quelli delle foto UUID): niente
+  `_id > ""` per partire, il primo giro va senza.
+- Privacy: nessuna API dei volti è pubblica e `FotoCondivisa` non ha
+  `persone` (test in `CondivisioniTest`). `FOTOTIMELINE_VOLTI=false` spegne
+  tutto (409), i dati restano. Vedere e nominare: chi usa l'app; il lavoro:
+  admin.
+
+## Rotazione
+
+- "Ruota" (`service/Rotazioni`, `RotazioneController`): `Foto.rotazione` (0, 90,
+  180, 270, in senso orario) **sopra** l'orientamento EXIF, solo nella scheda.
+  **Il file non si tocca mai**, nemmeno il tag Orientation: `hash` è lo SHA-256
+  del file, `deploy/confronta-tutto.sh` e i "già presenti" lavorano per
+  contenuto. Si somma (90 + 90 = 180, 270 + 90 = 0) sotto un lock; a 90 e 270
+  `larghezza` e `altezza` della scheda si scambiano (sono sempre "come si vede").
+  Nel cestino no (404), come le modifiche. Non serve il cloud montato.
+- Miniature: `.miniature/<id>.jpg` resta la **dritta** (solo EXIF); quelle
+  girate sono `ruotate/<id>-<gradi>.jpg`, fatte dalla dritta
+  (`ArchivioFile.creaMiniaturaRuotata`). Un nome per rotazione: niente
+  sovrascritture né file vecchi col nome buono. `FotoService.fileMiniatura` dà
+  quella come si vede, `fileMiniaturaDritta` la dritta: **i volti** cercano e
+  ritagliano sulla dritta (i riquadri valgono lì; un volto coricato si trova
+  peggio, ma girare non tocca le persone già riconosciute). Lo stesso schema per
+  la vista dei link (`condivise/ruotate/`) e la vista dei formati senza EXIF.
+- Indirizzi: miniatura, vista e download sono `immutable` in cache: il frontend
+  aggiunge `?r=<gradi>` (`rotazione()` in `formati.ts`, `FotoService.indirizzoMiniatura`
+  per cestino e quasi uguali). Il server dà sempre la rotazione della scheda.
+- Vista e download dei JPEG (`media/JpegRuotato`): una copia in streaming con
+  solo il tag Orientation cambiato (o aggiunto: IFD0 ricopiata in fondo
+  all'EXIF, o un APP1 minimo), più `tiff:Orientation` dell'XMP. Stessi byte
+  compressi, quindi senza perdita; la risorsa ha la sua lunghezza (Range).
+  Niente jpegtran: non c'è nel container e taglia i bordi non multipli di 8/16.
+  Gli HEIC: la vista JPEG di heif-convert con lo stesso tag; il download resta
+  l'HEIC. PNG/GIF/BMP/WebP: vista JPEG girata (`viste/ruotate/`), download com'è.
+  `?originale=true` dà sempre i byte dell'archivio.
+- Link condivisi: `FotoCondivisa.rotazione`, vista ridotta e miniatura girate
+  nei pixel (senza EXIF), originale e zip girati come sopra.
+- Video: solo a vederli (CSS `rotate` sul player, nel visore e nei link) e la
+  miniatura girata; file, versione compatibile e download restano com'erano.
+- Impronta (pHash) e CLIP si rifanno dalla miniatura **come si vede**: una foto
+  coricata raddrizzata a mano torna "quasi uguale" alla sua copia dritta, e la
+  ricerca per contenuto la vede nel verso giusto. `ruota` ricalcola l'impronta
+  subito, toglie `contenutoIndicizzato` e pubblica `FotoRuotata` (lo ascoltano
+  `IndiceContenuto` e `QuasiUguali`).
+
 ## Cestino
 
 - `FotoService.elimina` non cancella: mette `Foto.eliminataIl` (indice) e la
@@ -451,7 +552,35 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   permessi dell'eliminazione.
 - Eventi: `FotoNelCestino`, `FotoRipristinata`, `FotoEliminata` (solo per
   sempre: toglie il vettore da visione). `QuasiUguali` li ascolta, perché nel
-  cestino il numero di schede non cambia e la cache non se ne accorgerebbe.
+  cestino il numero di schede non cambia e la cache non se ne accorgerebbe;
+  `RiconoscimentoVolti` pure (volti `nelCestino`, fuori dall'indice dei vicini).
+
+## Eventi
+
+- Pacchetto `eventi`. `RilevamentoEventi` (senza Mongo, testabile da solo)
+  riceve le foto in ordine di scatto e consegna i gruppi chiusi; tiene solo
+  riepiloghi, mai elenchi di foto. `EventiService.ricalcola` lo alimenta con
+  un cursore (`mongo.stream`, proiezione) e scrive ogni gruppo appena chiuso:
+  le foto prendono l'evento **per intervallo di date** (`updateMulti`), gli
+  automatici vecchi che cominciavano in quel tratto si tolgono.
+- Automatici: id `a-` + la prima foto, `manuale` false, rifatti dal calcolo.
+  Ogni modifica a mano passa da `rendiManuale` (evento `manuale`, foto
+  `eventoFisso`): il calcolo salta le foto fisse e non tocca i manuali. Una
+  modifica nuova deve fare lo stesso, o il ricalcolo la perde.
+- "Calcola eventi" è un lavoro di `LavoriImportazione` (origine `EVENTI`,
+  `importate` = foto in un evento, `duplicate` = fuori); salva il punto
+  (`impostazioni/eventi-calcolo`) e riprende da lì. Il ricalcolo leggero
+  (`@Scheduled`, giorni in `eventi_da_rifare` segnati da `FotoAggiunta`,
+  `FotoNelCestino`, `FotoRipristinata`) non gira insieme al calcolo.
+- Il posto di una foto lo legge solo `LuogoFoto.di` (città, provincia,
+  regione, nazione dei luoghi strutturati; anche un luogo scelto a mano solo
+  come regione o nazione), il nome del luogo lo sceglie solo
+  `NomiEventi.nomeLuogo`: per altri campi di luogo si cambia lì. Dopo un
+  cambio dei luoghi (versione di `GeocodificaInversa`) i nomi automatici si
+  rifanno con "Calcola eventi" (rifà tutto se il calcolo di prima era finito),
+  dopo "Calcola luoghi".
+- Filtro `evento` in `FiltroFoto` (`conEvento`) e in `FotoService.criteri`.
+  Mai negli oggetti dei link condivisi (`FotoCondivisa`): test in `CondivisioniTest`.
 
 ## Git e CI
 

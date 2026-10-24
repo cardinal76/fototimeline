@@ -1,0 +1,94 @@
+/* La pagina "Eventi": dialogo, bottoni e comandi vengono da cestino.css. */
+.cerca {
+  flex: 1 1 200px;
+  min-width: 0;
+  font: inherit;
+  color: var(--testo);
+  background: var(--superficie-2);
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+}
+.cerca:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: 1px;
+}
+.anno h3 {
+  margin: 0.4rem 0 0.6rem;
+  font-size: 1.05rem;
+}
+.anno h3 small {
+  font-weight: 400;
+}
+.eventi {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.eventi li {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.nascosto-evento {
+  opacity: 0.6;
+}
+.copertina {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--sfondo);
+}
+.copertina img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.quante {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.4rem;
+  color: #fff;
+  font-size: 0.85rem;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+.testo {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 0.4rem;
+  min-width: 0;
+}
+.scegli {
+  display: grid;
+  place-items: center;
+}
+.nome-evento {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nome-evento:hover {
+  text-decoration: underline;
+}
+.nome-evento:focus-visible {
+  outline: 2px solid var(--accento);
+}
+.date,
+.testo .azioni {
+  grid-column: 1 / -1;
+}
+.date {
+  font-size: 0.85rem;
+}

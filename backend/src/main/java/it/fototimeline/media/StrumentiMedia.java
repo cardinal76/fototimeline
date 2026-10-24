@@ -118,7 +118,94 @@ public class StrumentiMedia {
                 "-c:a", "aac", "-b:a", "160k",
                 "-movflags", "+faststart", "-threads", t,
                 "-f", "mp4", mp4.toString()));
+        eseguiLungo(comando, secondiFatti, annullata, "Conversione annullata");
+        if (!Files.exists(mp4) || Files.size(mp4) == 0) {
+            throw new IOException("ffmpeg non ha prodotto il video");
+        }
+    }
+
+    /**
+     * La ricompressione in H.265 di un video troppo grande per il cloud
+     * (pacchetto {@code telefono}): tutti i flussi ({@code -map 0}), i
+     * metadati del contenitore ({@code -map_metadata 0}, anche quelli non
+     * standard come {@code com.apple.quicktime.creationdate}, con
+     * {@code use_metadata_tags}: la data di ripresa resta quella), l'audio e
+     * il resto copiati, il video in libx265 con {@code crf} e {@code preset},
+     * {@code hvc1} perché Apple lo riconosca. Niente {@code +faststart}: su
+     * un file da decine di GB riscriverebbe tutto una seconda volta.
+     *
+     * <p>Per la memoria del container: {@code thread} thread per decodificare
+     * e per il pool di x265, più {@code parametriX265} (per esempio
+     * {@code frame-threads=1:rc-lookahead=5:bframes=2}), che decidono quanti
+     * fotogrammi x265 tiene in memoria. Con {@code limite} (byte, 0 = nessuno)
+     * ffmpeg smette di scrivere appena lo supera ({@code -fs}): un risultato
+     * comunque troppo grande non occupa il disco fino in fondo, e chi chiama lo
+     * riconosce dalla dimensione. Gira con {@code nice -n 19} e, dove si può,
+     * come primo candidato dell'OOM killer ({@link #primoDaSacrificare}): se il
+     * container finisce la memoria muore ffmpeg, non la JVM.
+     *
+     * @param secondiFatti riceve i secondi di video già ricompressi, per l'avanzamento
+     * @param annullata    controllata mentre ffmpeg lavora: se diventa true lo si ferma
+     */
+    public void ricomprimi(Path video, Path mp4, int crf, String preset, int thread, String parametriX265,
+            long limite, DoubleConsumer secondiFatti, BooleanSupplier annullata) throws IOException {
+        List<String> comando = new ArrayList<>();
+        if (nice) {
+            comando.addAll(List.of("nice", "-n", "19"));
+        }
+        String t = String.valueOf(thread);
+        String x265 = "pools=" + t + (parametriX265 == null || parametriX265.isBlank() ? "" : ":" + parametriX265.strip())
+                + ":log-level=error";
+        comando.addAll(List.of(properties.ffmpeg(), "-y", "-nostdin", "-v", "error", "-nostats",
+                "-progress", "pipe:1", "-threads", t, "-i", video.toString(),
+                "-map", "0", "-map_metadata", "0", "-c", "copy",
+                "-c:v", "libx265", "-crf", String.valueOf(crf), "-preset", preset, "-x265-params", x265,
+                "-tag:v", "hvc1", "-movflags", "+use_metadata_tags"));
+        if (limite > 0) {
+            comando.addAll(List.of("-fs", String.valueOf(limite)));
+        }
+        comando.addAll(List.of("-f", "mp4", mp4.toString()));
+        eseguiLungo(comando, secondiFatti, annullata, "Ricompressione annullata");
+        if (!Files.exists(mp4) || Files.size(mp4) == 0) {
+            throw new IOException("ffmpeg non ha prodotto il video");
+        }
+    }
+
+    /**
+     * Durata, dimensioni e formato dei pixel del primo flusso video (ffprobe),
+     * per controllare un ricompresso e stimare quanta memoria vorrà x265.
+     * I campi che ffprobe non dice restano null.
+     */
+    public FormatoVideo formato(Path video) throws IOException {
+        String uscita = esegui(List.of(properties.ffprobe(), "-v", "error", "-print_format", "json",
+                "-show_format", "-show_streams", video.toString()));
+        JsonNode probe = JSON.readTree(uscita);
+        JsonNode formato = probe.path("format");
+        Double durata = formato.hasNonNull("duration") ? formato.get("duration").asDouble() : null;
+        for (JsonNode s : probe.path("streams")) {
+            if ("video".equals(s.path("codec_type").asText())
+                    && s.path("disposition").path("attached_pic").asInt(0) == 0) {
+                return new FormatoVideo(durata, s.hasNonNull("width") ? s.get("width").asInt() : null,
+                        s.hasNonNull("height") ? s.get("height").asInt() : null, testo(s, "pix_fmt"));
+            }
+        }
+        return new FormatoVideo(durata, null, null, null);
+    }
+
+    /** La durata del video in secondi (ffprobe), null se il file non la dice. */
+    public Double durata(Path video) throws IOException {
+        return formato(video).durata();
+    }
+
+    /**
+     * Un ffmpeg lungo (conversione, ricompressione) con {@code -progress pipe:1}:
+     * l'avanzamento a {@code secondiFatti}, l'annullamento controllato anche
+     * se ffmpeg non scrive niente (cloud lento), l'errore con le sue ultime righe.
+     */
+    private void eseguiLungo(List<String> comando, DoubleConsumer secondiFatti, BooleanSupplier annullata,
+            String annullato) throws IOException {
         Process p = new ProcessBuilder(comando).start();
+        primoDaSacrificare(p);
         var errori = new StringBuilder();
         Thread lettore = Thread.ofVirtual().start(() -> {
             try {
@@ -127,7 +214,6 @@ public class StrumentiMedia {
                 // il processo è morto: lo dice il codice di uscita
             }
         });
-        // Annullare deve fermarlo anche se ffmpeg non scrive niente (cloud lento).
         Thread guardiano = Thread.ofVirtual().start(() -> {
             try {
                 while (p.isAlive()) {
@@ -163,15 +249,31 @@ public class StrumentiMedia {
             throw new IOException("Interrotto", e);
         }
         if (annullata.getAsBoolean()) {
-            throw new IOException("Conversione annullata");
+            throw new IOException(annullato);
         }
         if (p.exitValue() != 0) {
             String messaggio = errori.toString().strip();
-            throw new IOException("ffmpeg è uscito con " + p.exitValue()
+            // 137 = ucciso con SIGKILL: nel container quasi sempre l'OOM killer.
+            String memoria = p.exitValue() == 137 ? " (ucciso: memoria del container finita?)" : "";
+            throw new IOException("ffmpeg è uscito con " + p.exitValue() + memoria
                     + (messaggio.isEmpty() ? "" : ": " + ultimeRighe(messaggio)));
         }
-        if (!Files.exists(mp4) || Files.size(mp4) == 0) {
-            throw new IOException("ffmpeg non ha prodotto il video");
+    }
+
+    /**
+     * Mette il processo figlio in cima alla lista dell'OOM killer
+     * ({@code oom_score_adj} 1000; alzarlo non vuole permessi): se ffmpeg e
+     * la JVM insieme superano il tetto del container, il kernel uccide
+     * ffmpeg e l'app resta su. Fuori da Linux non fa niente.
+     */
+    private static void primoDaSacrificare(Process p) {
+        Path adj = Path.of("/proc", String.valueOf(p.pid()), "oom_score_adj");
+        try {
+            if (Files.isWritable(adj)) {
+                Files.writeString(adj, "1000");
+            }
+        } catch (IOException | RuntimeException e) {
+            log.debug("oom_score_adj di {} non cambiato: {}", p.pid(), e.getMessage());
         }
     }
 

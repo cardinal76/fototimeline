@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 import it.fototimeline.cloud.ArchivioNonDisponibile;
+import it.fototimeline.eventi.EventiService;
 import it.fototimeline.luoghi.LuoghiService;
 import it.fototimeline.service.ImportazioneCartelle.Avanzamento;
 import it.fototimeline.service.Risultati.Caricamento;
@@ -48,9 +49,10 @@ public class LavoriImportazione {
      * MANUALE e AUTOMATICA importano una cartella; INDICIZZAZIONE cerca
      * nell'archivio i file senza scheda; LUOGHI dà il luogo alle foto con GPS
      * (nello stato: {@code importate} quelle con un luogo, {@code duplicate}
-     * quelle senza, cioè in mare aperto).
+     * quelle senza, cioè in mare aperto). EVENTI raggruppa le foto in eventi
+     * ({@code importate} quelle finite in un evento, {@code duplicate} le altre).
      */
-    public enum Origine { MANUALE, AUTOMATICA, INDICIZZAZIONE, LUOGHI }
+    public enum Origine { MANUALE, AUTOMATICA, INDICIZZAZIONE, LUOGHI, EVENTI }
 
     public enum Stato { IN_CORSO, FINITA, ANNULLATA, FALLITA }
 
@@ -87,6 +89,7 @@ public class LavoriImportazione {
     private final ArchivioFile archivio;
     private final List<ProvenienzaFile> provenienze;
     private final LuoghiService luoghi;
+    private final EventiService eventi;
     private final IndicizzazioneProperties tempi;
     private final Clock clock;
     /**
@@ -103,13 +106,14 @@ public class LavoriImportazione {
 
     public LavoriImportazione(ImportazioneCartelle importazione, ImportazioneAutomaticaProperties automatica,
             MemoriaImportazione memoria, ArchivioFile archivio, List<ProvenienzaFile> provenienze, LuoghiService luoghi,
-            IndicizzazioneProperties tempi, Optional<Clock> clock) {
+            IndicizzazioneProperties tempi, Optional<Clock> clock, EventiService eventi) {
         this.importazione = importazione;
         this.automatica = automatica;
         this.memoria = memoria;
         this.archivio = archivio;
         this.provenienze = List.copyOf(provenienze);
         this.luoghi = luoghi;
+        this.eventi = eventi;
         this.tempi = tempi;
         this.clock = clock.orElse(Clock.systemUTC());
     }
@@ -182,6 +186,18 @@ public class LavoriImportazione {
         return avvia(archivio.radice(), Origine.LUOGHI, lavoro -> luoghi.calcola(tutte, lavoro));
     }
 
+    /**
+     * "Calcola eventi" in sottofondo, con la stessa barra: legge e scrive solo
+     * MongoDB, gira anche col cloud smontato. Se il calcolo di prima si era
+     * fermato a metà riprende da lì, salvo {@code daCapo}.
+     */
+    public StatoLavoro avviaEventi(boolean daCapo) {
+        if (eventi.calcoloInCorso()) {
+            throw new IllegalStateException("Il calcolo degli eventi è già in corso");
+        }
+        return avvia(archivio.radice(), Origine.EVENTI, lavoro -> eventi.calcola(daCapo, lavoro));
+    }
+
     /** Quello che fa un lavoro, riferendo al lavoro stesso. */
     private interface Compito {
         void esegui(Lavoro lavoro) throws Exception;
@@ -206,12 +222,13 @@ public class LavoriImportazione {
                 throw new IllegalStateException(switch (attuale.origine) {
                     case INDICIZZAZIONE -> "C'è un'indicizzazione dell'archivio in corso: aspetta che finisca o annullala";
                     case LUOGHI -> "Il calcolo dei luoghi è in corso: aspetta che finisca o annullalo";
+                    case EVENTI -> "Il calcolo degli eventi è in corso: aspetta che finisca o annullalo";
                     default -> "C'è già un'importazione in corso: aspetta che finisca o annullala";
                 });
             }
             dopoLAutomatica = true;
         }
-        if (origine != Origine.LUOGHI) {
+        if (origine != Origine.LUOGHI && origine != Origine.EVENTI) {
             archivio.verificaDisponibile();
         }
         Lavoro lavoro = new Lavoro(cartella.toString(), origine, clock.instant());
@@ -340,6 +357,7 @@ public class LavoriImportazione {
         String nome = switch (lavoro.origine) {
             case INDICIZZAZIONE -> "Indicizzazione";
             case LUOGHI -> "Calcolo dei luoghi";
+            case EVENTI -> "Calcolo degli eventi";
             default -> "Importazione";
         };
         if (!lavoro.inCorso()) {
@@ -365,6 +383,11 @@ public class LavoriImportazione {
                     fine.importate(), fine.duplicate(), fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
             return;
         }
+        if (lavoro.origine == Origine.EVENTI) {
+            log.info("{} {}: {} foto, {} in un evento, {} fuori ({} in {})", nome, fine.stato(), fine.trovate(),
+                    fine.importate(), fine.duplicate(), fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
+            return;
+        }
         log.info("{} {} di {}: {} nuove, {} già presenti, {} errori, {} tolte dall'origine ({} in {})",
                 nome, fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.errori(), fine.rimossi(),
                 fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
@@ -384,7 +407,7 @@ public class LavoriImportazione {
      * Stato mutabile di un lavoro; lo legge l'API mentre i thread
      * dell'importazione (più d'uno: un file ciascuno) lo aggiornano.
      */
-    private final class Lavoro implements Avanzamento, LuoghiService.Avanzamento {
+    private final class Lavoro implements Avanzamento, LuoghiService.Avanzamento, EventiService.Avanzamento {
         private final String id = UUID.randomUUID().toString();
         private final String cartella;
         private final Path base;
@@ -421,7 +444,7 @@ public class LavoriImportazione {
             this.base = Path.of(cartella).toAbsolutePath().normalize();
             this.origine = origine;
             this.iniziatoIl = iniziatoIl;
-            this.ricerca = origine != Origine.LUOGHI;
+            this.ricerca = origine != Origine.LUOGHI && origine != Origine.EVENTI;
         }
 
         synchronized boolean inCorso() {
@@ -526,6 +549,13 @@ public class LavoriImportazione {
             fatte += quante;
             importate += conLuogo;
             duplicate += quante - conLuogo;
+        }
+
+        @Override
+        public synchronized void raggruppate(int quante, int inEventi) {
+            fatte += quante;
+            importate += inEventi;
+            duplicate += quante - inEventi;
         }
 
         @Override

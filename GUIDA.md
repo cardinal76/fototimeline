@@ -279,6 +279,14 @@ rilascio compare da solo come "Telefono", con le sue impostazioni, e non ricopia
 `FOTOTIMELINE_TELEFONO_PROPRIETARIO` (nel `.env`) o, se vuoto, del primo amministratore che entra;
 da **Modifica** gli si cambia nome e proprietario.
 
+**3.3 Video troppo grandi.** LifetimeCloud non prende file oltre 20 GB (e a volte rifiuta con
+"413" anche più piccoli). Quei video l'app li ricomprime da sola in H.265 su server2, uno alla volta
+e anche per ore, e li importa come gli altri; l'originale resta su pCloud, spostato in
+`Video originali troppo grandi` solo dopo che il ricompresso è in archivio. In **Telefoni**, sotto
+ogni telefono, "Video troppo grandi" dice a che punto è, quanto pesava e quanto pesa; da admin
+**Annulla** e **Riprova**. Dettagli e limiti (spazio, memoria) in DEPLOY.md, "Video troppo grandi
+per LifetimeCloud".
+
 Controllo da server2:
 
 ```bash
@@ -310,10 +318,20 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza contenuto** (admin): la prima volta, dopo il trasloco, manda tutte le foto alla
   ricerca per contenuto. Con 150.000 foto ci vogliono ore (anche una notte): va avanti da solo,
   anche col cloud smontato, e se il server riparte riprende. Le foto nuove entrano da sole.
-- **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
-  ce l'hanno; quelle nuove lo prendono da sole. Non serve il cloud montato, 150 mila foto in meno
-  di un minuto. Dopo il primo rilascio con i luoghi va lanciato una volta; poi il filtro
-  **📍 Luogo** nella barra sceglie nazione, regione o paese (o lo cerca per nome).
+- **Calcola luoghi**: dà il luogo (Rovereto · Provincia di Trento · Trentino-Alto Adige · Italia,
+  Manchester · Inghilterra · Regno Unito) alle foto col GPS che non ce l'hanno; quelle nuove lo
+  prendono da sole. Non serve il cloud montato, 150 mila foto in meno di un minuto; se lo si
+  ferma, la volta dopo riprende da dove era rimasto. Dopo il rilascio dei luoghi con la provincia
+  va lanciato una volta. Il filtro **📍 Luogo** nella barra è l'elenco dei luoghi con quante
+  foto (nazione → regione → provincia → città) e li cerca per nome; anche la ricerca normale li
+  trova: "Trentino", "Olanda", "Manchester".
+- **Luogo a mano** (una foto senza GPS, o col luogo sbagliato): nel visore, pannello dei
+  dettagli (I), ✎ accanto al luogo o il tasto **L**; si scrive il nome ("Manch") e si sceglie
+  "Manchester, Inghilterra, Regno Unito", oppure una provincia, una regione o una nazione.
+  **Nessun luogo** lo toglie, **Usa il GPS** torna a quello automatico. Per tante foto insieme:
+  *Seleziona*, poi **📍 Luogo…** nella barra in basso. Un luogo scelto a mano non lo cambia più
+  nessun ricalcolo. Le foto senza GPS con una città scelta a mano compaiono sulla mappa lì, con il
+  bordo tratteggiato (posizione approssimativa).
 - **Condividere con chi non ha un account**: *Seleziona* le foto (o apri un album), *Condividi…*
   (o *Condividi album*), scegli titolo e scadenza, *Crea link*, *Copia* e mandalo su WhatsApp. Chi lo
   apre vede solo quelle foto, senza login. Spunta "Permetti di scaricare" solo se servono gli
@@ -325,6 +343,13 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   Le preferite non si propongono mai da togliere. La prima volta, da admin, **Calcola impronte**
   (nel dialogo) per le foto già in archivio: legge solo le miniature, non serve il cloud. Le foto
   nuove la prendono da sole.
+- **Persone** (Strumenti): un volto per persona, con quante foto. La prima volta, da admin,
+  **Riconosci volti** guarda tutte le foto (dalle miniature, ore con 110.000 foto, riprende da solo);
+  le nuove si fanno da sole. In **Senza nome** clic sul nome di un gruppo e scrivi chi è; **Unisci…**
+  mette insieme i gruppi della stessa persona; nel dettaglio ✕ toglie un volto sbagliato e **Non
+  mostrare** nasconde gli sconosciuti. Clic su un volto: le sue foto; il filtro **Persona** si
+  combina con gli altri. Nel visore, nei dettagli, chi c'è nella foto, e **Chi è?** su un volto
+  senza nome. I nomi restano nell'app: chi ha un link condiviso non li vede.
 - **Salute**: il pallino dice se va tutto bene (verde), se c'è da guardare (giallo) o se qualcosa
   non va (rosso); il dialogo spiega cosa, voce per voce. Con il bot di Telegram (DEPLOY.md,
   "Salute e avvisi su Telegram") arriva un messaggio quando una voce diventa rossa e quando torna
@@ -663,6 +688,8 @@ backup): un'altra cartella di lavoro per ogni giro, per esempio
 | "La ricerca per contenuto non risponde" | il container visione riparte o è fermo | `docker logs fototimeline-visione-1` su server2; si riprova dopo un minuto |
 | il rilascio dice "Manca VISIONE_SEGRETO" | `.env` di prima della ricerca per contenuto | aggiungere `VISIONE_SEGRETO=$(openssl rand -hex 32)` in `~/fototimeline/.env` |
 | scarica: `file name too long` | su pCloud un nome oltre 255 byte (didascalie lunghe), che il disco di Linux non accetta | `git pull` e rilanciare `scarica`: quei file arrivano col nome accorciato (`…~1a2b3c4d.jpg`), e `pulisci` cancella comunque l'originale |
+| Video troppo grande "rimandato: spazio insufficiente in /video-grandi" | su server2 non c'è posto per originale e ricompresso | liberare spazio (`df -h ~/fototimeline`): riprova da solo ogni ora |
+| Video troppo grande "ffmpeg vuole circa ... di memoria" | un 4K a 10 bit (HDR) o un 8K | DEPLOY.md, "Video troppo grandi per LifetimeCloud", Memoria; poi **Riprova** |
 | Takeout: "Spazio insufficiente in /takeout ..." | su server2 non c'è posto per lo zip | liberare spazio (`df -h ~`) o rifare Takeout con zip più piccoli (6.1), poi **Avvia** |
 | Takeout: `didn't find section in config file` per `gdrive:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 6.2 |
 | Takeout: "Qui non si può: ... senza rclone" | app sul PC, non sul server | il Takeout si importa solo da server2 |

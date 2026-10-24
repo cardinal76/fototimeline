@@ -39,6 +39,7 @@ import it.fototimeline.contenuto.Visione.Somiglianza;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
+import it.fototimeline.service.EventiFoto.FotoRuotata;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
 import it.fototimeline.service.FiltroFoto;
@@ -156,8 +157,22 @@ public class IndiceContenuto {
         }
     }
 
+    /**
+     * Girata a mano: il vettore si rifà dalla miniatura girata (visione lo
+     * sostituisce, stesso id). Se visione non risponde il segno resta tolto e
+     * la riprende "Indicizza contenuto".
+     */
+    @EventListener
+    public void ruotata(FotoRuotata evento) {
+        if (attiva()) {
+            singole.execute(() -> indicizzaUna(evento.id()));
+        }
+    }
+
     private void indicizzaUna(String id) {
-        Path miniatura = archivio.miniatura(id);
+        Foto foto = mongo.findById(id, Foto.class);
+        // Come si vede: con la rotazione scelta a mano, che è il verso giusto anche per CLIP.
+        Path miniatura = archivio.miniaturaRuotata(id, foto == null ? 0 : foto.getRotazione());
         if (!Files.exists(miniatura)) {
             return;
         }
@@ -285,9 +300,9 @@ public class IndiceContenuto {
                 fine.errori(), mongo.count(senzaSegno(), Foto.class));
     }
 
-    /** La miniatura su disco; se manca la rifà dall'originale (serve il cloud montato). */
+    /** La miniatura su disco, come si vede (girata a mano); se manca la rifà dall'originale (serve il cloud montato). */
     private Path miniatura(Foto foto) {
-        Path miniatura = archivio.miniatura(foto.getId());
+        Path miniatura = archivio.miniaturaRuotata(foto.getId(), foto.getRotazione());
         return Files.exists(miniatura) ? miniatura : fotoService.fileMiniatura(foto);
     }
 
@@ -325,7 +340,7 @@ public class IndiceContenuto {
 
     /**
      * Le foto più simili al testo, dalla più simile, con gli altri filtri
-     * della timeline (tag, album, preferite, date; {@code q} non conta). Solo
+     * della timeline (tag, album, preferite, date, persona; {@code q} non conta). Solo
      * quelle sopra la soglia e vicine alla più simile: per "cane" i cani, non
      * tutte le foto in ordine di somiglianza.
      */
@@ -342,7 +357,8 @@ public class IndiceContenuto {
         }
         Map<String, Double> punteggi = new HashMap<>();
         simili.forEach(x -> punteggi.putIfAbsent(x.id(), x.punteggio()));
-        FiltroFoto altri = new FiltroFoto(null, filtro.tag(), filtro.album(), filtro.preferite(), filtro.dal(), filtro.al());
+        FiltroFoto altri = new FiltroFoto(null, filtro.tag(), filtro.album(), filtro.preferite(), filtro.dal(), filtro.al())
+                .conPersona(filtro.persona());
         Query query = new Query(new Criteria().andOperator(
                 Criteria.where("_id").in(punteggi.keySet()), FotoService.criteri(altri)));
         List<Foto> trovate = new ArrayList<>(mongo.find(query, Foto.class));

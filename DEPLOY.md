@@ -9,7 +9,7 @@ dall'app.
 ```
 internet ─▶ caddy (HTTPS, Let's Encrypt) ─▶ app (Spring Boot + Angular) ─┬─▶ mongo
                                                                           ├─▶ rclone rcd ─WebDAV─▶ LifetimeCloud
-                                                                          └─▶ visione (CLIP, ricerca per contenuto)
+                                                                          └─▶ visione (CLIP e volti: contenuto, persone)
 login: Keycloak di presenze, realm "fototimeline"
 ```
 
@@ -19,8 +19,10 @@ login: Keycloak di presenze, realm "fototimeline"
 | Foto da importare | qualunque cartella di LifetimeCloud (l'app vede la radice come `/cloud`) |
 | Miniature | volume Docker `fototimeline_miniature` su server2 (si rigenerano dagli originali) |
 | Video compatibili (H.264) | LifetimeCloud, `FotoTimeline/.compatibili/<id>.mp4` (si rifanno con "Converti video") |
+| Originali dei video troppo grandi per LifetimeCloud | pCloud, `Video originali troppo grandi/` (in archivio c'è la versione ricompressa in H.265) |
 | Metadati (date, tag, album) | MongoDB, volume `fototimeline_mongo` su server2 |
 | Indice della ricerca per contenuto | volume `fototimeline_visione-dati` su server2 (si rifà dalle miniature) |
+| Volti e persone (nomi, gruppi) | MongoDB, collezioni `volti` e `persone`; l'indice dei vicini in `fototimeline_visione-dati`, cartella `volti` (si rifà da Mongo) |
 | Configurazione e segreti | `~/fototimeline/.env` e `~/fototimeline/rclone/rclone.conf` su server2 |
 
 Il rilascio lo fa `.github/workflows/rilascio.yml` sul runner `fototimeline-build`
@@ -282,6 +284,105 @@ dopo il rilascio.
 
 Si attiva solo sul server (serve rclone) e con `FOTOTIMELINE_CARTELLA_AUTOMATICA`
 dentro `RCLONE_PUNTO_MONTAGGIO`: altrimenti la finestra dice perché.
+
+### Video troppo grandi per LifetimeCloud
+
+LifetimeCloud non prende file oltre **20480 MB** (`File too large. Max 20480MB on 2 TB
+Lifetime.: 403 Forbidden`), e il suo nginx a volte rifiuta anche file più piccoli con un **413
+Request Entity Too Large** (la soglia vera di nginx non è scritta da nessuna parte: si tratta
+come lo stesso caso). Prima erano due errori a ogni giro del telefono; ora un video così si
+**ricomprime in H.265** su server2 e entra in FotoTimeline come ogni altro, mentre l'originale
+resta su pCloud in una cartella sua.
+
+1. **Il giro del telefono** non prova nemmeno a copiare un video oltre `FOTOTIMELINE_VIDEO_MAX_MB`
+   (20000 MB, poco sotto il limite) e mette in coda anche quelli che il cloud rifiuta per la
+   dimensione (403 "File too large" o 413: niente seconda prova, un'eventuale copia a metà si
+   toglie). Non sono errori: nel riepilogo sono "N in ricompressione". Il registro
+   `video_grandi_telefono` (MongoDB) li ricorda: un giro dopo non li riprova a copiare.
+2. **La ricompressione**, un video alla volta su un thread suo (`video-grandi`):
+   - controlla lo spazio in `$FOTOTIMELINE_DATI/video-grandi` (montata come `/video-grandi` in
+     rclone e nell'app, come `/takeout`): servono originale + ricompresso (al più la soglia) +
+     `FOTOTIMELINE_VIDEO_GRANDI_RISERVA` (2 GB). Per un video da 23 GB, fino a ~45 GB; se non ci
+     sono il video è **rimandato**: riprova da solo ogni ora finché lo spazio non c'è, e intanto
+     la voce dei telefoni in **Salute** è gialla col messaggio (quanto serve, quanto c'è). Anche
+     rclone o pCloud che non rispondono rimandano, ma dopo 5 volte di fila è un errore;
+   - rclone scarica l'originale da pCloud lì (`operations/copyfile` asincrono);
+   - ffmpeg lo ricomprime col comando provato a mano su due video da 23 GB, più i limiti per CPU
+     e memoria: `nice -n 19 ffmpeg -threads 2 -i in -map 0 -map_metadata 0 -c copy -c:v libx265
+     -crf 24 -preset fast -x265-params pools=2:frame-threads=1:rc-lookahead=5:bframes=2:ref=2:lookahead-slices=0
+     -tag:v hvc1 -movflags +use_metadata_tags -fs <limite> out.mp4`. Restano tutti i flussi e i
+     metadati del contenitore (anche `com.apple.quicktime.creationdate`), quindi la data di
+     ripresa; `-fs` ferma ffmpeg appena il risultato supera il limite;
+   - controlla il risultato: sotto il limite (la soglia, e sotto l'originale), altrimenti riprova
+     con CRF 28 e 32 (`FOTOTIMELINE_VIDEO_GRANDI_CRF`, `_CRF_MASSIMO`); **durata** uguale a quella
+     dell'originale entro un secondo, altrimenti è un errore;
+   - lo carica nella cartella automatica col nome dell'originale (`telefono/Xiaomi 25080RABDG - DCIM -
+     Camera - 20260301_195506_293.mp4`, nome libero, mai sovrascritto) e lo mette nel registro
+     delle copie segnato `ricompresso`. Se LifetimeCloud rifiuta anche lui, CRF più alto e limite
+     sotto quello rifiutato. I file su `/video-grandi` si tolgono sempre, anche dopo un errore.
+3. **L'importazione automatica** lo prende come ogni file del telefono: scheda, miniatura, data
+   dai metadati, "caricata da" il proprietario del telefono; poi la versione compatibile H.264
+   come per ogni HEVC.
+4. **Al giro dopo**, **solo se c'è una scheda con lo SHA-256 del ricompresso** (calcolato prima di
+   caricarlo), l'originale si **sposta** su pCloud, lato server (`operations/movefile`, cioè
+   `renamefile` di pCloud), in `FOTOTIMELINE_VIDEO_GRANDI_PCLOUD` (predefinita `Video originali
+   troppo grandi`, dalla radice del remote del telefono: `pcloud:Video originali troppo grandi/`).
+   Se lì c'è già un file con quel nome, `nome (2).mp4`. Nel riepilogo: "N video ricompressi" e
+   una riga per video con dimensione prima e dopo e dove è andato l'originale. La sincronizzazione
+   salta quella cartella anche per un telefono che guarda tutto pCloud.
+
+**L'originale non si cancella mai**: la pulizia dopo i giorni del telefono salta le copie
+`ricompresso`, e lo spostamento avviene solo con la scheda in archivio. Se il ricompresso sparisce
+dalla cartella automatica senza diventare una scheda, dopo un giorno è un errore e l'originale
+resta dov'è. Un video tolto da pCloud prima della ricompressione esce dalla coda da solo.
+
+**Errori veri** (durata diversa, ffmpeg che non riesce, ancora troppo grande col CRF 32, troppa
+memoria) restano errori del giro, a ogni giro, finché non si preme **Riprova**. Dove si vede:
+**Telefoni** (una sezione "Video troppo grandi" per telefono: fase e percentuale di quello in
+corso, prima e dopo, dove è l'originale, **Annulla** e **Riprova** per l'admin) e **Salute**
+(voce dei telefoni). Annulla ferma rclone o ffmpeg e toglie i file da `/video-grandi`; il video
+resta su pCloud com'era. Dopo un riavvio il video a metà ricomincia da capo.
+
+**CPU**: `nice -n 19` e `FOTOTIMELINE_VIDEO_GRANDI_THREAD` thread (2), e un ffmpeg lungo alla volta
+in tutta l'app: la conversione dei video compatibili aspetta che la ricompressione finisca e
+viceversa. Quanto dura: x265 `fast` su un 4K va a pochi fotogrammi al secondo con 2 thread (qui
+4 fps su una CPU recente), quindi un video da 20 GB (20–30 minuti di 4K) vuole **molte ore**,
+anche una notte intera. Gira in sottofondo; il giro del telefono intanto va avanti.
+
+**Memoria**: x265 tiene in memoria i fotogrammi, e ffmpeg conta nel tetto del container
+(`FOTOTIMELINE_MEMORIA_APP`, 3 GB, con 1,5 GB di heap). Misurato con i parametri qui sopra (picco
+del processo):
+
+| Video | Preset `fast` così com'è | Con i parametri dell'app |
+|---|---|---|
+| 4K a 8 bit | 1,45 GB | 0,93 GB |
+| 4K a 10 bit (HDR) | 2,4 GB | 1,5 GB |
+| 8K a 8 bit | — | 3,4 GB |
+
+Con il tetto di 3 GB c'è posto per un 4K a 8 bit (`FOTOTIMELINE_VIDEO_GRANDI_MEMORIA=1100MB`).
+Prima di cominciare l'app stima la memoria dalla risoluzione e dai bit: un video che ne vuole di
+più (4K a 10 bit, 8K) è un errore che lo dice, invece di essere ucciso dopo ore. Per un 4K a 10 bit:
+`FOTOTIMELINE_MEMORIA_APP=4g` e `FOTOTIMELINE_VIDEO_GRANDI_MEMORIA=2000MB` nel `.env`, rilascio,
+**Riprova**; con 7,8 GB di RAM su server2 restano circa 0,8 GB più lo swap, e solo mentre ffmpeg
+gira. Un 8K non sta su server2. In più ffmpeg parte con `oom_score_adj` 1000: se il container
+finisce comunque la memoria, il kernel uccide ffmpeg (errore "ucciso: memoria del container
+finita?") e non la JVM.
+
+| Variabile | Predefinito | Cosa fa |
+| --- | --- | --- |
+| `FOTOTIMELINE_VIDEO_MAX_MB` | `20000` | oltre (MB in base 1024) non si copia, si ricomprime; è anche il tetto del ricompresso |
+| `FOTOTIMELINE_VIDEO_GRANDI_PCLOUD` | `Video originali troppo grandi` | dove vanno gli originali, dalla radice del remote del telefono |
+| `FOTOTIMELINE_VIDEO_GRANDI_RISERVA` | `2GB` | spazio da lasciare libero in `/video-grandi` oltre a originale e ricompresso |
+| `FOTOTIMELINE_VIDEO_GRANDI_THREAD` | `2` | thread di ffmpeg |
+| `FOTOTIMELINE_VIDEO_GRANDI_MEMORIA` | `1100MB` | memoria che ffmpeg può prendere (stimata); oltre, errore |
+| `FOTOTIMELINE_VIDEO_GRANDI_CRF`, `_CRF_MASSIMO` | `24`, `32` | primo e ultimo CRF, a passi di 4 |
+| `FOTOTIMELINE_VIDEO_GRANDI_X265` | vedi sopra | parametri di x265 (memoria) |
+| `FOTOTIMELINE_VIDEO_GRANDI_ATTIVA` | `true` | `false`: i video troppo grandi restano errori, come prima |
+
+La cartella `$FOTOTIMELINE_DATI/video-grandi` la crea il rilascio (di `marco`, uid 1000: rclone ci
+scrive da root, l'app ci crea una sottocartella per video e la toglie). Lo spazio libero:
+`df -h ~/fototimeline`. Poi il ricompresso passa dalla cache del VFS di rclone quando
+l'importazione lo legge, come ogni video.
 
 ### Chi ha caricato cosa
 
@@ -609,6 +710,143 @@ docker run -d -p 127.0.0.1:8000:8000 -e VISIONE_SEGRETO=prova -v visione-dati:/d
 VISIONE_URL=http://localhost:8000 VISIONE_SEGRETO=prova ./mvnw spring-boot:run   # in backend/
 ```
 
+### Riconoscimento dei volti (Persone)
+
+Strumenti → **Persone**: un volto per persona, con quante foto. Le foto si
+guardano sul server, nel container `visione`, e i volti simili si
+raggruppano da soli; tutto resta su server2 (niente servizi esterni, niente
+foto o vettori che escono).
+
+**I passi, la prima volta** (dopo il rilascio):
+
+1. da admin, Strumenti → **Riconosci volti (N)**: guarda tutte le foto in
+   sottofondo (barra "Volti %" in alto, **Annulla**). Riparte da solo dopo un
+   riavvio, da dove era arrivato; rilanciato non rifà le foto già guardate.
+   Non serve il cloud montato (usa le miniature, sul disco di server2);
+2. **Persone → Senza nome**: i gruppi, dal più grande. Clic sul **nome**
+   ("Senza nome") di un gruppo: si scrive chi è e diventa una persona. Se il
+   nome c'è già, l'app propone di unirli;
+3. **Unisci…**: si scelgono due o più volti della stessa persona (da bambina e
+   da grande, con e senza occhiali) e si uniscono; nel dettaglio di una persona
+   c'è anche "Somigliano: la stessa persona?" con i gruppi più vicini;
+4. nel dettaglio, i volti **meno somiglianti per primi**: ✕ toglie un volto
+   sbagliato (e non ci torna da solo), ★ lo usa come copertina; **Non
+   mostrare** nasconde un gruppo (sconosciuti, folla) in "Nascoste";
+5. **clic sul volto**: le foto di quella persona nella timeline; il filtro
+   **Persona** (Filtri) si combina con tag, album, luogo, date e con la
+   ricerca per contenuto. Nel visore, nel pannello dei dettagli, chi c'è nella
+   foto; su un volto senza nome **Chi è?**.
+
+Le foto nuove si guardano da sole appena entrano. Un volto nuovo molto
+simile a una persona con nome le va da solo (sopra
+`FOTOTIMELINE_VOLTI_SOGLIA_SICURA`); un po' meno simile resta una
+**proposta** ("Forse è Anna?", nel dettaglio di Anna e nel visore: ✓ o ✕).
+
+**Il modello**: due reti di OpenCV, girano con `cv2.dnn` senza torch.
+
+| | Rilevamento | Riconoscimento |
+|---|---|---|
+| Modello | YuNet (`face_detection_yunet_2023mar.onnx`) | SFace (`face_recognition_sface_2021dec.onnx`), vettore di 128 numeri |
+| Licenza | MIT | Apache 2.0 |
+| Peso | 0,2 MB | 37 MB |
+| Tempo | ~10 ms su una miniatura | ~25 ms a volto |
+
+Scelto al posto di InsightFace (buffalo_s/buffalo_l, più preciso) perché i
+pesi di InsightFace sono "solo per ricerca non commerciale", mentre YuNet e
+SFace hanno licenze libere senza condizioni; e perché stanno con CLIP nello
+stesso container senza alzare la memoria (InsightFace buffalo_l vuole
+~0,5 GB e onnxruntime). Il prezzo: SFace è meno bravo di ArcFace con i volti
+piccoli, di profilo o al buio, e con i bambini che crescono: lì nascono
+gruppi separati della stessa persona, da unire a mano (i "Somigliano" aiutano).
+I pesi si scaricano quando si costruisce l'immagine (da Hugging Face,
+`opencv/face_detection_yunet` e `opencv/face_recognition_sface`, a una
+revisione fissa, SHA-256 controllato), in uno strato a parte da quello di CLIP:
+a runtime niente download.
+
+**Cosa guarda**: solo foto e HEIC, dalla **miniatura** (480 px di lato, sul
+disco di server2), mai l'originale nel cloud e niente video. I volti con il
+lato corto sotto `FOTOTIMELINE_VOLTI_LATO_MINIMO` pixel della miniatura (32)
+si scartano: troppo pochi pixel per riconoscerli (folla, sfondo, foto di
+gruppo larghe). Se una miniatura manca la si rifà dall'originale, e lì serve
+il cloud montato.
+
+**Come raggruppa** (pacchetto `volti`, `Persone`): niente confronto di tutti
+con tutti (con 300.000 volti sarebbero 45 miliardi di coppie) né un DBSCAN
+periodico che rimescolerebbe i gruppi già nominati. Ogni volto nuovo chiede a
+visione i 14 volti più simili (indice dei vettori come quello di CLIP,
+coseno, in un colpo solo per un blocco di 8 foto) e:
+
+1. se tra loro c'è una persona con nome sopra la soglia **sicura** (0,6), è sua;
+2. se no, se c'è un gruppo senza nome (o nascosto) sopra la soglia del **gruppo** (0,5), entra lì;
+3. una persona con nome fra la soglia delle **proposte** (0,42) e quella sicura resta una proposta;
+4. se no, con i vicini ancora senza gruppo sopra 0,5 fa un gruppo nuovo.
+
+Fra più candidati vince chi ha più somiglianza in tutto fra i vicini, non il
+singolo più simile; i volti della stessa foto non contano. Le soglie sono
+coseni fra i vettori di SFace (OpenCV indica 0,363 come confine fra "stessa
+persona" e no): più alte = gruppi più puliti ma più spezzati, più basse =
+meno gruppi ma qualche estraneo dentro. Si cambiano nel `.env`
+(`FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO`, `_SICURA`, `_PROPOSTA`) e valgono per i
+volti nuovi; quelli già raggruppati restano dove sono.
+
+**Dove stanno i dati**: in MongoDB `volti` (foto, riquadro in frazioni della
+miniatura, punteggio, vettore in binario, persona, proposta, "non è lei") e
+`persone` (nome, nascosta, volto di copertina); ogni foto tiene in
+`Foto.persone` gli id (mai i nomi) delle sue persone, per il filtro.
+L'indice dei vicini è in visione (volume `visione-dati`, cartella `volti`): se
+va perso, **Persone → Ricostruisci indice** lo rifà da Mongo, senza riguardare
+le foto. Il backup dei metadati copia `foto` (con gli id delle persone), non
+`volti` e `persone`: per tenere anche i nomi,
+`docker exec fototimeline-mongo-1 mongodump ... --db fototimeline --collection persone --archive > persone.archive`.
+
+**Cestino**: le foto nel cestino non contano (né nel numero di foto di una
+persona, né nella copertina, né nel filtro) e i loro volti lasciano l'indice
+dei vicini; ripristinate tornano com'erano. Eliminate per sempre, i loro volti
+se ne vanno, e un gruppo senza nome rimasto vuoto pure (una persona con nome
+resta, con 0 foto).
+
+**Chi può fare cosa**: vedere le persone, dare i nomi, unire, nascondere,
+togliere un volto e confermare le proposte lo può **chi usa l'app** (come i
+tag e gli album: è la famiglia che riconosce la famiglia, e vede già tutte le
+foto); **Riconosci volti** e **Ricostruisci indice** sono da admin
+(`fototimeline-admin`). Nessuna API dei volti è pubblica.
+
+**Link condivisi**: chi ha un link `/c/...` non vede **niente** delle persone:
+né nomi, né gruppi, né riquadri, né ritagli. La galleria pubblica usa i suoi
+record (`FotoCondivisa`), senza `persone`; non c'è nessun percorso dei volti
+sotto `/api/condivise`, e le API `/api/persone`, `/api/volti/**`,
+`/api/foto/{id}/volti` vogliono il login (lo controlla `CondivisioniTest`).
+Le immagini dei link sono la vista ridotta di sempre: nessun riquadro disegnato.
+
+**Spegnere tutto**: nel `.env`
+
+```bash
+FOTOTIMELINE_VOLTI=false
+```
+
+e il rilascio. Spenti: il lavoro, la coda delle foto nuove, la pagina
+*Persone*, il filtro, i nomi nel visore (le API rispondono 409), e visione non
+carica nemmeno il modello (`VISIONE_VOLTI`, ~120 MB in meno). I dati restano
+in Mongo: riaccendendo si riparte da lì. Per cancellarli davvero, con l'app
+spenta o la funzione spenta:
+
+```bash
+docker exec fototimeline-mongo-1 mongosh -u ... -p ... --authenticationDatabase admin fototimeline --eval \
+  'db.volti.drop(); db.persone.drop(); db.foto.updateMany({}, {$unset: {persone: 1, voltiCercati: 1}}); db.impostazioni.deleteOne({_id: "riconosci-volti"})'
+docker exec fototimeline-visione-1 rm -rf /dati/volti
+```
+
+**Quanto costa, con 110.000 foto:**
+
+| | |
+|---|---|
+| RAM di visione | +~120 MB per OpenCV e i due modelli; l'indice dei vicini ~40 MB ogni 100.000 volti (float16). Con CLIP: ~0,45 GB a riposo, picchi ~1,3 GB (un calcolo alla volta, CLIP o volti). Sta nei 1,5 GB di prima; se `docker inspect fototimeline-visione-1 --format '{{.State.OOMKilled}}'` dice `true`, `VISIONE_MEMORIA=2g` nel `.env` (resta 1 GB per sistema e runner) |
+| RAM dell'app | quasi niente: i vettori non stanno nella JVM, solo un blocco di 8 foto alla volta |
+| MongoDB | ~1 KB a volto (vettore 512 byte): 200.000 volti ≈ 200 MB su disco |
+| Disco dell'immagine | +~90 MB (OpenCV headless 55 MB, pesi 37 MB) |
+| Tempo di "Riconosci volti" | ~40 ms a foto in visione con 2 thread (misurato su 4 vCPU, miniature da 480 px), più ricerca dei vicini e Mongo: ~0,1 s a foto, 110.000 foto ≈ 3–4 ore; su server2 con le build in mezzo 5–8. Si lascia andare di notte: riprende da solo |
+| Una foto nuova | ~0,1 s, in sottofondo, dopo la miniatura |
+
 ### Luoghi dal GPS (GeoNames)
 
 Il nome del posto (Sperlonga, Lazio · Italia) si ricava dalle coordinate sul
@@ -620,12 +858,24 @@ stage `geonames` da `https://download.geonames.org/export/dump/` e mette in
 | File | Cosa | Peso nell'immagine |
 |---|---|---|
 | `cities500.txt` | ~225 mila centri sopra i 500 abitanti (anche molte frazioni italiane), senza la colonna dei nomi alternativi | ~25 MB |
-| `alternateNames-it.txt` | i nomi in italiano (Roma, Parigi, Baviera), filtrati da `alternateNamesV2.zip` (200 MB, scaricato e buttato nello stage) | ~0,9 MB |
+| `alternateNames-it.txt` | i nomi in italiano (Roma, Parigi, Baviera, Provincia di Trento; per le nazioni anche gli altri, come Olanda), filtrati da `alternateNamesV2.zip` (200 MB, scaricato e buttato nello stage) | ~0,9 MB |
 | `admin1CodesASCII.txt`, `countryInfo.txt` | regioni e nazioni | ~0,2 MB |
+| `admin2Codes.txt` | solo le ~110 righe `IT.` (le province) dei 2,3 MB del file di GeoNames | ~8 KB |
 
 In tutto circa **26 MB** in più nell'immagine. All'avvio l'app li legge in un
 paio di secondi in un indice compatto (array di primitivi, k-d tree): circa
-**10 MB di heap**. Oltre 30 km dal centro abitato più vicino
+**12 MB di heap** (10 prima dei luoghi a più livelli: provincia, geonameid e
+abitanti di ogni punto, ~2 MB, per la provincia e la ricerca per nome).
+
+**Livelli**: città o comune, provincia (solo in Italia: admin2, "Provincia di
+Trento"; all'estero admin2 è troppo vario e non si legge), regione (admin1: in
+Italia la regione, "Trentino-Alto Adige"; all'estero il primo livello,
+"Inghilterra", "Olanda Settentrionale", "Baviera") e nazione. I nomi delle
+nazioni sono quelli di Java in italiano ("Paesi Bassi", "Regno Unito"), con gli
+altri nomi italiani di GeoNames per la ricerca ("Olanda", "UK", "USA"). Stanno
+nei campi della foto `luogo`, `provincia`, `regione`, `nazione`,
+`codiceNazione` con `origineLuogo` (GPS o MANUALE), non nei tag: i tag liberi
+restano di chi li scrive, e i luoghi hanno già filtro, indice e mappa. Oltre 30 km dal centro abitato più vicino
 (`FOTOTIMELINE_LUOGHI_DISTANZA`) il luogo resta sconosciuto: mare aperto.
 Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
 "Luoghi spenti").
@@ -634,9 +884,22 @@ Se la cartella manca o è vuota l'app parte lo stesso, senza luoghi (nel log:
 - Per quelle già in archivio: da admin **Calcola luoghi** (`POST
   /api/archivio/luoghi`), in sottofondo con la barra delle importazioni. Legge
   solo MongoDB, non il cloud: va anche da smontato, 150 mila foto in meno di
-  un minuto. Rilanciarlo non rifà quelle già calcolate (anche quelle in mare
-  aperto, segnate con `luogoCalcolato`); se tutte ce l'hanno chiede se
-  ricalcolarle tutte (`?tutte=true`), utile dopo un aggiornamento del dataset.
+  un minuto. Rilanciarlo non rifà quelle già calcolate con la versione attuale
+  del calcolo (`versioneLuoghi`, anche quelle in mare aperto); annullato o
+  interrotto da un riavvio, riparte da dove era rimasto (la versione si scrive
+  ogni 500 foto). Se tutte ce l'hanno chiede se ricalcolarle tutte
+  (`?tutte=true`), utile dopo un aggiornamento del dataset.
+- **Dopo il rilascio dei luoghi a più livelli** (versione 2, con la provincia):
+  le foto calcolate prima contano di nuovo come "da calcolare"; va lanciato una
+  volta **Calcola luoghi** (Strumenti, da admin). Il primo build riscarica lo
+  stage `geonames` (~215 MB, un minuto), perché il Dockerfile è cambiato.
+- **Luoghi scelti a mano** (visore o selezione, `PUT /api/foto/{id}/luogo`,
+  `IMPOSTA_LUOGO`): `origineLuogo` MANUALE, e né il calcolo né `?tutte=true` li
+  toccano; "Usa il GPS" (`DELETE /api/foto/{id}/luogo`, `LUOGO_DA_GPS`) li
+  rimette al calcolo. Una città scelta a mano porta le sue coordinate
+  (`latitudineLuogo`, `longitudineLuogo`): sulla mappa la foto senza GPS (o
+  col GPS a più di `FOTOTIMELINE_LUOGHI_DISTANZA` km) va lì, segnata
+  approssimativa. Quelle coordinate non escono mai dai link condivisi.
 - **Aggiornare il dataset**: lo stage resta nella cache di Docker e non si
   riscarica a ogni rilascio (se la cache viene pulita, si riscarica da sé: ~215
   MB, un minuto). Per prendere quello nuovo, su server2 dal checkout del runner
@@ -920,7 +1183,10 @@ L'app ha **1,5 GB di heap** (`-Xmx1536m`) in un container con un tetto di
 **3 GB** (`mem_limit`): oltre l'heap la JVM usa memoria sua (metaspace, thread,
 codice compilato, qualche centinaio di MB) e nel container contano anche i
 processi figli, cioè ffmpeg della conversione dei video e heif-convert, che
-con una foto da 48 MP decodifica centinaia di MB. Si cambiano nel `.env`:
+con una foto da 48 MP decodifica centinaia di MB. La ricompressione dei video
+troppo grandi (x265, fino a ~1 GB per un 4K) è il figlio più pesante: un ffmpeg
+lungo alla volta, e quanto può prendere lo dice `FOTOTIMELINE_VIDEO_GRANDI_MEMORIA`
+("Video troppo grandi per LifetimeCloud", sopra). Si cambiano nel `.env`:
 
 | Variabile | Predefinito | Cosa fa |
 | --- | --- | --- |
@@ -928,7 +1194,7 @@ con una foto da 48 MP decodifica centinaia di MB. Si cambiano nel `.env`:
 | `FOTOTIMELINE_MEMORIA_APP` | `3g` | tetto del container; oltre, Docker lo uccide |
 
 Il conto su server2 (7,8 GB di RAM, 2 GB di swap): app 3 GB al massimo,
-visione 1,5 GB (`mem_limit`), MongoDB circa 0,5 GB (cache di WiredTiger a
+visione 1,5 GB (`mem_limit`, `VISIONE_MEMORIA`; CLIP e volti insieme, vedi "Riconoscimento dei volti"), MongoDB circa 0,5 GB (cache di WiredTiger a
 0,25 GB), rclone fra 0,2 e 1 GB (i buffer dei file aperti), Caddy pochi MB:
 restano almeno 1,5 GB per il sistema e per i runner della CI. Con la RAM che
 cambia, `free -h` e `docker stats --no-stream` dicono quanto c'è e quanto si usa.
@@ -993,10 +1259,10 @@ FOTOTIMELINE_CESTINO_GIORNI=30
   restano anche loro fino all'eliminazione definitiva.
 - **Dove non si vede**: timeline e colonna dei mesi, ricerca (anche per
   contenuto), mappa, "Accadde oggi" (anche su Telegram), tag, album, luoghi,
-  "Caricate da", quasi uguali, link condivisi (le foto nel cestino rispondono
+  "Caricate da", quasi uguali, persone (conteggi, copertine, filtro), link condivisi (le foto nel cestino rispondono
   404; ripristinate tornano nel link), numeri della pagina *Salute* (che dice
   quante sono nel cestino). "Calcola luoghi", "Calcola impronte", "Indicizza
-  contenuto" e "Converti video" le saltano (un video in coda riparte quando
+  contenuto", "Riconosci volti" e "Converti video" le saltano (un video in coda riparte quando
   lo si ripristina).
 - **Reimportarla** (dal browser, dal telefono, dalla cartella automatica, da
   Google): lo stesso contenuto (SHA-256) non rientra come nuovo e non si
@@ -1017,6 +1283,87 @@ FOTOTIMELINE_CESTINO_GIORNI=30
 - **Permessi**: quelli dell'eliminazione, cioè chiunque usi l'app (non serve
   `fototimeline-admin`). Le preferite non si tolgono dalle quasi uguali, come
   prima.
+
+## Eventi
+
+Le foto scattate vicine nel tempo, e nei viaggi nello stesso posto, si
+raggruppano da sole in **eventi** con un nome in italiano ("Sperlonga,
+10–11 agosto 2019", "Manchester, marzo 2018", "12 maggio 2021" senza luogo).
+Si guardano da Strumenti → **Eventi** (per anno, con copertina, date e numero
+di foto), si filtrano (Filtri → Evento, insieme agli altri filtri), il visore
+dice l'evento della foto e "Accadde oggi" il suo nome. I link condivisi non li
+mostrano.
+
+**Dopo il rilascio**, una volta: da admin Strumenti → **Calcola eventi**. Gira
+in sottofondo con la barra delle importazioni, legge e scrive solo MongoDB
+(va anche col cloud smontato), 110 mila foto in meno di un minuto. Annullato,
+o fermato da un riavvio, il successivo **riprende** da dove era arrivato (la
+fine dell'ultimo gruppo scritto, in `impostazioni/eventi-calcolo`); finito,
+il successivo rifà tutto da capo (gli eventi toccati a mano restano).
+
+```bash
+# nel .env di server2, poi il rilascio (i valori qui sono quelli predefiniti)
+FOTOTIMELINE_EVENTI_PAUSA=PT4H
+FOTOTIMELINE_EVENTI_MINIMO_FOTO=12
+FOTOTIMELINE_EVENTI_GIORNI_VUOTI=1
+FOTOTIMELINE_EVENTI_CASA=
+FOTOTIMELINE_EVENTI_RICALCOLO=PT10M
+```
+
+| Variabile | Predefinito | Cosa fa |
+|---|---|---|
+| `FOTOTIMELINE_EVENTI_PAUSA` | `PT4H` | Tra due scatti più lontani di così l'evento si spezza (una festa che va oltre mezzanotte resta una) |
+| `FOTOTIMELINE_EVENTI_MINIMO_FOTO` | `12` | Meno foto di così non fanno un evento: i giorni normali con poche foto |
+| `FOTOTIMELINE_EVENTI_GIORNI_VUOTI` | `1` | In un viaggio, quanti giorni senza foto possono stare in mezzo; `0` = solo giorni consecutivi |
+| `FOTOTIMELINE_EVENTI_CASA` | (vuoto) | Il luogo di casa ("Roma"); vuoto = il luogo con più foto |
+| `FOTOTIMELINE_EVENTI_RICALCOLO` | `PT10M` | Ogni quanto si rifanno gli eventi dei giorni toccati |
+
+Cambiata una soglia, **Calcola eventi** rifà tutto.
+
+- **Come si raggruppano** (`eventi/RilevamentoEventi`): le foto con una data,
+  in ordine di scatto da un cursore di Mongo, mai tutte in memoria. Una pausa
+  più lunga di `PAUSA` chiude un pezzo; un pezzo si unisce al precedente se
+  comincia lo stesso giorno o il giorno dopo (più `GIORNI_VUOTI`) e il posto
+  continua il viaggio: stesso luogo, stessa regione o stessa nazione, **lontano
+  da casa** (a casa i giorni di fila restano separati). Le foto senza GPS in
+  mezzo a un viaggio (una fotocamera, uno scanner) restano nel viaggio: entrano
+  se il pezzo dopo col GPS lo continua, o se dopo non c'è niente di vicino. Un
+  gruppo con almeno `MINIMO_FOTO` foto è un evento. Le foto con data
+  sconosciuta e quelle nel cestino non entrano.
+- **Il nome** (`eventi/NomiEventi`): "{luogo}, {date}". Il luogo è la città
+  con almeno metà delle foto ("Sperlonga", "Manchester"); altrimenti in Italia
+  la regione con almeno metà ("Trentino-Alto Adige" per un giro tra Canazei,
+  Moena e Bolzano), all'estero la nazione ("Regno Unito"); se no la città con
+  più foto. Le foto con un luogo scelto a mano solo come regione o nazione
+  contano per la regione e la nazione; se nessuna ha una città, il livello più
+  preciso che c'è. La provincia non dà mai il nome (sta dentro la regione). Le
+  date: un giorno ("12 maggio 2021"), fino a 4 giorni giorno per giorno ("9–11
+  marzo 2018"), oltre il mese ("agosto 2019", "luglio–agosto 2019"). Il luogo
+  viene dai campi strutturati `luogo`/`provincia`/`regione`/`nazione` (vedi
+  "Luoghi dal GPS"): `LuogoFoto.di` e `NomiEventi.nomeLuogo` sono gli unici
+  punti che li leggono e li scelgono. Per avere i nomi con i luoghi nuovi:
+  prima **Calcola luoghi**, poi **Calcola eventi** (se il calcolo di prima era
+  finito rifà tutto l'archivio; i nomi degli eventi toccati a mano restano).
+- **Modifiche a mano** (pagina Eventi, e "Evento…" nella barra della
+  selezione): rinominare, unire, dividere da una foto, togliere o aggiungere
+  foto, nascondere, creare un evento dalla selezione. Un evento toccato diventa
+  *manuale* (`eventi.manuale`) e le sue foto *fisse* (`foto.eventoFisso`); una
+  foto tolta resta fissa senza evento. Il calcolo salta le foto fisse e non
+  toglie mai un evento manuale: le modifiche non si perdono. *Torna automatico*
+  scioglie l'evento e il ricalcolo lo rifà da sé.
+- **Foto nuove**: l'importazione (e il cestino, e il ripristino) segnano il
+  giorno della foto in `eventi_da_rifare`; ogni `RICALCOLO` quei giorni si
+  rifanno, coi giorni vicini e gli eventi automatici che li toccano. Una foto
+  nuova dentro le date di un evento manuale (caricata dopo la sua ultima
+  modifica) entra in lui. Cambiare a mano la data di una foto non la sposta
+  di evento: lo fa il prossimo **Calcola eventi**.
+- **Cestino**: le foto nel cestino non contano (conteggio, copertina, filtro);
+  ripristinate tornano nel loro evento al ricalcolo leggero.
+- **Collezioni**: `eventi` (un documento per evento, con il riepilogo),
+  `eventi_da_rifare`, `impostazioni/eventi-calcolo`; nelle foto `evento` (id) ed
+  `eventoFisso`. Il backup dei metadati copia le foto, quindi anche l'evento di
+  ognuna; gli eventi si rifanno con **Calcola eventi**, ma nomi e modifiche a
+  mano no.
 
 ## Backup
 

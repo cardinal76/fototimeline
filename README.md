@@ -59,7 +59,9 @@ Il server: [DEPLOY.md](DEPLOY.md).
   il suo proprietario e i suoi orari. Ogni tot ore copia le foto nuove nella
   cartella automatica e, dopo qualche giorno, le toglie da pCloud se sono
   state importate. L'admin li aggiunge e li cambia; ognuno vede lo stato del
-  proprio e può lanciarne un giro (DEPLOY.md).
+  proprio e può lanciarne un giro (DEPLOY.md). I video troppo grandi per
+  LifetimeCloud (oltre 20 GB) si ricomprimono da soli in H.265 sul server ed
+  entrano come gli altri; l'originale resta su pCloud, in una cartella sua.
 - **Google Foto**, in due modi (pulsante *Google Foto*; dettagli sotto,
   "Google Foto"):
   - **Importa da Google Takeout** (admin, sul server): tutta la libreria dagli
@@ -73,21 +75,54 @@ Il server: [DEPLOY.md](DEPLOY.md).
   l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
   o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
 - **Visore** a tutto schermo: si vede solo la foto; ← → o il dito per
-  scorrere, `P` preferita, `I` pannello dei dettagli (si ricorda se lo si
+  scorrere, `P` preferita, `I` pannello dei dettagli, `L` luogo (si ricorda se lo si
   lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
   chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
   si scarica l'originale o si elimina (va nel cestino).
+- **Ruota**: nel visore ↺ ↻ (o `R` a destra, `Maiusc+R` a sinistra), dalla
+  selezione *↺* / *↻ Ruota* su più foto. La rotazione si salva nella scheda e
+  vale ovunque (timeline, visore, mappa, ricordi, link condivisi); **il file
+  nell'archivio non cambia** (SHA-256, confronto con pCloud e "già presenti"
+  restano quelli). Il download di un JPEG girato è una copia girata senza
+  perdita (cambia solo il tag EXIF Orientation; dal pannello anche
+  l'originale non girato); HEIC, PNG e gli altri si scaricano come sono. I
+  video si girano solo a vederli. Dettagli in CLAUDE.md, "Rotazione".
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
-- **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,
-  in italiano: "Sperlonga, Lazio · Italia", "Parigi, Île-de-France · Francia"),
-  calcolato sul server senza servizi esterni con i dati di
-  [GeoNames](https://www.geonames.org/) (CC BY 4.0). Si vede nel visore e nel
-  popup della mappa; il filtro **📍 Luogo** sceglie nazione, regione o luogo
-  da un elenco con i conteggi, o li cerca per nome. Le foto nuove lo prendono
-  all'importazione; per quelle già in archivio c'è **Calcola luoghi** (admin),
-  in sottofondo con la barra. Oltre 30 km dal centro abitato più vicino (mare
-  aperto) il luogo resta sconosciuto.
+- **Luoghi**: dal GPS il posto su più livelli, come tag automatici: città o
+  comune, provincia (solo in Italia), regione (all'estero il primo livello di
+  GeoNames: Inghilterra, Baviera, Olanda Settentrionale) e nazione, in
+  italiano: "Rovereto · Provincia di Trento · Trentino-Alto Adige · Italia",
+  "Manchester · Inghilterra · Regno Unito", "Amsterdam · Olanda Settentrionale
+  · Paesi Bassi". Calcolato sul server senza servizi esterni con i dati di
+  [GeoNames](https://www.geonames.org/) (CC BY 4.0). Nel visore i livelli sono
+  tag cliccabili (filtrano la timeline) e c'è il popup della mappa; il filtro
+  **📍 Luogo** è anche l'elenco dei luoghi dell'archivio, nazione → regione
+  (→ provincia) → città con i conteggi, o li cerca per nome. La ricerca libera
+  trova anche i luoghi: "Trentino" dà tutte le foto in Trentino, "Olanda"
+  quelle dei Paesi Bassi. Le foto nuove lo prendono all'importazione; per
+  quelle già in archivio c'è **Calcola luoghi** (admin), in sottofondo con la
+  barra, che riprende da dove era rimasto. Oltre 30 km dal centro abitato più
+  vicino (mare aperto) il luogo resta sconosciuto.
+- **Luogo a mano**: nel visore (✎ accanto al luogo, o il tasto `L`) si cerca
+  per nome ("Manch" → Manchester, Inghilterra, Regno Unito) una città, una
+  provincia, una regione o una nazione; o "Nessun luogo". Con la selezione,
+  **📍 Luogo…** dà lo stesso luogo a tutte le foto scelte, anche senza GPS. Un
+  luogo scelto a mano resta: "Calcola luoghi" non lo tocca finché non si
+  sceglie **Usa il GPS**. Una foto senza GPS con una città scelta a mano va
+  sulla mappa lì, con il bordo tratteggiato (posizione approssimativa); così
+  anche una col GPS a più di 30 km dalla città scelta (GPS sbagliato). Nei link
+  condivisi i luoghi non ci sono, come prima.
+- **Eventi** (Strumenti → *Eventi*): le foto scattate vicine nel tempo, e nei
+  viaggi nello stesso posto, si raggruppano da sole con un nome ("Sperlonga,
+  10–11 agosto 2019", "Manchester, marzo 2018"); per anno, con copertina, date
+  e numero di foto, e un clic apre le loro foto. Filtro *Evento* combinabile
+  con gli altri, l'evento nel visore e in "Accadde oggi". Si rinominano,
+  uniscono, dividono, nascondono; dalla selezione (*Evento…*) se ne crea uno o
+  si tolgono e aggiungono foto: le modifiche a mano restano quando gli eventi
+  si rifanno. Le foto nuove entrano da sole entro pochi minuti; per l'archivio
+  c'è **Calcola eventi** (admin), in sottofondo, che si riprende se annullato.
+  Soglie e dettagli in DEPLOY.md, "Eventi".
 - **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
   anni passati ("3 anni fa"); si chiude fino al giorno dopo. Ogni mattina
   (alle 8, si cambia) anche su Telegram, nella chat degli avvisi o in una a
@@ -111,6 +146,14 @@ Il server: [DEPLOY.md](DEPLOY.md).
   quando una voce cambia stato (DEPLOY.md).
 - **Ricerca e filtri**: testo libero (titolo, descrizione, file, tag, album,
   fotocamera), tag, album, solo preferite.
+- **Persone** (sul server, col servizio `visione`): i volti delle foto si
+  riconoscono sul server (YuNet + SFace di OpenCV, niente servizi esterni) e
+  si raggruppano da soli; Strumenti → *Persone* mostra un volto per persona,
+  con quante foto. Si dà un nome a un gruppo, si uniscono i gruppi della stessa
+  persona, si nascondono gli sconosciuti, si toglie un volto sbagliato. Clic
+  sul volto: le sue foto; il filtro *Persona* si combina con gli altri, e il
+  visore dice chi c'è nella foto. I nomi non escono mai dai link condivisi
+  (DEPLOY.md).
 - **Ricerca per contenuto** (sul server, col servizio `visione`): con
   l'interruttore *Per contenuto* accanto al campo di ricerca si scrive cosa
   c'è nella foto, in italiano ("spiaggia", "cane", "torta di compleanno",
@@ -220,6 +263,11 @@ java -jar target/fototimeline-1.0.0.jar
 | `VISIONE_SEGRETO`       | (vuoto)                                   | Segreto condiviso con visione (header `X-Visione-Segreto`) |
 | `FOTOTIMELINE_VISIONE_SOGLIA` | `0.24`                              | Somiglianza minima di un risultato per contenuto |
 | `FOTOTIMELINE_VISIONE_MARGINE` | `0.06`                             | Distacco massimo dalla foto più somigliante |
+| `FOTOTIMELINE_VOLTI`    | `true`                                    | Riconoscimento dei volti (serve anche `VISIONE_URL`); `false` = spento del tutto |
+| `FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO` | `0.5`                          | Coseno minimo per entrare in un gruppo senza nome |
+| `FOTOTIMELINE_VOLTI_SOGLIA_SICURA` | `0.6`                          | Coseno minimo per dare da solo un volto a una persona con nome |
+| `FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA` | `0.42`                       | Da qui alla soglia sicura il volto resta una proposta |
+| `FOTOTIMELINE_VOLTI_LATO_MINIMO` | `32`                             | Lato minimo di un volto, in pixel della miniatura (480) |
 | `FOTOTIMELINE_TELEFONO_PROPRIETARIO` | (vuoto)                      | Di chi è il telefono migrato da quando era uno solo; vuoto = del primo admin che entra |
 | `FOTOTIMELINE_LUOGHI`   | (vuoto; nel container `/app/geonames`)    | Cartella dei file di GeoNames; vuoto = niente luoghi |
 | `FOTOTIMELINE_LUOGHI_DISTANZA` | `30`                               | Km oltre i quali il luogo è sconosciuto  |
@@ -229,6 +277,11 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_VIDEO_DESTINAZIONE` | `<archivio>/.compatibili`       | Dove vanno i convertiti                  |
 | `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
 | `FOTOTIMELINE_CESTINO_GIORNI` | `30`                                | Giorni nel cestino prima che una foto eliminata se ne vada per sempre, file compreso; `0` = mai |
+| `FOTOTIMELINE_EVENTI_PAUSA` | `PT4H`                                | Eventi: tra due scatti più lontani di così l'evento si spezza (salvo i viaggi) |
+| `FOTOTIMELINE_EVENTI_MINIMO_FOTO` | `12`                            | Eventi: foto minime per un evento   |
+| `FOTOTIMELINE_EVENTI_GIORNI_VUOTI` | `1`                            | Eventi: giorni senza foto che un viaggio può avere in mezzo |
+| `FOTOTIMELINE_EVENTI_CASA` | (vuoto)                                | Eventi: il luogo di casa (lì i giorni di fila non sono un viaggio); vuoto = il luogo con più foto |
+| `FOTOTIMELINE_EVENTI_RICALCOLO` | `PT10M`                           | Eventi: ogni quanto si rifanno i giorni toccati (foto nuove, cestino) |
 | `FOTOTIMELINE_TELEGRAM_TOKEN`, `FOTOTIMELINE_TELEGRAM_CHAT` | (vuoti) | Avvisi su Telegram della pagina "Salute"; vuoti = spenti |
 | `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
 | `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
@@ -259,7 +312,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `provincia`, `luogo`, `caricataDa` (username), `evento` (id), `persona` (id di una persona o di un gruppo di volti), `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
@@ -283,6 +336,25 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/contenuto`             | Ricerca per contenuto: `attiva`, foto, `indicizzate`, `mancanti`, `nellIndice`, ultimo lavoro |
 | POST   | `/api/contenuto/indicizza`   | "Indicizza contenuto" in sottofondo (`daCapo=true` per rifare tutto); 202, 409 se già in corso (admin) |
 | POST   | `/api/contenuto/annulla`     | Ferma "Indicizza contenuto" (admin)                        |
+| GET    | `/api/volti`                 | Riconoscimento dei volti: `attiva`, `foto`, `cercate`, `mancanti`, `volti`, `nellIndice`, `persone` (con nome), ultimo lavoro |
+| POST   | `/api/volti/riconosci`       | "Riconosci volti" in sottofondo (`ricostruisci=true`: prima rimette i vettori nell'indice di visione); 202, 409 se già in corso o spento (admin) |
+| POST   | `/api/volti/annulla`         | Ferma "Riconosci volti" (admin)                            |
+| GET    | `/api/persone`               | `tipo` = `NOMINATE` (per nome), `GRUPPI` (senza nome, dal più grande), `NASCOSTE`; `limite` → `{ persone: [{ id, nome, nascosta, volti, proposte, copertina }], totale }` |
+| GET    | `/api/persone/{id}`          | Una persona o un gruppo, con i conteggi                    |
+| PUT    | `/api/persone/{id}`          | `{ nome }`: dà o cambia il nome (vuoto: torna gruppo); 409 con `persona` se un'altra ha già quel nome |
+| POST   | `/api/persone/{id}/nascondi` | `{ nascosta }`: "non mostrare" (sconosciuti, folla)         |
+| POST   | `/api/persone/unisci`        | `{ in, da: [id] }`: le persone `da` passano in `in`         |
+| GET    | `/api/persone/{id}/volti`    | I suoi volti, i meno somiglianti prima (`pagina`, `dimensione`) |
+| GET    | `/api/persone/{id}/proposte` | I volti proposti (somiglianti, sotto la soglia sicura)     |
+| POST   | `/api/persone/{id}/proposte/conferma` | Tutte le proposte diventano sue: `{ confermate }`  |
+| GET    | `/api/persone/{id}/simili`   | Altri gruppi che le somigliano, da unire                   |
+| POST   | `/api/persone/{id}/copertina`| `{ volto }`: il volto da mostrare nella griglia            |
+| GET    | `/api/foto/{id}/volti`       | I volti della foto: `riquadro` (frazioni della miniatura), `personaId`, `nome`, `proposta` |
+| GET    | `/api/volti/{id}/ritaglio`   | Il volto ritagliato dalla miniatura, JPEG 160×160          |
+| POST   | `/api/volti/{id}/togli`      | "Non è lei/lui": il volto esce dalla persona e non ci torna da solo |
+| POST   | `/api/volti/{id}/assegna`    | `{ persona }`: il volto è suo (anche per confermare una proposta) |
+| POST   | `/api/volti/{id}/nome`       | `{ nome }`: "Chi è?" (persona esistente, nome al gruppo o persona nuova) |
+| POST   | `/api/volti/{id}/rifiuta`    | Rifiuta la proposta del volto                              |
 | GET    | `/api/archivio/video`        | Coda dei video da convertire: `fatti`, `daFare`, `corrente`, `percentuale`, `inAttesa` (cloud smontato) |
 | POST   | `/api/archivio/video/converti` | "Converti video": mette in coda i video già in archivio che ne hanno bisogno, 202 (admin) |
 | POST   | `/api/archivio/video/annulla`  | Ferma quello in corso e svuota la coda (admin)          |
@@ -305,15 +377,31 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Manda la foto nel cestino (204; 404 se non c'è o è già lì; 503 col cloud smontato) |
-| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto (`ELIMINA` = nel cestino; le altre non toccano le foto nel cestino) |
+| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto (`ELIMINA` = nel cestino; le altre non toccano le foto nel cestino; `IMPOSTA_LUOGO` con la chiave di `/api/luoghi/cerca` in `valore`, vuoto = nessun luogo; `LUOGO_DA_GPS`) |
+| PUT    | `/api/foto/{id}/luogo`       | `{ chiave }` (di `/api/luoghi/cerca`; `null` = nessun luogo): il luogo scelto a mano (`origineLuogo` MANUALE), risponde con la foto; 400 se la chiave non è un luogo, 404 se la foto non c'è o è nel cestino |
+| DELETE | `/api/foto/{id}/luogo`       | "Usa il GPS": torna al luogo calcolato dalle coordinate, risponde con la foto |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
 | GET    | `/api/foto/{id}/file`        | Il file, con `Range` per i video: la versione compatibile se c'è, altrimenti l'originale; `?originale=true` o `?scarica=true` (allegato) per l'originale |
-| GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
+| GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC), girato se c'è una rotazione; il frontend aggiunge `?r=<gradi>` (cache immutabile) |
+| POST   | `/api/foto/{id}/ruota`       | `{ gradi }` (90 a destra, -90 a sinistra, 180): si somma alla rotazione; la foto aggiornata (404 se non c'è o è nel cestino, 400 se non è un multiplo di 90) |
+| POST   | `/api/foto/ruota`            | `{ ids, gradi }` su più foto: `{ modificate }` (quelle nel cestino no) |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
 | GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline), col nome del luogo |
-| GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, regioni: [{ nome, conteggio, luoghi: [{ nome, conteggio }] }] }] }`, i più fotografati prima |
+| GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, altriNomi, regioni: [{ nome, conteggio, province: [{ nome, conteggio }], luoghi: [{ nome, provincia, conteggio }] }] }] }`, i più fotografati prima, senza il cestino |
+| GET    | `/api/luoghi/cerca`          | `q` (almeno 2 lettere) → fino a 15 luoghi di GeoNames `{ chiave, livello: CITTA\|PROVINCIA\|REGIONE\|NAZIONE, luogo, provincia, regione, nazione, codiceNazione, latitudine, longitudine }`: prima i nomi uguali, poi i più popolosi |
 | POST   | `/api/archivio/luoghi`       | "Calcola luoghi" in sottofondo, stato come `/api/importa`; `?tutte=true` rifà anche quelle che ce l'hanno (ruolo `fototimeline-admin`; 409 senza dataset) |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
+| GET    | `/api/eventi`                | `{ eventi: [{ id, nome, inizio, fine, primoGiorno, ultimoGiorno, conteggio, copertina, luogo, manuale, nascosto }], calcolo, giorniDaRifare, minimoFoto }`, dal più recente; `nascosti=true` anche i nascosti |
+| GET    | `/api/eventi/{id}`           | Un evento (404 se non c'è)                                 |
+| GET    | `/api/eventi/nomi`           | `ids=a,b`: `{ id: nome }` degli eventi non nascosti         |
+| POST   | `/api/eventi`                | `{ nome, ids }`: un evento nuovo dalle foto scelte (201; senza nome, quello automatico) |
+| PUT    | `/api/eventi/{id}`           | `{ nome, nascosto }` (null = com'è; nome vuoto = quello automatico) |
+| DELETE | `/api/eventi/{id}`           | "Torna automatico": l'evento si scioglie, il ricalcolo lo rifà (204) |
+| POST   | `/api/eventi/unisci`         | `{ ids }`: tutto nel più vecchio (400 con meno di due)      |
+| POST   | `/api/eventi/{id}/dividi`    | `{ foto }`: lei e quelle dopo in un evento nuovo; i due eventi |
+| POST   | `/api/eventi/{id}/foto`      | `{ ids }`: le foto entrano nell'evento; `{ modificate }`     |
+| POST   | `/api/eventi/togli`          | `{ ids }`: le foto escono dal loro evento e ci restano fuori; `{ modificate }` |
+| POST   | `/api/archivio/eventi`       | "Calcola eventi" in sottofondo, stato come `/api/importa`; riprende dove si era fermato, `?daCapo=true` rifà tutto (ruolo `fototimeline-admin`) |
 
 Google Foto (dietro login; il Takeout solo `fototimeline-admin`; mai client
 secret né token nelle risposte):
@@ -515,8 +603,16 @@ Solo sulla rete interna di Docker, tutte (tranne `/salute`) con l'header
 | POST   | `/clip/indice` | Più foto insieme: multipart, un `file` per foto con l'id come nome del file |
 | DELETE | `/clip/indice/{id}` | Toglie (404 se non c'era) |
 | GET    | `/clip/cerca` | `q`, `k` (≤ 2000), `soglia` → `{"risultati":[{"id","punteggio"}]}` dal più simile |
+| POST   | `/volti/rileva` | Multipart, un `file` per immagine con l'id come nome del file (≤ 64); `lato_minimo` (px), `punteggio_minimo` → `{"risultati":{id:{"larghezza","altezza","volti":[{"riquadro":{x,y,larghezza,altezza},"punteggio","vettore":[128]}]}},"errori":{id:motivo}}`. Non tocca l'indice |
+| GET    | `/volti/indice` | Modello, dimensione e numero di volti nell'indice dei volti |
+| POST   | `/volti/indice` | `{"voci":[{"id","vettore"}]}`: aggiunge o sostituisce |
+| POST   | `/volti/indice/togli` | `{"ids":[...]}` → `{"tolti","totale"}` |
+| POST   | `/volti/vicini` | `{"vettori":[[...]],"k":10,"soglia":0.4}` (≤ 256 vettori, k ≤ 200) → per ogni vettore i volti più simili |
+
+Con `VISIONE_VOLTI=false` (o senza OpenCV, come nei test) le `/volti/...` rispondono 503 e CLIP va come prima.
 il binario di MongoDB. Per i luoghi usano un mini dataset di GeoNames in
-`src/test/resources/geonames` (Roma, Sperlonga, Parigi, ...).
+`src/test/resources/geonames` (Roma, Sperlonga, Parigi, Trento, Rovereto,
+Amsterdam, le due Manchester, ...).
 
 ### Luoghi sul PC
 
@@ -527,12 +623,13 @@ mkdir -p ~/geonames && cd ~/geonames
 curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
 curl -O https://download.geonames.org/export/dump/admin1CodesASCII.txt
 curl -O https://download.geonames.org/export/dump/countryInfo.txt
+curl https://download.geonames.org/export/dump/admin2Codes.txt | grep '^IT\.' > admin2Codes.txt   # le province
 export FOTOTIMELINE_LUOGHI=~/geonames      # poi ./mvnw spring-boot:run
 ```
 
-Così i nomi stranieri restano quelli di GeoNames (Rome, Paris); i nomi in
-italiano vengono da `alternateNames-it.txt`, che fa il Dockerfile (stage
-`geonames`).
+Così i nomi stranieri restano quelli di GeoNames (Rome, Paris, Provincia
+autonoma di Trento); i nomi in italiano (e "Olanda" nella ricerca) vengono da
+`alternateNames-it.txt`, che fa il Dockerfile (stage `geonames`).
 
 ## CI su server2
 

@@ -257,7 +257,7 @@ public class RicordiTelegram {
      * sul disco non c'è niente.
      */
     private Path immagine(Foto f) {
-        Path vista = archivio.vistaCondivisa(f.getId());
+        Path vista = archivio.vistaCondivisa(f.getId(), f.getRotazione());
         if (Files.exists(vista)) {
             return vista;
         }
@@ -268,7 +268,7 @@ public class RicordiTelegram {
                 log.debug("Vista ridotta di {} non fatta: {}", f.getId(), e.getMessage());
             }
         }
-        Path miniatura = archivio.miniatura(f.getId());
+        Path miniatura = archivio.miniaturaRuotata(f.getId(), f.getRotazione());
         return Files.exists(miniatura) ? miniatura : null;
     }
 

@@ -40,6 +40,7 @@ import it.fototimeline.service.FileScartato;
 import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 import it.fototimeline.service.Risultati.Cartella;
+import it.fototimeline.service.Rotazioni;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.PaginaFoto;
 import it.fototimeline.service.Risultati.PuntoMappa;
@@ -61,15 +62,17 @@ public class FotoController {
     private final UtenteCorrente corrente;
     private final RegistroUtenti utenti;
     private final ConversioneVideo conversione;
+    private final Rotazioni rotazioni;
 
     public FotoController(FotoService service, ImportazioneCartelle importazione, LavoriImportazione lavori,
-            UtenteCorrente corrente, RegistroUtenti utenti, ConversioneVideo conversione) {
+            UtenteCorrente corrente, RegistroUtenti utenti, ConversioneVideo conversione, Rotazioni rotazioni) {
         this.service = service;
         this.importazione = importazione;
         this.lavori = lavori;
         this.corrente = corrente;
         this.utenti = utenti;
         this.conversione = conversione;
+        this.rotazioni = rotazioni;
     }
 
     @GetMapping("/foto")
@@ -82,11 +85,15 @@ public class FotoController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate al,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String provincia,
             @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa,
+            @RequestParam(required = false) String evento,
+            @RequestParam(required = false) String persona,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa),
+        return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa,
+                provincia, evento, persona),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -98,9 +105,13 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String provincia,
             @RequestParam(required = false) String luogo,
-            @RequestParam(required = false) String caricataDa) {
-        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
+            @RequestParam(required = false) String caricataDa,
+            @RequestParam(required = false) String evento,
+            @RequestParam(required = false) String persona) {
+        return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo,
+                caricataDa, provincia, evento, persona));
     }
 
     @GetMapping("/mappa")
@@ -111,9 +122,13 @@ public class FotoController {
             @RequestParam(required = false) Boolean preferite,
             @RequestParam(required = false) String nazione,
             @RequestParam(required = false) String regione,
+            @RequestParam(required = false) String provincia,
             @RequestParam(required = false) String luogo,
-            @RequestParam(required = false) String caricataDa) {
-        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa));
+            @RequestParam(required = false) String caricataDa,
+            @RequestParam(required = false) String evento,
+            @RequestParam(required = false) String persona) {
+        return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo,
+                caricataDa, provincia, evento, persona));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */
@@ -249,21 +264,29 @@ public class FotoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /** Quello che il browser sa mostrare: per gli HEIC un JPEG, per il resto l'originale. */
+    /**
+     * Quello che il browser sa mostrare: per gli HEIC un JPEG, per il resto
+     * l'originale; girata se c'è una rotazione (Rotazioni.vista). Il
+     * frontend aggiunge {@code ?r=<gradi>}: con la cache immutabile ogni
+     * rotazione ha il suo indirizzo.
+     */
     @GetMapping("/foto/{id}/vista")
     public ResponseEntity<Resource> vista(@PathVariable String id) {
         return service.trova(id)
-                .map(foto -> ResponseEntity.ok()
+                .map(rotazioni::vista)
+                .map(vista -> ResponseEntity.ok()
                         .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
-                        .contentType(MediaType.parseMediaType(service.contentTypeVista(foto)))
-                        .<Resource>body(new FileSystemResource(service.fileVista(foto))))
+                        .contentType(MediaType.parseMediaType(vista.contentType()))
+                        .body(vista.risorsa()))
                 .orElse(ResponseEntity.notFound().build());
     }
 
     /**
      * Il file; con Range (i video nel browser) risponde a pezzi. Per i video
      * la versione compatibile (H.264 in MP4) se c'è; {@code originale=true} o
-     * {@code scarica=true} danno sempre l'originale.
+     * {@code scarica=true} danno sempre l'originale. Un JPEG girato a mano
+     * arriva girato senza perdita (Rotazioni.originale), salvo
+     * {@code originale=true}: allora sono i byte dell'archivio.
      */
     @GetMapping("/foto/{id}/file")
     public ResponseEntity<Resource> file(@PathVariable String id,
@@ -283,7 +306,8 @@ public class FotoController {
                             .cacheControl(cache)
                             .contentType(MediaType.parseMediaType(servito.contentType()))
                             .header(HttpHeaders.CONTENT_DISPOSITION, disposizione.toString())
-                            .<Resource>body(new FileSystemResource(servito.file()));
+                            .<Resource>body(originale ? new FileSystemResource(servito.file())
+                                    : rotazioni.originaleGirato(foto).orElseGet(() -> new FileSystemResource(servito.file())));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
