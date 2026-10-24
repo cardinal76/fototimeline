@@ -1240,6 +1240,10 @@ public class FotoService {
         if (f.caricataDa() != null && !f.caricataDa().isBlank()) {
             e.add(Criteria.where("caricataDa").is(f.caricataDa().trim()));
         }
+        // Un evento (pacchetto eventi): le foto che il calcolo o una modifica a mano gli hanno dato.
+        if (f.evento() != null && !f.evento().isBlank()) {
+            e.add(Criteria.where("evento").is(f.evento().trim()));
+        }
         if (f.dal() != null || f.al() != null) {
             Criteria data = Criteria.where("scattataIl");
             if (f.dal() != null) {

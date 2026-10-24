@@ -53,6 +53,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import it.fototimeline.cloud.ArchivioNonDisponibile;
 import it.fototimeline.cloud.Cloud;
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.eventi.EventiService;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.FotoService;
 
@@ -101,6 +102,9 @@ class CondivisioniTest {
 
     @Autowired
     CondivisioniService service;
+
+    @Autowired
+    EventiService eventi;
 
     @MockitoSpyBean
     Cloud cloud;
@@ -158,6 +162,24 @@ class CondivisioniTest {
                 .andExpect(jsonPath("$[0].visite").value(1))
                 .andExpect(jsonPath("$[0].ultimoAccesso").isNotEmpty())
                 .andExpect(jsonPath("$[0].token").value(token));
+    }
+
+    @Test
+    void gliEventiNonEsconoDaiLink() throws Exception {
+        var evento = eventi.crea("Compleanno segreto", List.of(conExif.getId(), rossa.getId()));
+        String token = crea(utente("anna"), Map.of("ids", List.of(conExif.getId(), rossa.getId())));
+
+        String risposta = mvc.perform(get("/api/condivise/" + token).with(da(ip)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.foto.length()").value(2))
+                .andReturn().getResponse().getContentAsString();
+        for (String vietato : List.of("evento", "Evento", evento.id(), "Compleanno segreto")) {
+            assertThat(risposta).as(vietato).doesNotContain(vietato);
+        }
+        // Gli eventi stanno dietro login: senza, niente elenco né evento.
+        mvc.perform(get("/api/eventi").with(da(ip))).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/eventi/" + evento.id()).with(da(ip))).andExpect(status().isUnauthorized());
+        eventi.sciogli(evento.id());
     }
 
     @Test

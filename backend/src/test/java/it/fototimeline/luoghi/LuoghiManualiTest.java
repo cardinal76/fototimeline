@@ -114,8 +114,8 @@ class LuoghiManualiTest {
         // Il filtro: nazione, regione, provincia.
         assertThat(cerca(new FiltroFoto(null, null, null, null, null, null, "IT", "Trentino-Alto Adige", null)))
                 .isEqualTo(2);
-        assertThat(cerca(new FiltroFoto(null, null, null, null, null, null, "IT", "Trentino-Alto Adige", null, null,
-                "Provincia di Trento"))).isEqualTo(2);
+        assertThat(cerca(new FiltroFoto(null, null, null, null, null, null, "IT", "Trentino-Alto Adige", null)
+                .conProvincia("Provincia di Trento"))).isEqualTo(2);
         assertThat(cerca(new FiltroFoto(null, null, null, null, null, null, "NL", null, null))).isEqualTo(1);
         assertThat(cerca(new FiltroFoto(null, null, null, null, null, null, "GB", "Inghilterra", "Manchester")))
                 .isEqualTo(1);

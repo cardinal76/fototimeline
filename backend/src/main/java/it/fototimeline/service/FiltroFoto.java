@@ -5,15 +5,28 @@ import java.time.LocalDate;
 /**
  * Filtri della timeline; i campi null non filtrano. {@code nazione} è il
  * codice ISO (IT), {@code regione}, {@code provincia} (solo Italia) e
- * {@code luogo} i nomi come in /api/luoghi; {@code caricataDa} è uno username.
+ * {@code luogo} i nomi come in /api/luoghi; {@code caricataDa} è uno username;
+ * {@code evento} l'id di un evento (pacchetto {@code eventi}).
  */
 public record FiltroFoto(String q, String tag, String album, Boolean preferite, LocalDate dal, LocalDate al,
-        String nazione, String regione, String luogo, String caricataDa, String provincia) {
+        String nazione, String regione, String luogo, String caricataDa, String provincia, String evento) {
 
-    /** Senza filtro per provincia. */
+    /** Senza filtro per provincia né per evento. */
     public FiltroFoto(String q, String tag, String album, Boolean preferite, LocalDate dal, LocalDate al,
             String nazione, String regione, String luogo, String caricataDa) {
-        this(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa, null);
+        this(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa, null, null);
+    }
+
+    /** Lo stesso filtro, solo con le foto di un evento (null = di tutti). */
+    public FiltroFoto conEvento(String evento) {
+        return new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa, provincia,
+                evento);
+    }
+
+    /** Lo stesso filtro, solo con le foto di una provincia (null = di tutte). */
+    public FiltroFoto conProvincia(String provincia) {
+        return new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa, provincia,
+                evento);
     }
 
     /** Senza filtro per luogo né per chi l'ha caricata. */
@@ -34,6 +47,7 @@ public record FiltroFoto(String q, String tag, String album, Boolean preferite, 
     }
 
     public FiltroFoto senzaDate() {
-        return new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa, provincia);
+        return new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo, caricataDa, provincia,
+                evento);
     }
 }

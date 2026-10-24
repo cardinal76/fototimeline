@@ -91,6 +91,10 @@
           <span>Luogo</span>
           <app-filtro-luogo />
         </div>
+        <div class="campo">
+          <span>Evento</span>
+          <app-filtro-evento (scegli)="chiudiMenu(); dialogoEventi.set(true)" />
+        </div>
         <button
           type="button"
           class="interruttore"
@@ -139,7 +143,7 @@
             Cerco i file: {{ l.trovate | number }}
           } @else if (l.stato === 'IN_CORSO') {
             <span class="girello" aria-hidden="true"></span>
-            {{ l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
+            {{ l.origine === 'EVENTI' ? 'Eventi' : l.origine === 'LUOGHI' ? 'Luoghi' : l.origine === 'INDICIZZAZIONE' ? 'Indicizzo' : 'Importo' }}
             {{ percentualeImportazione() }}%
           } @else {
             {{ nomeLavoro(l) }} {{ l.stato === 'FALLITA' ? 'non riuscita' : l.stato === 'ANNULLATA' ? 'annullata' : 'finita' }}
@@ -249,6 +253,16 @@
                 Calcola luoghi
               </button>
             }
+            <button
+              type="button"
+              class="voce"
+              role="menuitem"
+              [disabled]="galleria.lavoroOccupato()"
+              title="Raggruppa le foto in eventi (viaggi, feste); riprende da dove si era fermato"
+              (click)="chiudiMenu(); calcolaEventi()"
+            >
+              Calcola eventi
+            </button>
             @if (galleria.archivioDisponibile()) {
               <button
                 type="button"
@@ -262,6 +276,9 @@
               </button>
             }
           }
+          <button type="button" class="voce" role="menuitem" title="Le foto raggruppate per tempo e posto: viaggi, feste, giornate" (click)="chiudiMenu(); dialogoEventi.set(true)">
+            Eventi
+          </button>
           <button type="button" class="voce" role="menuitem" title="Raffiche, copie ricompresse o ridimensionate" (click)="chiudiMenu(); dialogoQuasiUguali.set(true)">
             Quasi uguali
           </button>
@@ -394,6 +411,9 @@
     @if (!filtriAttivi()) {
       <app-ricordi (apri)="aperta.set($event)" />
     }
+    @if (galleria.filtro().evento) {
+      <p class="salto"><app-filtro-evento [riga]="true" /></p>
+    }
     @if (galleria.filtro().al; as al) {
       <p class="salto">
         Foto fino a {{ al | date: 'MMMM y' }}
@@ -509,6 +529,7 @@
     <button type="button" (click)="dialogoLuogo.set(true)">📍 Luogo…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
     <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
+    <button type="button" title="Nuovo evento, aggiungi, togli, dividi" (click)="dialogoSceltaEvento.set(true)">Evento…</button>
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
     <button type="button" class="link" (click)="galleria.deseleziona()">Deseleziona</button>
   </div>
@@ -546,13 +567,14 @@
   @if (!galleria.importazioneRidotta()) {
   <div class="avanzamento importazione" role="status" [class.sopra]="!!galleria.caricamento()">
     <div class="riga">
-      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : 'Importazione';
+      @let lavoro = l.origine === 'INDICIZZAZIONE' ? 'Indicizzazione' : l.origine === 'LUOGHI' ? 'Calcolo dei luoghi' : l.origine === 'EVENTI' ? 'Calcolo degli eventi' : 'Importazione';
       <b>
         @switch (l.stato) {
           @case ('IN_CORSO') {
             @switch (l.origine) {
               @case ('INDICIZZAZIONE') { Indicizzazione dell'archivio… }
               @case ('LUOGHI') { Calcolo dei luoghi… }
+              @case ('EVENTI') { Calcolo degli eventi… }
               @case ('AUTOMATICA') { Importazione automatica da {{ l.cartella }}… }
               @default { Importo da {{ l.cartella }}… }
             }
@@ -595,6 +617,13 @@
       </p>
     } @else if (l.origine === 'LUOGHI') {
       <p>{{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} con un luogo · {{ l.duplicate }} senza (mare aperto)</p>
+    } @else if (l.origine === 'EVENTI') {
+      <p>
+        {{ l.fatte }} / {{ l.trovate }} foto · {{ l.importate }} in un evento · {{ l.duplicate }} fuori
+        @if (l.stato === 'ANNULLATA') {
+          · riprende da qui al prossimo <b>Calcola eventi</b>
+        }
+      </p>
     } @else {
       <p>
         {{ l.fatte }} / {{ l.trovate }} · {{ l.importate }} nuove · {{ l.duplicate }} già presenti
@@ -1061,6 +1090,13 @@
 
 @if (dialogoCestino()) {
   <app-cestino [disponibile]="galleria.archivioDisponibile()" (chiudi)="dialogoCestino.set(false)" />
+}
+
+@if (dialogoEventi()) {
+  <app-eventi (chiudi)="dialogoEventi.set(false)" />
+}
+@if (dialogoSceltaEvento()) {
+  <app-scelta-evento (chiudi)="dialogoSceltaEvento.set(false)" />
 }
 
 @if (dialogoSalute()) {

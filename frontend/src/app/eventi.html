@@ -1,0 +1,134 @@
+<div class="velo" (click)="chiudi.emit()">
+  <section
+    #dialogo
+    class="dialogo"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="titolo-eventi"
+    tabindex="-1"
+    (click)="$event.stopPropagation()"
+  >
+    <header>
+      <h2 id="titolo-eventi">Eventi</h2>
+      @if (elenco(); as l) {
+        <span class="tenue">{{ l.eventi.length === 1 ? '1 evento' : l.eventi.length + ' eventi' }}</span>
+      }
+      <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
+    </header>
+
+    <p class="tenue">
+      Le foto scattate vicine nel tempo (e nello stesso posto, nei viaggi) si raggruppano da sole, con almeno
+      {{ elenco()?.minimoFoto ?? '…' }} foto. Un evento rinominato, unito, diviso o nascosto resta com'è anche
+      quando gli eventi si rifanno.
+    </p>
+    @if (elenco(); as l) {
+      @if (l.calcolo?.interrotto) {
+        <p class="avviso" role="status">
+          Il calcolo degli eventi si è fermato
+          @if (l.calcolo?.fattoFinoA) {
+            alle foto del {{ l.calcolo!.fattoFinoA | date: 'd MMMM y' }}
+          }
+          : <b>Calcola eventi</b> riprende da lì.
+        </p>
+      } @else if (!l.calcolo && galleria.io()?.admin) {
+        <p class="avviso" role="status">Gli eventi non sono ancora stati calcolati: <b>Calcola eventi</b> li fa per tutto l'archivio.</p>
+      }
+      @if (l.giorniDaRifare) {
+        <p class="tenue">{{ l.giorniDaRifare }} giorni con foto nuove o tolte: i loro eventi si aggiornano entro pochi minuti.</p>
+      }
+    }
+
+    <div class="comandi" role="toolbar" aria-label="Eventi">
+      <input
+        #cerca
+        type="search"
+        class="cerca"
+        placeholder="Cerca un evento…"
+        aria-label="Cerca un evento"
+        [value]="testo()"
+        (input)="testo.set(cerca.value)"
+      />
+      <button type="button" [attr.aria-pressed]="nascosti()" (click)="commutaNascosti()">
+        {{ nascosti() ? 'Nascondi i nascosti' : 'Mostra i nascosti' }}
+      </button>
+      @if (scelti().size) {
+        <b>{{ scelti().size }} scelti</b>
+        <button type="button" [disabled]="occupato() || scelti().size < 2" (click)="unisci()">Unisci</button>
+        <button type="button" class="link" (click)="deseleziona()">Deseleziona</button>
+      }
+      @if (galleria.io()?.admin) {
+        <button
+          type="button"
+          class="primario svuota"
+          [disabled]="galleria.lavoroOccupato()"
+          title="Raggruppa in eventi tutte le foto dell'archivio (in sottofondo, si può annullare e riprendere)"
+          (click)="calcola()"
+        >
+          {{ elenco()?.calcolo?.interrotto ? 'Riprendi il calcolo' : 'Calcola eventi' }}
+        </button>
+      }
+    </div>
+
+    @if (caricando() && !elenco()) {
+      <span class="rotella" aria-label="Caricamento"></span>
+    } @else {
+      @for (a of anni(); track a.anno) {
+        <section class="anno">
+          <h3>{{ a.anno }} <small class="tenue">{{ a.eventi.length === 1 ? '1 evento' : a.eventi.length + ' eventi' }} · {{ a.foto }} foto</small></h3>
+          <ul class="eventi">
+            @for (e of a.eventi; track e.id) {
+              @let scelto = scelti().has(e.id);
+              <li [class.nascosto-evento]="e.nascosto">
+                <button type="button" class="copertina" [attr.aria-label]="'Apri ' + e.nome" (click)="apri(e)">
+                  @if (e.copertina) {
+                    <img [src]="'/api/foto/' + e.copertina + '/miniatura'" alt="" loading="lazy" />
+                  }
+                  <span class="quante">{{ e.conteggio }} foto</span>
+                </button>
+                <div class="testo">
+                  <label class="scegli" [title]="'Scegli per unire'">
+                    <input type="checkbox" [checked]="scelto" (change)="commuta(e)" [attr.aria-label]="'Scegli ' + e.nome" />
+                  </label>
+                  <button type="button" class="nome-evento" [title]="e.nome" (click)="apri(e)">{{ e.nome }}</button>
+                  <span class="tenue date">
+                    @if (stessoGiorno(e)) {
+                      {{ e.inizio | date: 'EEEE d MMMM y' }}
+                    } @else {
+                      {{ e.inizio | date: 'd MMM' }} – {{ e.fine | date: 'd MMM y' }}
+                    }
+                    @if (e.manuale) {
+                      · <span title="Toccato a mano: il ricalcolo non lo cambia">a mano</span>
+                    }
+                    @if (e.nascosto) {
+                      · nascosto
+                    }
+                  </span>
+                  <div class="azioni">
+                    <button type="button" [disabled]="occupato()" (click)="rinomina(e)">Rinomina</button>
+                    <button type="button" [disabled]="occupato()" (click)="nascondi(e)">{{ e.nascosto ? 'Mostra' : 'Nascondi' }}</button>
+                    @if (e.manuale) {
+                      <button type="button" [disabled]="occupato()" title="Le modifiche a mano si perdono: il ricalcolo lo rifà da sé" (click)="sciogli(e)">
+                        Torna automatico
+                      </button>
+                    }
+                  </div>
+                </div>
+              </li>
+            }
+          </ul>
+        </section>
+      } @empty {
+        <p class="vuoto">
+          @if (testo().trim()) {
+            Nessun evento con questo nome.
+          } @else {
+            Nessun evento, per ora.
+          }
+        </p>
+      }
+    }
+    <p class="tenue">
+      Dalla timeline: <b>Seleziona</b> le foto e poi <b>Evento…</b> per crearne uno, aggiungerle, toglierle o dividere un evento.
+    </p>
+  </section>
+</div>

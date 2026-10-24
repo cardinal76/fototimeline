@@ -161,6 +161,7 @@
       <dt>Caricata da</dt>
       <dd>{{ caricataDa() ?? '—' }}</dd>
     </dl>
+    <app-evento-foto [foto]="foto()" (scelto)="chiudi.emit()" />
     <p class="scorciatoie">← → scorri · P preferita · I dettagli · L luogo · Canc elimina · F schermo intero · Esc chiudi</p>
   </aside>
 }

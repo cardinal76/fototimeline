@@ -19,6 +19,10 @@ export interface Foto {
   tag: string[];
   album?: string;
   preferita: boolean;
+  /** L'evento della foto (Eventi), se ne ha uno. */
+  evento?: string;
+  /** True se l'evento (o il non averne) l'ha deciso qualcuno: il ricalcolo non la tocca. */
+  eventoFisso?: boolean;
   fotocamera?: string;
   latitudine?: number;
   longitudine?: number;
@@ -105,6 +109,8 @@ export interface Filtro {
   regione?: string;
   provincia?: string;
   luogo?: string;
+  /** Id di un evento: solo le sue foto. */
+  evento?: string;
   /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
   al?: string;
   /** Cerca q in quello che c'è nella foto ("spiaggia", "cane"), non nei testi. */
@@ -153,7 +159,7 @@ export type StatoImportazione = 'IN_CORSO' | 'FINITA' | 'ANNULLATA' | 'FALLITA';
 export interface LavoroImportazione {
   id: string;
   cartella: string;
-  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE' | 'LUOGHI';
+  origine: 'MANUALE' | 'AUTOMATICA' | 'INDICIZZAZIONE' | 'LUOGHI' | 'EVENTI';
   stato: StatoImportazione;
   iniziatoIl: string;
   finitoIl?: string;
@@ -695,4 +701,42 @@ export interface ModificaTakeout {
   sorgente: string;
   proprietario: string;
   giorniPrimaDiCancellare: number;
+}
+
+/** Un evento: foto vicine nel tempo (e nel posto) con un nome. */
+export interface Evento {
+  id: string;
+  nome: string;
+  /** "2019-08-10T10:00:00". */
+  inizio: string;
+  fine: string;
+  /** "2019-08-10". */
+  primoGiorno: string;
+  ultimoGiorno: string;
+  conteggio: number;
+  /** La foto della copertina (id). */
+  copertina?: string;
+  luogo?: string;
+  /** Toccato a mano: il ricalcolo non lo cambia. */
+  manuale: boolean;
+  nascosto: boolean;
+}
+
+/** Dove è arrivato "Calcola eventi". */
+export interface StatoCalcoloEventi {
+  /** La fine dell'ultimo gruppo fatto, se il calcolo si è fermato a metà. */
+  fattoFinoA?: string;
+  /** Fermato a metà: il prossimo riprende da fattoFinoA. */
+  interrotto: boolean;
+  iniziatoIl?: string;
+  finitoIl?: string;
+}
+
+export interface ElencoEventi {
+  eventi: Evento[];
+  /** Assente se "Calcola eventi" non è mai partito. */
+  calcolo?: StatoCalcoloEventi;
+  /** Giorni con foto nuove o tolte che aspettano il ricalcolo leggero. */
+  giorniDaRifare: number;
+  minimoFoto: number;
 }

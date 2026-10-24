@@ -363,6 +363,7 @@ public class Salute {
             case AUTOMATICA -> "Importazione automatica";
             case INDICIZZAZIONE -> "Indicizzazione";
             case LUOGHI -> "Calcolo dei luoghi";
+            case EVENTI -> "Calcolo degli eventi";
             case MANUALE -> "Importazione";
         };
         dettagli.add(0, cosa + " di " + l.cartella() + ": " + l.importate() + " nuove · " + l.duplicate()

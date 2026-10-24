@@ -474,6 +474,28 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   sempre: toglie il vettore da visione). `QuasiUguali` li ascolta, perché nel
   cestino il numero di schede non cambia e la cache non se ne accorgerebbe.
 
+## Eventi
+
+- Pacchetto `eventi`. `RilevamentoEventi` (senza Mongo, testabile da solo)
+  riceve le foto in ordine di scatto e consegna i gruppi chiusi; tiene solo
+  riepiloghi, mai elenchi di foto. `EventiService.ricalcola` lo alimenta con
+  un cursore (`mongo.stream`, proiezione) e scrive ogni gruppo appena chiuso:
+  le foto prendono l'evento **per intervallo di date** (`updateMulti`), gli
+  automatici vecchi che cominciavano in quel tratto si tolgono.
+- Automatici: id `a-` + la prima foto, `manuale` false, rifatti dal calcolo.
+  Ogni modifica a mano passa da `rendiManuale` (evento `manuale`, foto
+  `eventoFisso`): il calcolo salta le foto fisse e non tocca i manuali. Una
+  modifica nuova deve fare lo stesso, o il ricalcolo la perde.
+- "Calcola eventi" è un lavoro di `LavoriImportazione` (origine `EVENTI`,
+  `importate` = foto in un evento, `duplicate` = fuori); salva il punto
+  (`impostazioni/eventi-calcolo`) e riprende da lì. Il ricalcolo leggero
+  (`@Scheduled`, giorni in `eventi_da_rifare` segnati da `FotoAggiunta`,
+  `FotoNelCestino`, `FotoRipristinata`) non gira insieme al calcolo.
+- Il posto di una foto lo legge solo `LuogoFoto.di`, il nome del luogo lo
+  sceglie solo `NomiEventi.nomeLuogo`: per altri campi di luogo si cambia lì.
+- Filtro `evento` in `FiltroFoto` (`conEvento`) e in `FotoService.criteri`.
+  Mai negli oggetti dei link condivisi (`FotoCondivisa`): test in `CondivisioniTest`.
+
 ## Git e CI
 
 - Lavora su un branch e apri una pull request verso `main`; la GitHub Action
