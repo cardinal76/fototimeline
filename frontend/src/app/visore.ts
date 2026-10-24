@@ -325,6 +325,9 @@ export class Visore {
       case 'p':
         void this.preferita();
         break;
+      case 'Delete':
+        void this.elimina();
+        break;
       default:
         return;
     }

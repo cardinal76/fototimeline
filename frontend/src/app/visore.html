@@ -55,6 +55,7 @@
     </button>
     <a [href]="scarica()" title="Scarica l'originale" aria-label="Scarica l'originale">⤓</a>
     <button type="button" (click)="dettagli()" [attr.aria-pressed]="pannello()" title="Dettagli (I)" aria-label="Dettagli">ⓘ</button>
+    <button type="button" (click)="elimina()" title="Elimina, va nel cestino (Canc)" aria-label="Elimina">🗑</button>
     @if (puoSchermoIntero) {
       <button
         type="button"
