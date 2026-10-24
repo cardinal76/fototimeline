@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, afterNextRender, effect, inject, output, signal, viewChild } from '@angular/core';
 import * as L from 'leaflet';
 
+import { rotazione } from './formati';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { PuntoMappa } from './modelli';
@@ -143,7 +144,7 @@ export class Mappa implements OnDestroy {
   }
 
   private segno(p: PuntoMappa): L.Marker {
-    const miniatura = `/api/foto/${p.id}/miniatura`;
+    const miniatura = `/api/foto/${p.id}/miniatura${rotazione(p, '?')}`;
     const segno = L.marker([p.lat, p.lon], {
       icon: L.divIcon({
         className: '',

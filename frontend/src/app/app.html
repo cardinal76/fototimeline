@@ -572,6 +572,8 @@
     <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
     <button type="button" (click)="dialogoLuogo.set(true)">📍 Luogo…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
+    <button type="button" title="Ruota a sinistra di 90°" aria-label="Ruota a sinistra" (click)="ruota(-90)">↺</button>
+    <button type="button" title="Ruota a destra di 90°" aria-label="Ruota a destra" (click)="ruota(90)">↻ Ruota</button>
     <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
     <button type="button" title="Nuovo evento, aggiungi, togli, dividi" (click)="dialogoSceltaEvento.set(true)">Evento…</button>
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>

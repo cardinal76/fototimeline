@@ -47,7 +47,7 @@ public class RitaglioVolto {
             // Rifatta dall'originale: serve il cloud montato, se no 503 come le miniature.
             Foto foto = fotoService.trova(volto.getFotoId())
                     .orElseThrow(() -> new IllegalArgumentException("La foto del volto non c'è più"));
-            miniatura = fotoService.fileMiniatura(foto);
+            miniatura = fotoService.fileMiniaturaDritta(foto);
         }
         try {
             BufferedImage immagine = ImageIO.read(miniatura.toFile());

@@ -31,7 +31,8 @@ import net.coobird.thumbnailator.util.exif.Orientation;
  * buona. Con 480 px di lato una foto da 50 MP occupa così pochi MB.
  *
  * <p>L'orientamento EXIF lo legge metadata-extractor (solo le intestazioni)
- * e lo applica Thumbnailator dopo la riduzione, come prima.
+ * e lo applica Thumbnailator dopo la riduzione, come prima; la rotazione
+ * scelta a mano ({@link Rotazione}) si somma a lui.
  */
 public final class Riduzione {
 
@@ -47,7 +48,17 @@ public final class Riduzione {
      */
     public static void jpeg(Path sorgente, Path destinazione, int lato, boolean exif, double qualita,
             boolean ingrandisci) throws IOException {
-        Orientation orientamento = exif ? orientamento(sorgente) : null;
+        jpeg(sorgente, destinazione, lato, exif, qualita, ingrandisci, 0);
+    }
+
+    /**
+     * Come sopra, girata in più di {@code rotazione} gradi in senso orario
+     * ({@code Foto.rotazione}), sopra l'orientamento EXIF: una sola
+     * trasformazione, dopo la riduzione.
+     */
+    public static void jpeg(Path sorgente, Path destinazione, int lato, boolean exif, double qualita,
+            boolean ingrandisci, int rotazione) throws IOException {
+        Orientation orientamento = Rotazione.componi(exif ? orientamento(sorgente) : null, rotazione);
         BufferedImage immagine = leggi(sorgente, lato);
         var costruttore = Thumbnails.of(immagine);
         int lungo = Math.max(immagine.getWidth(), immagine.getHeight());

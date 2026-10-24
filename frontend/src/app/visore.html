@@ -3,6 +3,7 @@
   @if (foto().video) {
     <video
       class="immagine pronta"
+      [attr.data-rotazione]="foto().rotazione || null"
       [src]="src()"
       [poster]="anteprima()"
       controls
@@ -55,6 +56,8 @@
     </button>
     <a [href]="scarica()" title="Scarica l'originale" aria-label="Scarica l'originale">⤓</a>
     <button type="button" (click)="dettagli()" [attr.aria-pressed]="pannello()" title="Dettagli (I)" aria-label="Dettagli">ⓘ</button>
+    <button type="button" (click)="ruota(-90)" title="Ruota a sinistra (Maiusc+R)" aria-label="Ruota a sinistra">↺</button>
+    <button type="button" (click)="ruota(90)" title="Ruota a destra (R)" aria-label="Ruota a destra">↻</button>
     <button type="button" (click)="elimina()" title="Elimina, va nel cestino (Canc)" aria-label="Elimina">🗑</button>
     @if (puoSchermoIntero) {
       <button
@@ -126,6 +129,19 @@
     <dl>
       <dt>File</dt>
       <dd>{{ foto().percorso }}</dd>
+      @if (foto().rotazione) {
+        <dt>Rotazione</dt>
+        <dd>
+          {{ foto().rotazione }}° a destra, solo qui: il file nell'archivio non cambia.
+          @if (foto().video) {
+            Il video si gira solo a vederlo; si scarica com'è.
+          } @else if (foto().contentType === 'image/jpeg') {
+            ⤓ lo scarica girato senza perdita; <a [href]="scaricaNonRuotata()">l'originale non girato</a>.
+          } @else {
+            Si scarica com'è, non girato (girati senza perdita solo i JPEG).
+          }
+        </dd>
+      }
       @if (foto().larghezza) {
         <dt>Dimensioni</dt>
         <dd>
@@ -164,6 +180,6 @@
       <dd>{{ caricataDa() ?? '—' }}</dd>
     </dl>
     <app-evento-foto [foto]="foto()" (scelto)="chiudi.emit()" />
-    <p class="scorciatoie">← → scorri · P preferita · I dettagli · L luogo · Canc elimina · F schermo intero · Esc chiudi</p>
+    <p class="scorciatoie">← → scorri · P preferita · I dettagli · L luogo · R / Maiusc+R ruota · Canc elimina · F schermo intero · Esc chiudi</p>
   </aside>
 }

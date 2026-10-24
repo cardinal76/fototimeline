@@ -493,6 +493,44 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   tutto (409), i dati restano. Vedere e nominare: chi usa l'app; il lavoro:
   admin.
 
+## Rotazione
+
+- "Ruota" (`service/Rotazioni`, `RotazioneController`): `Foto.rotazione` (0, 90,
+  180, 270, in senso orario) **sopra** l'orientamento EXIF, solo nella scheda.
+  **Il file non si tocca mai**, nemmeno il tag Orientation: `hash` è lo SHA-256
+  del file, `deploy/confronta-tutto.sh` e i "già presenti" lavorano per
+  contenuto. Si somma (90 + 90 = 180, 270 + 90 = 0) sotto un lock; a 90 e 270
+  `larghezza` e `altezza` della scheda si scambiano (sono sempre "come si vede").
+  Nel cestino no (404), come le modifiche. Non serve il cloud montato.
+- Miniature: `.miniature/<id>.jpg` resta la **dritta** (solo EXIF); quelle
+  girate sono `ruotate/<id>-<gradi>.jpg`, fatte dalla dritta
+  (`ArchivioFile.creaMiniaturaRuotata`). Un nome per rotazione: niente
+  sovrascritture né file vecchi col nome buono. `FotoService.fileMiniatura` dà
+  quella come si vede, `fileMiniaturaDritta` la dritta: **i volti** cercano e
+  ritagliano sulla dritta (i riquadri valgono lì; un volto coricato si trova
+  peggio, ma girare non tocca le persone già riconosciute). Lo stesso schema per
+  la vista dei link (`condivise/ruotate/`) e la vista dei formati senza EXIF.
+- Indirizzi: miniatura, vista e download sono `immutable` in cache: il frontend
+  aggiunge `?r=<gradi>` (`rotazione()` in `formati.ts`, `FotoService.indirizzoMiniatura`
+  per cestino e quasi uguali). Il server dà sempre la rotazione della scheda.
+- Vista e download dei JPEG (`media/JpegRuotato`): una copia in streaming con
+  solo il tag Orientation cambiato (o aggiunto: IFD0 ricopiata in fondo
+  all'EXIF, o un APP1 minimo), più `tiff:Orientation` dell'XMP. Stessi byte
+  compressi, quindi senza perdita; la risorsa ha la sua lunghezza (Range).
+  Niente jpegtran: non c'è nel container e taglia i bordi non multipli di 8/16.
+  Gli HEIC: la vista JPEG di heif-convert con lo stesso tag; il download resta
+  l'HEIC. PNG/GIF/BMP/WebP: vista JPEG girata (`viste/ruotate/`), download com'è.
+  `?originale=true` dà sempre i byte dell'archivio.
+- Link condivisi: `FotoCondivisa.rotazione`, vista ridotta e miniatura girate
+  nei pixel (senza EXIF), originale e zip girati come sopra.
+- Video: solo a vederli (CSS `rotate` sul player, nel visore e nei link) e la
+  miniatura girata; file, versione compatibile e download restano com'erano.
+- Impronta (pHash) e CLIP si rifanno dalla miniatura **come si vede**: una foto
+  coricata raddrizzata a mano torna "quasi uguale" alla sua copia dritta, e la
+  ricerca per contenuto la vede nel verso giusto. `ruota` ricalcola l'impronta
+  subito, toglie `contenutoIndicizzato` e pubblica `FotoRuotata` (lo ascoltano
+  `IndiceContenuto` e `QuasiUguali`).
+
 ## Cestino
 
 - `FotoService.elimina` non cancella: mette `Foto.eliminataIl` (indice) e la

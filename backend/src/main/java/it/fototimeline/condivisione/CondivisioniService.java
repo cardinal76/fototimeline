@@ -29,6 +29,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import org.springframework.data.domain.Sort;
+import org.springframework.core.io.Resource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -41,6 +42,7 @@ import it.fototimeline.dominio.Foto;
 import it.fototimeline.media.Riduzione;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.Rotazioni;
 
 /**
  * Link pubblici a un gruppo di foto. Il token è l'unica chiave: 256 bit
@@ -72,16 +74,18 @@ public class CondivisioniService {
     private final FotoService fotoService;
     private final ArchivioFile archivio;
     private final CondivisioniProperties properties;
+    private final Rotazioni rotazioni;
     /** Le viste ridotte si fanno una alla volta: una foto grande decodificata pesa decine di MB. */
     private final Semaphore riduzioni = new Semaphore(1);
 
     public CondivisioniService(CondivisioneRepository repository, MongoTemplate mongo, FotoService fotoService,
-            ArchivioFile archivio, CondivisioniProperties properties) {
+            ArchivioFile archivio, CondivisioniProperties properties, Rotazioni rotazioni) {
         this.repository = repository;
         this.mongo = mongo;
         this.fotoService = fotoService;
         this.archivio = archivio;
         this.properties = properties;
+        this.rotazioni = rotazioni;
     }
 
     // ---------------------------------------------------------------- gestione (utenti collegati)
@@ -190,7 +194,8 @@ public class CondivisioniService {
 
     /** Una foto come la vede chi ha il link. */
     public record FotoCondivisa(String id, boolean video, Integer larghezza, Integer altezza,
-            LocalDateTime scattataIl, Double durata, String titolo, Double latitudine, Double longitudine) {
+            LocalDateTime scattataIl, Double durata, String titolo, Double latitudine, Double longitudine,
+            int rotazione) {
     }
 
     /**
@@ -245,7 +250,7 @@ public class CondivisioniService {
                 .map(f -> new FotoCondivisa(f.getId(), f.isVideo(), f.getLarghezza(), f.getAltezza(),
                         f.getScattataIl(), f.getDurata(), f.getTitolo(),
                         c.isPosizione() ? f.getLatitudine() : null,
-                        c.isPosizione() ? f.getLongitudine() : null))
+                        c.isPosizione() ? f.getLongitudine() : null, f.getRotazione()))
                 .toList();
         return new Galleria(c.getTitolo(), c.getScadeIl(), c.isDownload(), archivio.disponibile(), foto);
     }
@@ -277,7 +282,8 @@ public class CondivisioniService {
      * montato) e poi tenuto accanto alle miniature.
      */
     public Path vista(Foto foto) {
-        Path file = archivio.vistaCondivisa(foto.getId());
+        // Una per rotazione: girare non lascia in giro quella di prima col nome buono.
+        Path file = archivio.vistaCondivisa(foto.getId(), foto.getRotazione());
         if (Files.exists(file)) {
             return file;
         }
@@ -299,7 +305,7 @@ public class CondivisioniService {
             temporaneo = Files.createTempFile(file.getParent(), "riduzione-", ".jpg");
             // Letta già ridotta (Riduzione), mai a piena risoluzione; Thumbnailator riscrive
             // l'immagine: l'EXIF (e il GPS) non passa. Le più piccole del lato restano come sono.
-            Riduzione.jpeg(sorgente, temporaneo, properties.latoVista(), exif, 0.88, false);
+            Riduzione.jpeg(sorgente, temporaneo, properties.latoVista(), exif, 0.88, false, foto.getRotazione());
             Files.move(temporaneo, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return file;
         } catch (IOException e) {
@@ -319,6 +325,14 @@ public class CondivisioniService {
     /** L'originale (video da guardare, o download): passa da ArchivioFile, che controlla il cloud. */
     public Path originale(Foto foto) {
         return fotoService.fileOriginale(foto);
+    }
+
+    /**
+     * L'originale da scaricare: un JPEG girato a mano arriva girato senza
+     * perdita (solo il tag EXIF), come lo vede chi ha il link; il resto com'è.
+     */
+    public Resource daScaricare(Foto foto) {
+        return rotazioni.originale(foto);
     }
 
     /** Il nome con cui si scarica: la data di scatto, mai il nome o il percorso dell'archivio. */
@@ -345,14 +359,14 @@ public class CondivisioniService {
         Set<String> usati = new HashSet<>();
         byte[] buffer = new byte[64 * 1024];
         for (Foto f : foto) {
-            Path file = originale(f);
+            Resource file = daScaricare(f);
             ZipEntry voce = new ZipEntry(nomeDownload(f, usati));
             if (f.getScattataIl() != null) {
                 voce.setTimeLocal(f.getScattataIl());
             }
             zip.setLevel(COMPRESSI.contains(estensione(f)) ? Deflater.NO_COMPRESSION : Deflater.DEFAULT_COMPRESSION);
             zip.putNextEntry(voce);
-            try (InputStream in = Files.newInputStream(file)) {
+            try (InputStream in = file.getInputStream()) {
                 int letti;
                 while ((letti = in.read(buffer)) > 0) {
                     zip.write(buffer, 0, letti);

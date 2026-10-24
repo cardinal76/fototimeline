@@ -478,6 +478,16 @@ export class App {
     this.galleria.deseleziona();
   }
 
+  /** "↻ Ruota" sulla selezione: 90 a destra, -90 a sinistra. */
+  protected async ruota(gradi: number): Promise<void> {
+    try {
+      await this.galleria.ruotaSelezionate(gradi);
+      this.selezione.set(false);
+    } catch {
+      this.galleria.avvisa('Rotazione non riuscita');
+    }
+  }
+
   protected async operazione(op: 'AGGIUNGI_TAG' | 'TOGLI_TAG' | 'IMPOSTA_ALBUM' | 'PREFERITA' | 'ELIMINA'): Promise<void> {
     const n = this.galleria.selezionate().size;
     let valore: string | undefined;

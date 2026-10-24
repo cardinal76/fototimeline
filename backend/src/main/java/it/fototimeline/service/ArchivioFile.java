@@ -358,8 +358,68 @@ public class ArchivioFile {
         return relativo(p);
     }
 
+    /**
+     * La miniatura "dritta": com'è il file, con l'orientamento EXIF ma senza
+     * la rotazione scelta a mano. Non cambia mai con la rotazione: da lei
+     * vengono quelle girate ({@link #miniaturaRuotata}) e su di lei stanno i
+     * riquadri dei volti.
+     */
     public Path miniatura(String id) {
         return miniature.resolve(id + ".jpg");
+    }
+
+    /** Le rotazioni a mano che hanno file loro (miniatura, vista, vista dei link). */
+    static final int[] ROTAZIONI = {90, 180, 270};
+
+    /**
+     * La miniatura come si vede: con {@code rotazione} 0 la dritta, altrimenti
+     * {@code ruotate/<id>-<gradi>.jpg}. Un nome per ogni rotazione: girare non
+     * sovrascrive niente, e una richiesta in volo con la rotazione di prima
+     * non può lasciare una miniatura sbagliata col nome buono.
+     */
+    public Path miniaturaRuotata(String id, int rotazione) {
+        return rotazione == 0 ? miniatura(id) : miniature.resolve("ruotate").resolve(id + "-" + rotazione + ".jpg");
+    }
+
+    /**
+     * Fa la miniatura girata dalla dritta (che deve esserci): 480 pixel da
+     * girare, niente cloud. Prima un nome provvisorio, poi lo spostamento.
+     */
+    public void creaMiniaturaRuotata(String id, int rotazione) throws IOException {
+        Path destinazione = miniaturaRuotata(id, rotazione);
+        Files.createDirectories(destinazione.getParent());
+        Path temporaneo = Files.createTempFile(destinazione.getParent(), id + "-", ".parziale.jpg");
+        try {
+            Riduzione.jpeg(miniatura(id), temporaneo, latoMiniatura, false, 0.9, false, rotazione);
+            Files.move(temporaneo, destinazione, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(temporaneo);
+        }
+    }
+
+    /**
+     * La vista girata dei formati in cui la rotazione non si scrive nell'EXIF
+     * (PNG, GIF, BMP, WebP): un JPEG accanto alle viste degli HEIC.
+     */
+    public Path vistaRuotata(String id, int rotazione) {
+        return miniature.resolve("viste").resolve("ruotate").resolve(id + "-" + rotazione + ".jpg");
+    }
+
+    /** La vista dei link condivisi per una rotazione: con 0 quella di sempre. */
+    public Path vistaCondivisa(String id, int rotazione) {
+        return rotazione == 0 ? vistaCondivisa(id)
+                : miniature.resolve("condivise").resolve("ruotate").resolve(id + "-" + rotazione + ".jpg");
+    }
+
+    /** Toglie i file girati che non servono più, cioè di ogni rotazione tranne {@code tranne}. */
+    public void togliRuotate(String id, int tranne) throws IOException {
+        for (int r : ROTAZIONI) {
+            if (r != tranne) {
+                Files.deleteIfExists(miniaturaRuotata(id, r));
+                Files.deleteIfExists(vistaRuotata(id, r));
+                Files.deleteIfExists(vistaCondivisa(id, r));
+            }
+        }
     }
 
     public void elimina(String id, String percorsoRelativo) {
@@ -373,6 +433,7 @@ public class ArchivioFile {
                 Files.deleteIfExists(compatibile(id));
             }
             Files.deleteIfExists(vistaCondivisa(id));
+            togliRuotate(id, 0);
             if (percorsoRelativo != null) {
                 Path originale = originale(percorsoRelativo);
                 Files.deleteIfExists(originale);

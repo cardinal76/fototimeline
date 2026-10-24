@@ -33,6 +33,7 @@ import it.fototimeline.quasiuguali.Raggruppamento.Voce;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
+import it.fototimeline.service.EventiFoto.FotoRuotata;
 import it.fototimeline.service.FotoService;
 
 /**
@@ -126,7 +127,7 @@ public class QuasiUguali {
     }
 
     private static FotoSimile simile(Foto f, boolean suggerita) {
-        return new FotoSimile(f.getId(), "/api/foto/" + f.getId() + "/miniatura", f.getNomeOriginale(),
+        return new FotoSimile(f.getId(), FotoService.indirizzoMiniatura(f), f.getNomeOriginale(),
                 f.getLarghezza(), f.getAltezza(), f.getDimensione(), f.getScattataIl(), f.getFotocamera(),
                 f.isPreferita(), suggerita, suggerita || f.isPreferita());
     }
@@ -160,6 +161,12 @@ public class QuasiUguali {
 
     @EventListener
     public void ripristinata(FotoRipristinata evento) {
+        invalida();
+    }
+
+    /** Girata a mano: l'impronta è cambiata (si calcola sulla miniatura come si vede). */
+    @EventListener
+    public void ruotata(FotoRuotata evento) {
         invalida();
     }
 

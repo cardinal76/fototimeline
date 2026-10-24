@@ -2,6 +2,7 @@ import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
+import { rotazione } from './formati';
 import {
   CollegamentoGoogle,
   ModificaTakeout,
@@ -523,6 +524,16 @@ export class FotoApi {
     return this.http.post<{ modificate: number }>('/api/foto/multiple', { ids, operazione, valore });
   }
 
+  /** Gira la foto di 90 (destra) o -90 (sinistra) gradi in più: si salva nella scheda, il file non cambia. */
+  ruota(id: string, gradi: number): Observable<Foto> {
+    return this.http.post<Foto>(`/api/foto/${id}/ruota`, { gradi });
+  }
+
+  /** "Ruota" sulla selezione; quelle nel cestino no. */
+  ruotaMultiple(ids: string[], gradi: number): Observable<{ modificate: number }> {
+    return this.http.post<{ modificate: number }>('/api/foto/ruota', { ids, gradi });
+  }
+
   /** Link pubblici: si creano, si elencano (i propri; l'admin tutti) e si revocano. */
   creaCondivisione(nuova: NuovaCondivisione): Observable<Condivisione> {
     return this.http.post<Condivisione>('/api/condivisioni', nuova);
@@ -542,16 +553,22 @@ export class FotoApi {
   }
 
   static miniatura(f: Foto): string {
-    return `/api/foto/${f.id}/miniatura`;
+    return `/api/foto/${f.id}/miniatura${rotazione(f, '?')}`;
   }
 
   /** Quello che il browser sa mostrare: per gli HEIC un JPEG, per il resto l'originale. */
   static vista(f: Foto): string {
-    return `/api/foto/${f.id}/vista`;
+    return `/api/foto/${f.id}/vista${rotazione(f, '?')}`;
   }
 
+  /** Da scaricare: un JPEG girato a mano arriva girato (senza perdita); gli altri come sono. */
   static originale(f: Foto, scarica = false): string {
-    return `/api/foto/${f.id}/file${scarica ? '?scarica=true' : ''}`;
+    return `/api/foto/${f.id}/file${scarica ? '?scarica=true' + rotazione(f, '&') : ''}`;
+  }
+
+  /** I byte dell'archivio, senza la rotazione. */
+  static originaleNonRuotato(f: Foto): string {
+    return `/api/foto/${f.id}/file?scarica=true&originale=true`;
   }
 
   /**

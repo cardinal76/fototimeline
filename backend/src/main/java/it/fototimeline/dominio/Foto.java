@@ -25,8 +25,15 @@ public class Foto {
     private String nomeOriginale;
     private String contentType;
     private long dimensione;
+    /** Come si vede: con l'orientamento EXIF e la {@link #rotazione}. */
     private Integer larghezza;
     private Integer altezza;
+    /**
+     * La rotazione scelta a mano, in senso orario: 0, 90, 180 o 270 gradi,
+     * sopra l'orientamento EXIF. Sta solo qui: il file non si tocca (il suo
+     * SHA-256 è {@link #hash}); miniature, viste e download la applicano.
+     */
+    private int rotazione;
 
     /** Ora locale di scatto, come la scrive la fotocamera (senza fuso). */
     private LocalDateTime scattataIl;
@@ -173,6 +180,9 @@ public class Foto {
 
     public Integer getAltezza() { return altezza; }
     public void setAltezza(Integer altezza) { this.altezza = altezza; }
+
+    public int getRotazione() { return rotazione; }
+    public void setRotazione(int rotazione) { this.rotazione = rotazione; }
 
     public LocalDateTime getScattataIl() { return scattataIl; }
     public void setScattataIl(LocalDateTime scattataIl) {

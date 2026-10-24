@@ -54,6 +54,7 @@
       @if (f.video) {
         <video
           class="immagine"
+          [attr.data-rotazione]="f.rotazione || null"
           [src]="vista(f)"
           [poster]="miniatura(f)"
           controls

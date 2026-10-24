@@ -24,3 +24,11 @@ export function durata(secondi?: number): string {
   const sec = String(s % 60).padStart(2, '0');
   return ore ? `${ore}:${String(min).padStart(2, '0')}:${sec}` : `${min}:${sec}`;
 }
+
+/**
+ * "?r=90": miniature, viste e download stanno in cache per sempre (immutable),
+ * quindi ogni rotazione ha il suo indirizzo. Senza rotazione l'indirizzo di sempre.
+ */
+export function rotazione(f: { rotazione?: number }, prima: '?' | '&'): string {
+  return f.rotazione ? `${prima}r=${f.rotazione}` : '';
+}

@@ -510,6 +510,24 @@ export class Galleria {
     this.togliDallaLista([foto.id]);
   }
 
+  /** Gira una foto (90 a destra, -90 a sinistra): la scheda nuova prende il suo posto nella lista. */
+  async ruota(foto: Foto, gradi: number): Promise<Foto> {
+    const girata = await firstValueFrom(this.api.ruota(foto.id, gradi));
+    this.foto.update((lista) => lista.map((f) => (f.id === foto.id ? girata : f)));
+    return girata;
+  }
+
+  /** "Ruota" sulla selezione: miniature e proporzioni nuove, quindi si ricarica. */
+  async ruotaSelezionate(gradi: number): Promise<void> {
+    const ids = [...this.selezionate()];
+    if (!ids.length) {
+      return;
+    }
+    const { modificate } = await firstValueFrom(this.api.ruotaMultiple(ids, gradi));
+    this.avvisa(`${modificate} foto ruotate`);
+    this.ricarica();
+  }
+
   async operazione(operazione: Operazione, valore?: string): Promise<void> {
     const ids = [...this.selezionate()];
     if (!ids.length) {

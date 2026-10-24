@@ -817,7 +817,7 @@ public class FotoService {
                         Criteria.where("latitudine").ne(null).and("longitudine").ne(null),
                         Criteria.where("latitudineLuogo").ne(null).and("longitudineLuogo").ne(null))));
         query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video", "luogo", "latitudineLuogo",
-                "longitudineLuogo");
+                "longitudineLuogo", "rotazione");
         return mongo.find(query, Foto.class).stream()
                 .map(f -> {
                     boolean approssimativa = f.getLatitudineLuogo() != null && f.getLongitudineLuogo() != null
@@ -826,7 +826,7 @@ public class FotoService {
                                             f.getLatitudineLuogo(), f.getLongitudineLuogo()) > luoghi.distanzaMassimaKm());
                     return new PuntoMappa(f.getId(), approssimativa ? f.getLatitudineLuogo() : f.getLatitudine(),
                             approssimativa ? f.getLongitudineLuogo() : f.getLongitudine(), f.getGiorno(), f.getTitolo(),
-                            f.isVideo(), f.getLuogo(), approssimativa);
+                            f.isVideo(), f.getLuogo(), approssimativa, f.getRotazione());
                 })
                 .toList();
     }
@@ -895,10 +895,40 @@ public class FotoService {
     }
 
     /**
-     * La miniatura; se manca (archivio nel cloud e disco del server nuovo, o
-     * cartella delle miniature cancellata) la rifà dall'originale.
+     * L'indirizzo della miniatura per il browser: con la rotazione nell'indirizzo
+     * ({@code ?r=90}), perché la miniatura sta in cache per sempre (immutable).
+     */
+    public static String indirizzoMiniatura(Foto foto) {
+        return "/api/foto/" + foto.getId() + "/miniatura" + (foto.getRotazione() == 0 ? "" : "?r=" + foto.getRotazione());
+    }
+
+    /**
+     * La miniatura come si vede (con la rotazione scelta a mano); se manca
+     * (archivio nel cloud e disco del server nuovo, o cartella delle
+     * miniature cancellata) la rifà dall'originale.
      */
     public Path fileMiniatura(Foto foto) {
+        Path dritta = fileMiniaturaDritta(foto);
+        if (foto.getRotazione() == 0) {
+            return dritta;
+        }
+        // Girata a mano: dalla dritta, sul disco del server (niente cloud).
+        Path ruotata = archivio.miniaturaRuotata(foto.getId(), foto.getRotazione());
+        if (!Files.exists(ruotata)) {
+            try {
+                archivio.creaMiniaturaRuotata(foto.getId(), foto.getRotazione());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Non riesco a girare la miniatura di " + foto.getPercorso(), e);
+            }
+        }
+        return ruotata;
+    }
+
+    /**
+     * La miniatura senza la rotazione scelta a mano (solo l'orientamento
+     * EXIF), rifatta se manca: i volti si cercano e si ritagliano su di lei.
+     */
+    public Path fileMiniaturaDritta(Foto foto) {
         Path miniatura = archivio.miniatura(foto.getId());
         if (!Files.exists(miniatura)) {
             rifaiAnteprime(foto);

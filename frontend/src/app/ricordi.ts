@@ -32,7 +32,7 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
               <div class="striscia">
                 @for (f of r.foto; track f.id) {
                   <button type="button" [attr.aria-label]="f.titolo || f.nomeOriginale" (click)="apri.emit(f)">
-                    <img [src]="'/api/foto/' + f.id + '/miniatura'" alt="" loading="lazy" />
+                    <img [src]="miniatura(f)" alt="" loading="lazy" />
                   </button>
                 }
               </div>
@@ -148,6 +148,10 @@ export class Ricordi {
   }
 
   /** Il nome dell'evento della maggior parte delle foto di quell'anno, se ne hanno uno. */
+  protected miniatura(f: Foto): string {
+    return FotoApi.miniatura(f);
+  }
+
   protected nomeEvento(r: Ricordo): string | undefined {
     const e = eventoDi(r);
     return e ? this.nomiEventi()[e] : undefined;

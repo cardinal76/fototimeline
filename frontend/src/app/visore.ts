@@ -100,6 +100,8 @@ export class Visore {
     return f.video && f.compatibile === false && f.conversione !== 'FATTA';
   });
   protected readonly scarica = computed(() => FotoApi.originale(this.foto(), true));
+  /** Girata a mano: il ⤓ dà la copia girata (solo i JPEG, senza perdita); qui i byte dell'archivio. */
+  protected readonly scaricaNonRuotata = computed(() => FotoApi.originaleNonRuotato(this.foto()));
   protected readonly anteprima = computed(() => FotoApi.miniatura(this.foto()));
   protected readonly origine = computed(() => ORIGINI[this.foto().origineData]);
   /** "Anna": il nome di chi l'ha portata; null per le foto di prima. */
@@ -270,6 +272,20 @@ export class Visore {
     this.cambia.emit(aggiornata);
   }
 
+  /** Le rotazioni una dopo l'altra, nell'ordine dei tasti: R R fa 180 anche se il server è lento. */
+  private rotazioni: Promise<void> = Promise.resolve();
+
+  /** Ruota a destra (90) o a sinistra (-90): si salva subito, miniatura e vista arrivano girate. */
+  protected ruota(gradi: number): void {
+    this.rotazioni = this.rotazioni.then(async () => {
+      try {
+        this.cambia.emit(await this.galleria.ruota(this.foto(), gradi));
+      } catch {
+        this.galleria.avvisa('Rotazione non riuscita');
+      }
+    });
+  }
+
   protected async elimina(): Promise<void> {
     if (!confirm(`Eliminare "${this.foto().nomeOriginale}"? Va nel cestino: si ripristina da Strumenti → Cestino.`)) {
       return;
@@ -318,6 +334,12 @@ export class Visore {
         break;
       case 'Delete':
         void this.elimina();
+        break;
+      case 'r':
+        this.ruota(90);
+        break;
+      case 'R':
+        this.ruota(-90);
         break;
       case 'l':
         // Il luogo si cambia nel pannello: si apre se è chiuso.

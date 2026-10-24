@@ -79,6 +79,14 @@ Il server: [DEPLOY.md](DEPLOY.md).
   lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
   chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
   si scarica l'originale o si elimina (va nel cestino).
+- **Ruota**: nel visore ↺ ↻ (o `R` a destra, `Maiusc+R` a sinistra), dalla
+  selezione *↺* / *↻ Ruota* su più foto. La rotazione si salva nella scheda e
+  vale ovunque (timeline, visore, mappa, ricordi, link condivisi); **il file
+  nell'archivio non cambia** (SHA-256, confronto con pCloud e "già presenti"
+  restano quelli). Il download di un JPEG girato è una copia girata senza
+  perdita (cambia solo il tag EXIF Orientation; dal pannello anche
+  l'originale non girato); HEIC, PNG e gli altri si scaricano come sono. I
+  video si girano solo a vederli. Dettagli in CLAUDE.md, "Rotazione".
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
 - **Luoghi**: dal GPS il posto su più livelli, come tag automatici: città o
@@ -374,7 +382,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | DELETE | `/api/foto/{id}/luogo`       | "Usa il GPS": torna al luogo calcolato dalle coordinate, risponde con la foto |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
 | GET    | `/api/foto/{id}/file`        | Il file, con `Range` per i video: la versione compatibile se c'è, altrimenti l'originale; `?originale=true` o `?scarica=true` (allegato) per l'originale |
-| GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
+| GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC), girato se c'è una rotazione; il frontend aggiunge `?r=<gradi>` (cache immutabile) |
+| POST   | `/api/foto/{id}/ruota`       | `{ gradi }` (90 a destra, -90 a sinistra, 180): si somma alla rotazione; la foto aggiornata (404 se non c'è o è nel cestino, 400 se non è un multiplo di 90) |
+| POST   | `/api/foto/ruota`            | `{ ids, gradi }` su più foto: `{ modificate }` (quelle nel cestino no) |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
 | GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline), col nome del luogo |
 | GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, altriNomi, regioni: [{ nome, conteggio, province: [{ nome, conteggio }], luoghi: [{ nome, provincia, conteggio }] }] }] }`, i più fotografati prima, senza il cestino |

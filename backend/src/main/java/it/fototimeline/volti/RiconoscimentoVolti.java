@@ -282,10 +282,14 @@ public class RiconoscimentoVolti {
         }
     }
 
-    /** La miniatura su disco; se manca la rifà dall'originale (serve il cloud montato). */
+    /**
+     * La miniatura dritta (senza la rotazione a mano: i riquadri dei volti
+     * valgono su di lei, RitaglioVolto ritaglia da lì); se manca la rifà
+     * dall'originale (serve il cloud montato).
+     */
     private Path miniatura(Foto foto) {
         Path miniatura = archivio.miniatura(foto.getId());
-        return Files.exists(miniatura) ? miniatura : fotoService.fileMiniatura(foto);
+        return Files.exists(miniatura) ? miniatura : fotoService.fileMiniaturaDritta(foto);
     }
 
     // ------------------------------------------------------------ "Riconosci volti"

@@ -7,8 +7,11 @@ export interface Foto {
   nomeOriginale: string;
   contentType: string;
   dimensione: number;
+  /** Come si vede: con l'orientamento EXIF e la rotazione. */
   larghezza?: number;
   altezza?: number;
+  /** Rotazione scelta a mano, in senso orario: 0, 90, 180, 270. Il file non cambia. */
+  rotazione: number;
   /** Ora locale di scatto, "2024-05-17T14:03:22". */
   scattataIl: string;
   giorno: string;
@@ -266,6 +269,8 @@ export interface PuntoMappa {
   luogo?: string;
   /** Senza GPS (o col GPS lontano): alle coordinate della città scelta a mano. */
   approssimativa: boolean;
+  /** Rotazione scelta a mano: va nell'indirizzo della miniatura. */
+  rotazione: number;
 }
 
 /** I luoghi delle foto con quante ce ne sono (GET /api/luoghi), i più fotografati prima. */
@@ -557,6 +562,8 @@ export interface FotoCondivisa {
   /** Solo se chi ha creato il link ha scelto "includi posizione". */
   latitudine?: number;
   longitudine?: number;
+  /** Rotazione scelta a mano (0, 90, 180, 270): i video si girano col CSS. */
+  rotazione: number;
 }
 
 /** La galleria pubblica di un link (/c/<token>). */
