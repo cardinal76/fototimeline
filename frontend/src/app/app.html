@@ -265,6 +265,9 @@
           <button type="button" class="voce" role="menuitem" title="Raffiche, copie ricompresse o ridimensionate" (click)="chiudiMenu(); dialogoQuasiUguali.set(true)">
             Quasi uguali
           </button>
+          <button type="button" class="voce" role="menuitem" title="Le foto eliminate: si ripristinano o si eliminano per sempre" (click)="chiudiMenu(); dialogoCestino.set(true)">
+            Cestino
+          </button>
           @if (galleria.io()?.admin) {
             <button
               type="button"
@@ -521,6 +524,9 @@
     <progress [value]="percentuale()" max="100"></progress>
     <p>
       {{ c.caricate }} nuove · {{ c.duplicate }} già presenti
+      @if (c.nelCestino) {
+        (<span [title]="'Si ripristinano da Strumenti → Cestino'">{{ c.nelCestino }} nel cestino</span>)
+      }
       @if (c.errori.length) {
         · <span class="errore">{{ c.errori.length }} errori</span>
       }
@@ -1032,6 +1038,10 @@
     [disponibile]="galleria.archivioDisponibile()"
     (chiudi)="dialogoQuasiUguali.set(false)"
   />
+}
+
+@if (dialogoCestino()) {
+  <app-cestino [disponibile]="galleria.archivioDisponibile()" (chiudi)="dialogoCestino.set(false)" />
 }
 
 @if (dialogoSalute()) {

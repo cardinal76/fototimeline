@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -30,6 +31,8 @@ import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.quasiuguali.Raggruppamento.Voce;
 import it.fototimeline.service.ArchivioFile;
+import it.fototimeline.service.EventiFoto.FotoNelCestino;
+import it.fototimeline.service.EventiFoto.FotoRipristinata;
 import it.fototimeline.service.FotoService;
 
 /**
@@ -106,11 +109,12 @@ public class QuasiUguali {
         List<List<String>> scelti = tutti.subList(da, a);
 
         Set<String> ids = scelti.stream().flatMap(List::stream).collect(Collectors.toSet());
-        Map<String, Foto> foto = mongo.find(Query.query(Criteria.where("_id").in(ids)), Foto.class).stream()
+        Map<String, Foto> foto = mongo.find(Query.query(Criteria.where("_id").in(ids).and(FotoService.CESTINO).is(null)),
+                        Foto.class).stream()
                 .collect(Collectors.toMap(Foto::getId, Function.identity()));
         List<Gruppo> gruppi = new ArrayList<>();
         for (List<String> g : scelti) {
-            // Una foto tolta nel frattempo da un'altra parte non c'è più.
+            // Una foto tolta nel frattempo da un'altra parte (nel cestino) non c'è più.
             List<Foto> presenti = g.stream().map(foto::get).filter(f -> f != null).sorted(DA_TENERE).toList();
             if (presenti.size() > 1) {
                 gruppi.add(new Gruppo(presenti.stream()
@@ -142,9 +146,26 @@ public class QuasiUguali {
         cache = null;
     }
 
+    /**
+     * Una foto che va nel cestino (da qui con {@link #risolvi}, o dal visore e
+     * dalla selezione) o che ne torna cambia i gruppi, ma il numero di schede
+     * no (nel cestino la scheda resta): la cache non se ne accorgerebbe da
+     * sola. Una tolta esce dai gruppi in cache senza ricalcolare; una
+     * ripristinata può rientrare in un gruppo, e i gruppi si rifanno.
+     */
+    @EventListener
+    public void nelCestino(FotoNelCestino evento) {
+        aggiornaCache(Set.of(evento.id()), Set.of());
+    }
+
+    @EventListener
+    public void ripristinata(FotoRipristinata evento) {
+        invalida();
+    }
+
     private List<List<String>> calcolaGruppi() {
         long inizio = System.nanoTime();
-        Query query = Query.query(Criteria.where("impronta").ne(null));
+        Query query = Query.query(Criteria.where("impronta").ne(null).and(FotoService.CESTINO).is(null));
         query.fields().include("impronta", "scattataIl", "origineData", "fotocamera");
         List<Voce> voci = mongo.find(query, Foto.class).stream()
                 .map(f -> new Voce(f.getId(), f.getImpronta(), f.getScattataIl(), haExif(f)))
@@ -182,8 +203,8 @@ public class QuasiUguali {
     // ---------------------------------------------------------------- decisioni
 
     /**
-     * Toglie le foto {@code togli} come l'eliminazione normale (originale,
-     * scheda, miniatura: col cloud smontato 503). Se se ne tengono più d'una,
+     * Toglie le foto {@code togli} come l'eliminazione normale: nel cestino
+     * (col cloud smontato 503). Se se ne tengono più d'una,
      * per quelle vale "non sono doppioni" e il gruppo non ricompare.
      */
     public Esito risolvi(Collection<String> tieni, Collection<String> togli) {

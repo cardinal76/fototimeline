@@ -25,6 +25,7 @@ import {
   NuovaCondivisione,
   Operazione,
   PaginaFoto,
+  PaginaCestino,
   PaginaGruppi,
   PuntoMappa,
   ImpostazioniRicordiTelegram,
@@ -211,6 +212,25 @@ export class FotoApi {
   /** Elimina le foto "togli" di un gruppo; quelle tenute (se più d'una) non si propongono più insieme. */
   risolvi(tieni: string[], togli: string[]): Observable<{ eliminate: number }> {
     return this.http.post<{ eliminate: number }>('/api/quasi-uguali/risolvi', { tieni, togli });
+  }
+
+  /** Il cestino: dall'ultima eliminata. */
+  cestino(pagina: number, dimensione = 60): Observable<PaginaCestino> {
+    return this.http.get<PaginaCestino>('/api/cestino', { params: { pagina, dimensione } });
+  }
+
+  /** Rimette nell'archivio le foto del cestino; 503 col cloud smontato. */
+  ripristina(ids: string[]): Observable<{ fatte: number }> {
+    return this.http.post<{ fatte: number }>('/api/cestino/ripristina', { ids });
+  }
+
+  /** Elimina per sempre, file compresi, le foto del cestino; 503 col cloud smontato. */
+  eliminaPerSempre(ids: string[]): Observable<{ fatte: number }> {
+    return this.http.post<{ fatte: number }>('/api/cestino/elimina', { ids });
+  }
+
+  svuotaCestino(): Observable<{ fatte: number }> {
+    return this.http.post<{ fatte: number }>('/api/cestino/svuota', {});
   }
 
   /** "Non sono doppioni". */

@@ -88,7 +88,10 @@ class IndicizzazioneTest {
     @BeforeEach
     void svuota() throws Exception {
         aspettaFine();
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         // Anche i file rimasti senza scheda; le miniature restano.
         try (Stream<Path> s = Files.list(archivio)) {
             for (Path p : s.filter(p -> !p.getFileName().toString().equals(".miniature")).toList()) {

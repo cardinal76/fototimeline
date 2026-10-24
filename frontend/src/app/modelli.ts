@@ -43,6 +43,8 @@ export interface Foto {
   /** La versione compatibile (H.264 in MP4) dei video che ne hanno bisogno. */
   conversione?: StatoConversione;
   erroreConversione?: string;
+  /** Quando è finita nel cestino; assente per le foto nell'archivio. */
+  eliminataIl?: string;
 }
 
 export type StatoConversione = 'IN_CODA' | 'IN_CORSO' | 'FATTA' | 'ERRORE';
@@ -454,6 +456,32 @@ export interface FotoSimile {
   suggerita: boolean;
   /** Da tenere all'inizio: la suggerita e le preferite. */
   tieni: boolean;
+}
+
+/** Una foto del cestino. */
+export interface VoceCestino {
+  id: string;
+  /** "/api/foto/<id>/miniatura" */
+  miniatura: string;
+  nomeOriginale: string;
+  video: boolean;
+  larghezza?: number;
+  altezza?: number;
+  scattataIl?: string;
+  eliminataIl: string;
+  /** Quando se ne andrà da sola; assente se il cestino non si svuota da solo. */
+  siEliminaIl?: string;
+  /** Giorni interi che mancano (0 = al prossimo controllo). */
+  giorniRimasti?: number;
+}
+
+export interface PaginaCestino {
+  foto: VoceCestino[];
+  totale: number;
+  pagina: number;
+  altre: boolean;
+  /** Giorni del cestino; 0 = le foto restano finché non le si elimina a mano. */
+  giorni: number;
 }
 
 export interface GruppoSimili {

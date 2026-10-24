@@ -104,7 +104,10 @@ class SincronizzazioneTelefonoTest {
         mongo.remove(new Query(), ImpostazioniTelefono.class);
         mongo.remove(new Query(), CopiaTelefono.class);
         mongo.remove(new Query(), Utente.class);
-        fotoRepository.findAll().forEach(f -> fotoService.elimina(f.getId()));
+        fotoRepository.findAll().forEach(f -> {
+            fotoService.elimina(f.getId());
+            fotoService.eliminaPerSempre(f.getId());
+        });
         builder = RestClient.builder();
         rclone = new FintoRclone(builder);
         orologio = new Orologio(Instant.parse("2026-05-01T10:00:00Z"));

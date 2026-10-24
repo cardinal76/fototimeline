@@ -126,13 +126,13 @@ export class QuasiUguali implements OnDestroy {
     const togli = this.daTogliere().map((f) => f.id);
     const tieni = this.daTenere().map((f) => f.id);
     if (!togli.length || !tieni.length) return;
-    if (!confirm(`Eliminare ${togli.length} foto? I file vengono cancellati dal disco.`)) {
+    if (!confirm(`Eliminare ${togli.length} foto? Vanno nel cestino: si ripristinano da Strumenti → Cestino.`)) {
       return;
     }
     this.occupato.set(true);
     try {
       const { eliminate } = await firstValueFrom(this.api.risolvi(tieni, togli));
-      this.galleria.avvisa(`${eliminate} foto eliminate`);
+      this.galleria.avvisa(`${eliminate} foto nel cestino`);
       this.galleria.ricarica();
       this.totale.update((t) => t - 1);
       this.avanti();

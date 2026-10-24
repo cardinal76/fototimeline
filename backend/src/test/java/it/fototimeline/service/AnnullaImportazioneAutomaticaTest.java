@@ -74,7 +74,10 @@ class AnnullaImportazioneAutomaticaTest {
     @BeforeEach
     void svuota() throws Exception {
         aspetta(() -> lavori.corrente().map(s -> s.stato() != Stato.IN_CORSO).orElse(true), "lavori finiti");
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         memoria.dimenticaTutti();
         for (String c : List.of("telefono", "archivio")) {
             Path cartella = disco.resolve(c);

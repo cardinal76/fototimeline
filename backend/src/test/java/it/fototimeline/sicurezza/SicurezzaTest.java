@@ -224,6 +224,26 @@ class SicurezzaTest {
                 .andExpect(jsonPath("$.stato").value(oneOf("IN_CORSO", "FINITO")));
     }
 
+    @Test
+    void ilCestinoHaIPermessiDellEliminazione() throws Exception {
+        mvc.perform(get("/api/cestino")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/cestino/svuota").with(csrf())).andExpect(status().isUnauthorized());
+        // Come DELETE /api/foto/{id}: basta essere del realm, senza il ruolo di amministratore.
+        mvc.perform(get("/api/cestino").with(oidcLogin())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totale").value(0))
+                .andExpect(jsonPath("$.giorni").value(30));
+        mvc.perform(post("/api/cestino/ripristina").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"ids\":[\"a\"]}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.fatte").value(0));
+        mvc.perform(post("/api/cestino/elimina").with(oidcLogin()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"ids\":[\"a\"]}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.fatte").value(0));
+        mvc.perform(post("/api/cestino/svuota").with(oidcLogin()).with(csrf())).andExpect(status().isOk());
+        mvc.perform(delete("/api/foto/a").with(oidcLogin()).with(csrf())).andExpect(status().isNotFound());
+        // Senza token CSRF no.
+        mvc.perform(post("/api/cestino/svuota").with(oidcLogin())).andExpect(status().isForbidden());
+    }
+
     private static final OidcLoginRequestPostProcessor ANNA = oidcLogin()
             .idToken(t -> t.claim("preferred_username", "anna").claim("name", "Anna Rossi"));
     private static final OidcLoginRequestPostProcessor MARCO = oidcLogin()

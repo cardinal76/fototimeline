@@ -60,7 +60,10 @@ class FotoServiceTest {
 
     @BeforeEach
     void svuota() {
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
     }
 
     @Test
@@ -159,7 +162,9 @@ class FotoServiceTest {
         assertThat(service.album()).containsExactly("Roma");
 
         service.operazioneMultipla(List.of(a, b), Operazione.ELIMINA, null);
-        assertThat(repository.count()).isEqualTo(1);
+        // Nel cestino: le schede restano, ma non si vedono più.
+        assertThat(repository.count()).isEqualTo(3);
+        assertThat(service.cerca(new FiltroFoto(null, null, null, null, null, null), 0, 10).totale()).isEqualTo(1);
     }
 
     @Test
@@ -237,6 +242,10 @@ class FotoServiceTest {
 
         service.elimina(primo.getId());
         service.elimina(omonimo.getId());
+        // Nel cestino i file restano dove sono; eliminati per sempre se ne vanno, con le cartelle vuote.
+        assertThat(archivio.resolve("2024/08/15/IMG_0001.png")).exists();
+        service.eliminaPerSempre(primo.getId());
+        service.eliminaPerSempre(omonimo.getId());
         assertThat(archivio.resolve("2024")).doesNotExist();
     }
 

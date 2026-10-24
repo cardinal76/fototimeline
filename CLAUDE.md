@@ -411,7 +411,8 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - `CalcoloImpronte` (thread `impronte`, uno alla volta, annullabile) prende le
   foto senza impronta per `_id` crescente a blocchi: idempotente, e una foto
   che non riesce non si ripesca nello stesso giro. `POST /api/quasi-uguali/calcola`
-  è da admin; `risolvi` e `ignora` hanno i permessi dell'eliminazione.
+  è da admin; `risolvi` e `ignora` hanno i permessi dell'eliminazione;
+  `risolvi` manda nel cestino.
 - `Raggruppamento`: niente confronto di tutte le coppie. L'impronta si divide
   in `soglia + 1` bande: per il principio dei cassetti due impronte a distanza
   ≤ soglia hanno una banda identica, quindi si confrontano solo le foto nello
@@ -428,6 +429,29 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   "Non sono doppioni" salva il gruppo in `quasi_uguali_ignorati`: le foto di uno
   stesso documento non si uniscono più tra loro (risolvi lo fa per le tenute,
   se più d'una). Le preferite: `tieni` sempre vero e `risolvi` le rifiuta (400).
+
+## Cestino
+
+- `FotoService.elimina` non cancella: mette `Foto.eliminataIl` (indice) e la
+  foto è nel cestino. Il file resta dov'è, con miniature e video compatibile;
+  `ripristina` toglie il campo, `eliminaPerSempre` (solo dal cestino) cancella
+  prima i file e poi la scheda. Tutti e tre vogliono il cloud montato.
+- **Ogni query sulle foto esclude il cestino**: `FotoService.criteri` lo fa da
+  solo, altrimenti `FotoService.nonNelCestino()` o `.and(FotoService.CESTINO).is(null)`.
+  Una ricerca, un conteggio o un'aggregazione nuova su `foto` deve passare da
+  lì. Restano su tutte le schede, apposta: `trova` (per id: miniature e file
+  della pagina del cestino), `riordinaArchivio`, il backup (il file è ancora
+  nel cloud), `senzaMiniatura` della Salute, `existsByPercorso` e `findByHash`
+  delle importazioni (così il contenuto nel cestino non rientra).
+- Reimportare un contenuto nel cestino: DUPLICATA con `FotoService.NEL_CESTINO`,
+  mai un ripristino automatico (cartella automatica, Takeout, Indicizza archivio).
+- `cestino/Cestino`: pagina, ripristino ed eliminazione di più foto, "Svuota" e
+  la pulizia dopo `fototimeline.cestino.giorni` (`FOTOTIMELINE_CESTINO_GIORNI`,
+  30; 0 = mai), ogni ora, solo col cloud montato. `/api/cestino/**` ha i
+  permessi dell'eliminazione.
+- Eventi: `FotoNelCestino`, `FotoRipristinata`, `FotoEliminata` (solo per
+  sempre: toglie il vettore da visione). `QuasiUguali` li ascolta, perché nel
+  cestino il numero di schede non cambia e la cache non se ne accorgerebbe.
 
 ## Git e CI
 

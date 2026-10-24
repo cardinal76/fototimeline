@@ -130,7 +130,10 @@ class ConversioneVideoTest {
         }).when(media).converti(any(), any(), anyInt(), anyInt(), any(), any());
         conversione.annulla();
         aspetta(() -> !conversione.stato().inCorso(), "la coda non si ferma");
-        repository.findAll().forEach(f -> service.elimina(f.getId()));
+        repository.findAll().forEach(f -> {
+            service.elimina(f.getId());
+            service.eliminaPerSempre(f.getId());
+        });
         massimo.set(0);
     }
 

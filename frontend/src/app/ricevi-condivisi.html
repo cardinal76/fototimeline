@@ -59,6 +59,9 @@
         <progress [value]="percentuale()" max="100"></progress>
         <p role="status">
           {{ fatti() }} di {{ totale() }} · {{ nuove() }} nuove · {{ gia() }} già presenti
+          @if (nelCestino()) {
+            ({{ nelCestino() }} nel cestino: si ripristinano da Strumenti → Cestino)
+          }
           @if (errori().length) {
             · <span class="errore">{{ errori().length }} errori</span>
           }

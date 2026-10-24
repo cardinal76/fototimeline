@@ -556,9 +556,13 @@ public class Salute {
     // ------------------------------------------------------------ numeri
 
     private VoceSalute archivio() throws IOException {
-        long totale = mongo.count(new Query(), Foto.class);
-        long video = mongo.count(Query.query(Criteria.where("video").is(true)), Foto.class);
+        long totale = mongo.count(new Query(FotoService.nonNelCestino()), Foto.class);
+        long video = mongo.count(Query.query(Criteria.where("video").is(true).and(FotoService.CESTINO).is(null)), Foto.class);
+        long cestino = mongo.count(new Query(FotoService.nelCestino()), Foto.class);
         List<String> dettagli = new ArrayList<>();
+        if (cestino > 0) {
+            dettagli.add(numero(cestino) + " nel cestino (non contate)");
+        }
         long senza = senzaMiniatura();
         if (senza > 0) {
             dettagli.add(senza + " senza miniatura (si rifanno quando servono)");

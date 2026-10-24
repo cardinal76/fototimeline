@@ -17,6 +17,8 @@ interface Voce {
   video: boolean;
   stato: Stato;
   messaggio?: string;
+  /** Già presente, ma nel cestino. */
+  nelCestino?: boolean;
   /** Errore d'invio (non del file): è ancora in attesa sul telefono e si può riprovare. */
   daRiprovare?: boolean;
 }
@@ -54,6 +56,8 @@ export class RiceviCondivisi implements OnDestroy {
   protected readonly fatti = computed(() => this.voci().filter((v) => v.stato !== 'attesa' && v.stato !== 'invio').length);
   protected readonly nuove = computed(() => this.voci().filter((v) => v.stato === 'nuova').length);
   protected readonly gia = computed(() => this.voci().filter((v) => v.stato === 'gia').length);
+  /** Delle già presenti, quelle nel cestino: non rientrano, si ripristinano da lì. */
+  protected readonly nelCestino = computed(() => this.voci().filter((v) => v.stato === 'gia' && v.nelCestino).length);
   protected readonly errori = computed(() => this.voci().filter((v) => v.stato === 'errore'));
   /** Quelli ancora sul telefono, da riprovare. */
   protected readonly rimasti = computed(
@@ -113,6 +117,7 @@ export class RiceviCondivisi implements OnDestroy {
         this.aggiorna(v, {
           stato: esito.esito === 'CARICATA' ? 'nuova' : esito.esito === 'DUPLICATA' ? 'gia' : 'errore',
           messaggio: esito.messaggio,
+          nelCestino: !!esito.foto?.eliminataIl,
         });
       } catch (e) {
         const stato = e instanceof HttpErrorResponse ? e.status : -1;

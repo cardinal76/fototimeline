@@ -40,6 +40,7 @@ import it.fototimeline.dominio.Foto;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
+import it.fototimeline.service.EventiFoto.FotoRipristinata;
 import it.fototimeline.service.FiltroFoto;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.Risultati.PaginaFoto;
@@ -138,6 +139,23 @@ public class IndiceContenuto {
         }
     }
 
+    /**
+     * Nel cestino il vettore resta (la ricerca non la trova perché passa da
+     * {@link FotoService#criteri}): ripristinata torna subito cercabile. Se non
+     * era ancora nell'indice ci entra adesso.
+     */
+    @EventListener
+    public void ripristinata(FotoRipristinata evento) {
+        if (attiva()) {
+            singole.execute(() -> {
+                Foto foto = mongo.findById(evento.id(), Foto.class);
+                if (foto != null && foto.getContenutoIndicizzato() == null) {
+                    indicizzaUna(evento.id());
+                }
+            });
+        }
+    }
+
     private void indicizzaUna(String id) {
         Path miniatura = archivio.miniatura(id);
         if (!Files.exists(miniatura)) {
@@ -217,8 +235,9 @@ public class IndiceContenuto {
         mongo.upsert(Query.query(Criteria.where("_id").is(ID)), new Update().set("attivo", attivo), IMPOSTAZIONI);
     }
 
+    /** Quelle da mandare a visione: senza segno e non nel cestino. */
     private static Query senzaSegno() {
-        return Query.query(Criteria.where(CAMPO).is(null));
+        return Query.query(Criteria.where(CAMPO).is(null).and(FotoService.CESTINO).is(null));
     }
 
     private void esegui(Lavoro lavoro) {
@@ -226,7 +245,8 @@ public class IndiceContenuto {
         String ultimoId = "";
         try {
             while (!lavoro.annullato) {
-                Query query = Query.query(Criteria.where(CAMPO).is(null).and("_id").gt(ultimoId))
+                Query query = Query.query(Criteria.where(CAMPO).is(null).and(FotoService.CESTINO).is(null)
+                                .and("_id").gt(ultimoId))
                         .with(Sort.by("_id")).limit(properties.blocco());
                 List<Foto> blocco = mongo.find(query, Foto.class);
                 if (blocco.isEmpty()) {
@@ -292,7 +312,7 @@ public class IndiceContenuto {
         if (!attiva()) {
             return new StatoContenuto(false, 0, 0, 0, null, null);
         }
-        long foto = mongo.count(new Query(), Foto.class);
+        long foto = mongo.count(new Query(FotoService.nonNelCestino()), Foto.class);
         long mancanti = mongo.count(senzaSegno(), Foto.class);
         Long nellIndice;
         try {

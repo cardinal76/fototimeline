@@ -105,6 +105,11 @@ fototimeline:
     finestra-token-sbagliati: PT15M
     massimo-foto: 2000
     lato-vista: 2048
+  # Cestino: le foto eliminate restano (scheda e file) e dopo tanti giorni si
+  # eliminano per sempre da sole; 0 = mai. Il controllo gira ogni ora.
+  cestino:
+    giorni: ${FOTOTIMELINE_CESTINO_GIORNI:30}
+    controllo: ${FOTOTIMELINE_CESTINO_CONTROLLO:PT1H}
   # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
   # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
   quasi-uguali:

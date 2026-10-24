@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.StringOperators;
@@ -56,6 +57,8 @@ import it.fototimeline.quasiuguali.Impronta;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
+import it.fototimeline.service.EventiFoto.FotoNelCestino;
+import it.fototimeline.service.EventiFoto.FotoRipristinata;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
 import it.fototimeline.service.Risultati.Importazione;
@@ -119,6 +122,15 @@ public class FotoService {
      * cartella automatica non lo ricorda.
      */
     public static final String ILLEGGIBILE = "File illeggibile";
+
+    /**
+     * Il messaggio di un file il cui contenuto (stesso SHA-256) è una foto nel
+     * cestino: non rientra come nuova (l'hash è unico) e non si ripristina da
+     * sola, nemmeno dall'importazione automatica o da "Indicizza archivio".
+     * Esito DUPLICATA: con "sposta" la copia nell'origine si toglie come per
+     * ogni doppione, perché il contenuto è ancora nell'archivio.
+     */
+    public static final String NEL_CESTINO = "Nel cestino: si ripristina da Strumenti → Cestino";
 
     /** True se l'errore è di lettura ({@link #ILLEGGIBILE}): riprovando può andare. */
     public static boolean erroreDiLettura(String messaggio) {
@@ -429,8 +441,7 @@ public class FotoService {
         } catch (DuplicateKeyException e) {
             // Stesso file caricato in parallelo: ha vinto l'altro.
             annullaSalvataggio(foto, salvato, file);
-            return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
-                    "Già in archivio");
+            return giaPresente(nome, repository.findByHash(foto.getHash()).orElse(null));
         } catch (Exception e) {
             log.warn("Importazione di {} fallita", nome, e);
             annullaSalvataggio(foto, salvato, file);
@@ -515,8 +526,7 @@ public class FotoService {
             throw a;
         } catch (DuplicateKeyException e) {
             archivio.elimina(foto.getId(), null);
-            return new Caricamento(nome, Esito.DUPLICATA, repository.findByHash(foto.getHash()).orElse(null),
-                    "Già in archivio");
+            return giaPresente(nome, repository.findByHash(foto.getHash()).orElse(null));
         } catch (Exception e) {
             log.warn("Indicizzazione di {} fallita", percorso, e);
             archivio.elimina(foto.getId(), null);
@@ -600,7 +610,7 @@ public class FotoService {
         controllo.fase(ControlloFile.Fase.METADATI);
         Optional<Foto> esistente = repository.findByHash(hash);
         if (esistente.isPresent()) {
-            throw new Scartato(new Caricamento(nome, Esito.DUPLICATA, esistente.get(), "Già in archivio"));
+            throw new Scartato(giaPresente(nome, esistente.get()));
         }
 
         Foto foto = new Foto();
@@ -676,6 +686,12 @@ public class FotoService {
                     (genere == Genere.VIDEO ? "Video illeggibile" : "Immagine illeggibile")
                             + (e.getMessage() != null ? " (" + e.getMessage() + ")" : "")));
         }
+    }
+
+    /** Lo stesso contenuto c'è già: in archivio o nel cestino ({@link #NEL_CESTINO}). */
+    private static Caricamento giaPresente(String nome, Foto esistente) {
+        return new Caricamento(nome, Esito.DUPLICATA, esistente,
+                esistente != null && esistente.nelCestino() ? NEL_CESTINO : "Già in archivio");
     }
 
     /** La data dei metadati se c'è (EXIF), altrimenti la riserva con la sua origine. */
@@ -806,6 +822,7 @@ public class FotoService {
         String meseGiorno = "-%02d-%02d".formatted(oggi.getMonthValue(), oggi.getDayOfMonth());
         Query query = Query.query(Criteria.where("giorno").regex(Pattern.quote(meseGiorno) + "$")
                 .lt(oggi.getYear() + "-"))
+                .addCriteria(nonNelCestino())
                 .with(Sort.by(Sort.Order.desc("scattataIl")));
         Map<Integer, List<Foto>> perAnni = new java.util.LinkedHashMap<>();
         for (Foto f : mongo.find(query, Foto.class)) {
@@ -826,6 +843,7 @@ public class FotoService {
     public List<String> tag() {
         // Non distinct: per Mongo un array vuoto vale "undefined" e il driver non lo legge come stringa.
         var aggregazione = Aggregation.newAggregation(
+                Aggregation.match(nonNelCestino()),
                 Aggregation.unwind("tag"),
                 Aggregation.group("tag"),
                 Aggregation.sort(Sort.Direction.ASC, "_id"));
@@ -835,7 +853,7 @@ public class FotoService {
     }
 
     public List<String> album() {
-        return mongo.findDistinct(new Query(), "album", Foto.class, String.class).stream()
+        return mongo.findDistinct(new Query(nonNelCestino()), "album", Foto.class, String.class).stream()
                 .filter(a -> a != null && !a.isBlank())
                 .sorted(String.CASE_INSENSITIVE_ORDER)
                 .toList();
@@ -844,7 +862,7 @@ public class FotoService {
     /** Per il filtro "Caricate da": chi ha portato foto e quante, dal più attivo. Senza le foto di nessuno. */
     public List<Caricatore> caricateDa() {
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(Criteria.where("caricataDa").ne(null)),
+                Aggregation.match(Criteria.where("caricataDa").ne(null).and(CESTINO).is(null)),
                 Aggregation.group("caricataDa").count().as("conteggio"),
                 Aggregation.sort(Sort.by(Sort.Order.desc("conteggio"), Sort.Order.asc("_id"))));
         return mongo.aggregate(aggregazione, Foto.class, Document.class).getMappedResults().stream()
@@ -963,8 +981,9 @@ public class FotoService {
             Boolean preferita, LocalDateTime scattataIl) {
     }
 
+    /** Una foto nel cestino non si modifica (vuoto, cioè 404): prima si ripristina. */
     public Optional<Foto> modifica(String id, Modifica m) {
-        return repository.findById(id).map(foto -> {
+        return repository.findById(id).filter(foto -> !foto.nelCestino()).map(foto -> {
             foto.setTitolo(vuotoANull(m.titolo()));
             foto.setDescrizione(vuotoANull(m.descrizione()));
             foto.setTag(pulisciTag(m.tag()));
@@ -1029,7 +1048,8 @@ public class FotoService {
         if (ids == null || ids.isEmpty()) {
             return 0;
         }
-        Query query = Query.query(Criteria.where("_id").in(ids));
+        // Tag, album e preferite non toccano le foto nel cestino.
+        Query query = Query.query(Criteria.where("_id").in(ids).and(CESTINO).is(null));
         return switch (operazione) {
             case ELIMINA -> ids.stream().filter(this::elimina).count();
             case AGGIUNGI_TAG -> {
@@ -1049,21 +1069,95 @@ public class FotoService {
         };
     }
 
+    // ---------------------------------------------------------------- cestino
+
+    /** Il campo di {@link Foto#getEliminataIl()}: null (o assente) per le foto nell'archivio. */
+    public static final String CESTINO = "eliminataIl";
+
+    /**
+     * Le foto che non sono nel cestino: ogni ricerca, conteggio e
+     * aggregazione delle foto parte da qui (o da {@link #criteri(FiltroFoto)},
+     * che lo comprende).
+     */
+    public static Criteria nonNelCestino() {
+        return Criteria.where(CESTINO).is(null);
+    }
+
+    /** Le foto nel cestino. */
+    public static Criteria nelCestino() {
+        return Criteria.where(CESTINO).ne(null);
+    }
+
+    /**
+     * "Elimina" (visore, selezione, quasi uguali): la foto va nel cestino.
+     * Solo la scheda cambia ({@code eliminataIl}); originale, miniature e
+     * video compatibile restano dove sono finché non la si elimina per
+     * sempre ({@link #eliminaPerSempre}), a mano o dopo i giorni del cestino.
+     * Col cloud smontato no, come prima.
+     *
+     * @return false se non c'è o è già nel cestino
+     */
     public boolean elimina(String id) {
         archivio.verificaDisponibile();
-        return repository.findById(id).map(foto -> {
-            repository.delete(foto);
-            archivio.elimina(foto.getId(), foto.getPercorso());
-            eventi.publishEvent(new FotoEliminata(foto.getId()));
-            return true;
-        }).orElse(false);
+        boolean messa = mongo.updateFirst(Query.query(Criteria.where("_id").is(id).and(CESTINO).is(null)),
+                new Update().set(CESTINO, clock.instant()), Foto.class).getModifiedCount() > 0;
+        if (messa) {
+            eventi.publishEvent(new FotoNelCestino(id));
+        }
+        return messa;
+    }
+
+    /**
+     * Rimette una foto del cestino nell'archivio, com'era (album, tag, data):
+     * il file non si è mai mosso. Col cloud smontato no, come l'eliminazione.
+     *
+     * @return false se non c'è o non è nel cestino
+     */
+    public boolean ripristina(String id) {
+        archivio.verificaDisponibile();
+        Foto foto = mongo.findAndModify(Query.query(Criteria.where("_id").is(id).and(CESTINO).ne(null)),
+                new Update().unset(CESTINO), FindAndModifyOptions.options().returnNew(true), Foto.class);
+        if (foto == null) {
+            return false;
+        }
+        // Un video che aspettava la versione compatibile: nel cestino la coda lo saltava.
+        segnalaConversione(foto);
+        eventi.publishEvent(new FotoRipristinata(id));
+        return true;
+    }
+
+    /**
+     * Elimina per sempre una foto del cestino: originale, miniature, video
+     * compatibile, poi la scheda. Prima i file: se non si riesce a
+     * cancellarli la scheda resta nel cestino (e la pulizia ci riprova),
+     * invece di lasciare nell'archivio un file senza scheda che "Indicizza
+     * archivio" riprenderebbe come nuovo. Col cloud smontato no.
+     *
+     * @return false se non c'è o non è nel cestino (una foto dell'archivio
+     *         non si elimina per sempre senza passare dal cestino)
+     */
+    public boolean eliminaPerSempre(String id) {
+        archivio.verificaDisponibile();
+        Query nelCestino = Query.query(Criteria.where("_id").is(id).and(CESTINO).ne(null));
+        Foto foto = mongo.findOne(nelCestino, Foto.class);
+        if (foto == null) {
+            return false;
+        }
+        archivio.elimina(foto.getId(), foto.getPercorso());
+        mongo.remove(nelCestino, Foto.class);
+        eventi.publishEvent(new FotoEliminata(foto.getId()));
+        return true;
     }
 
     // ---------------------------------------------------------------- utilità
 
-    /** I filtri della timeline come criteri di Mongo (li usa anche la ricerca per contenuto). */
+    /**
+     * I filtri della timeline come criteri di Mongo (li usa anche la ricerca
+     * per contenuto), sempre senza le foto nel cestino.
+     */
     public static Criteria criteri(FiltroFoto f) {
         List<Criteria> e = new ArrayList<>();
+        e.add(nonNelCestino());
         if (f.q() != null && !f.q().isBlank()) {
             Pattern p = Pattern.compile(Pattern.quote(f.q().trim()), Pattern.CASE_INSENSITIVE);
             e.add(new Criteria().orOperator(
@@ -1109,7 +1203,7 @@ public class FotoService {
             }
             e.add(data);
         }
-        return e.isEmpty() ? new Criteria() : new Criteria().andOperator(e);
+        return new Criteria().andOperator(e);
     }
 
     static Set<String> pulisciTag(Collection<String> tag) {

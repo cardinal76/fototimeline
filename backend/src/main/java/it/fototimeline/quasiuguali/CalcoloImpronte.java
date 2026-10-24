@@ -72,9 +72,9 @@ public class CalcoloImpronte {
         this.clock = clock.orElse(Clock.systemUTC());
     }
 
-    /** Le foto senza impronta: niente video (quelli che non hanno il campo sono foto vecchie). */
+    /** Le foto senza impronta: niente video (quelli che non hanno il campo sono foto vecchie) né foto nel cestino. */
     private static Criteria senzaImpronta() {
-        return Criteria.where("impronta").exists(false).and("video").ne(true);
+        return Criteria.where("impronta").exists(false).and("video").ne(true).and(FotoService.CESTINO).is(null);
     }
 
     public StatoCalcolo stato() {

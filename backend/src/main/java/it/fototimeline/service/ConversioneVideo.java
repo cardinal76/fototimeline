@@ -140,16 +140,18 @@ public class ConversioneVideo {
         Criteria nonInCoda = new Criteria().orOperator(
                 Criteria.where("conversione").exists(false),
                 Criteria.where("conversione").nin(DA_FARE));
+        // Le foto nel cestino no: ripristinate, "Converti video" le riprende.
         // Mai analizzati (archivi di prima): la coda li guarda con ffprobe.
         mongo.updateMulti(Query.query(new Criteria().andOperator(
-                        Criteria.where("video").is(true), Criteria.where("compatibile").is(null), nonInCoda)),
+                        Criteria.where("video").is(true), Criteria.where("compatibile").is(null), nonInCoda,
+                        FotoService.nonNelCestino())),
                 inCoda(), Foto.class);
         // Da convertire, anche quelli non riusciti.
         mongo.updateMulti(Query.query(Criteria.where("video").is(true).and("compatibile").is(false)
-                        .and("conversione").in(null, StatoConversione.ERRORE)),
+                        .and("conversione").in(null, StatoConversione.ERRORE).and(FotoService.CESTINO).is(null)),
                 inCoda(), Foto.class);
         // Fatti, ma il file non c'è più (destinazione cambiata, cancellato a mano).
-        Query fatte = Query.query(Criteria.where("conversione").is(StatoConversione.FATTA));
+        Query fatte = Query.query(Criteria.where("conversione").is(StatoConversione.FATTA).and(FotoService.CESTINO).is(null));
         fatte.fields().include("_id");
         for (Foto f : mongo.find(fatte, Foto.class)) {
             if (!Files.exists(archivio.compatibile(f.getId()))) {
@@ -175,8 +177,10 @@ public class ConversioneVideo {
     }
 
     public StatoConversioni stato() {
-        long daFare = mongo.count(Query.query(Criteria.where("conversione").in(DA_FARE)), Foto.class);
-        long convertiti = mongo.count(Query.query(Criteria.where("conversione").is(StatoConversione.FATTA)), Foto.class);
+        long daFare = mongo.count(Query.query(Criteria.where("conversione").in(DA_FARE).and(FotoService.CESTINO).is(null)),
+                Foto.class);
+        long convertiti = mongo.count(Query.query(Criteria.where("conversione").is(StatoConversione.FATTA)
+                .and(FotoService.CESTINO).is(null)), Foto.class);
         Foto f = corrente;
         Integer percentuale = null;
         if (f != null && f.getDurata() != null && f.getDurata() > 0) {
@@ -249,9 +253,12 @@ public class ConversioneVideo {
         }
     }
 
-    /** Il prossimo in coda, dal più vecchio, segnato IN_CORSO nello stesso colpo. */
+    /**
+     * Il prossimo in coda, dal più vecchio, segnato IN_CORSO nello stesso
+     * colpo. Quelli nel cestino aspettano in coda: ripristinati, ripartono.
+     */
     private Foto prossima() {
-        Query query = Query.query(Criteria.where("conversione").is(StatoConversione.IN_CODA))
+        Query query = Query.query(Criteria.where("conversione").is(StatoConversione.IN_CODA).and(FotoService.CESTINO).is(null))
                 .with(Sort.by("caricataIl", "_id"));
         return mongo.findAndModify(query, new Update().set("conversione", StatoConversione.IN_CORSO),
                 FindAndModifyOptions.options().returnNew(true), Foto.class);

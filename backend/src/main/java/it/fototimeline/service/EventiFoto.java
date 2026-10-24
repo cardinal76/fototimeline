@@ -13,7 +13,15 @@ public final class EventiFoto {
     public record FotoAggiunta(String id) {
     }
 
-    /** Una foto è stata eliminata, scheda e file. */
+    /** Una foto è finita nel cestino: scheda e file restano, sparisce dagli elenchi. */
+    public record FotoNelCestino(String id) {
+    }
+
+    /** Una foto è tornata dal cestino nell'archivio. */
+    public record FotoRipristinata(String id) {
+    }
+
+    /** Una foto è stata eliminata per sempre, scheda e file. */
     public record FotoEliminata(String id) {
     }
 }

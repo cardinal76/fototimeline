@@ -101,6 +101,14 @@ public class Foto {
      */
     @Indexed
     private Instant contenutoIndicizzato;
+    /**
+     * Quando è finita nel cestino; null = nell'archivio. Nel cestino la scheda
+     * resta (hash compreso, così la stessa foto non rientra come nuova) e il
+     * file resta dov'è: sparisce da tutti gli elenchi ({@code FotoService.nonNelCestino()})
+     * finché non la si ripristina o la si elimina per sempre.
+     */
+    @Indexed
+    private Instant eliminataIl;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -209,4 +217,9 @@ public class Foto {
 
     public Instant getContenutoIndicizzato() { return contenutoIndicizzato; }
     public void setContenutoIndicizzato(Instant contenutoIndicizzato) { this.contenutoIndicizzato = contenutoIndicizzato; }
+
+    public Instant getEliminataIl() { return eliminataIl; }
+    public void setEliminataIl(Instant eliminataIl) { this.eliminataIl = eliminataIl; }
+
+    public boolean nelCestino() { return eliminataIl != null; }
 }

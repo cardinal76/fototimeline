@@ -89,6 +89,10 @@ class LuoghiTest {
         assertThat(service.mappa(new FiltroFoto(null, null, null, null, null, null)))
                 .singleElement().satisfies(p -> assertThat(p.luogo()).isEqualTo("Roma"));
         service.elimina(foto.getId());
+        // Nel cestino: niente punto sulla mappa e niente luogo nell'elenco.
+        assertThat(service.mappa(new FiltroFoto(null, null, null, null, null, null))).isEmpty();
+        assertThat(luoghi.elenco().nazioni()).isEmpty();
+        service.eliminaPerSempre(foto.getId());
     }
 
     @Test

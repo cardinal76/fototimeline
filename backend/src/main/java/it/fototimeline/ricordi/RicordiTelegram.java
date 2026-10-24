@@ -38,6 +38,7 @@ import it.fototimeline.quasiuguali.QuasiUgualiProperties;
 import it.fototimeline.salute.Telegram;
 import it.fototimeline.salute.TelegramProperties;
 import it.fototimeline.service.ArchivioFile;
+import it.fototimeline.service.FotoService;
 
 /**
  * "Accadde oggi" su Telegram: ogni mattina, dall'ora impostata, le foto dello
@@ -245,6 +246,7 @@ public class RicordiTelegram {
         String meseGiorno = "-%02d-%02d".formatted(oggi.getMonthValue(), oggi.getDayOfMonth());
         Query query = Query.query(Criteria.where("giorno").regex(Pattern.quote(meseGiorno) + "$")
                 .lt(oggi.getYear() + "-"))
+                .addCriteria(FotoService.nonNelCestino())
                 .with(Sort.by(Sort.Order.asc("scattataIl")));
         return mongo.find(query, Foto.class);
     }
