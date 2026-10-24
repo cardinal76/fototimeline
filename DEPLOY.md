@@ -19,6 +19,7 @@ login: Keycloak di presenze, realm "fototimeline"
 | Foto da importare | qualunque cartella di LifetimeCloud (l'app vede la radice come `/cloud`) |
 | Miniature | volume Docker `fototimeline_miniature` su server2 (si rigenerano dagli originali) |
 | Video compatibili (H.264) | LifetimeCloud, `FotoTimeline/.compatibili/<id>.mp4` (si rifanno con "Converti video") |
+| Originali dei video troppo grandi per LifetimeCloud | pCloud, `Video originali troppo grandi/` (in archivio c'è la versione ricompressa in H.265) |
 | Metadati (date, tag, album) | MongoDB, volume `fototimeline_mongo` su server2 |
 | Indice della ricerca per contenuto | volume `fototimeline_visione-dati` su server2 (si rifà dalle miniature) |
 | Volti e persone (nomi, gruppi) | MongoDB, collezioni `volti` e `persone`; l'indice dei vicini in `fototimeline_visione-dati`, cartella `volti` (si rifà da Mongo) |
@@ -283,6 +284,105 @@ dopo il rilascio.
 
 Si attiva solo sul server (serve rclone) e con `FOTOTIMELINE_CARTELLA_AUTOMATICA`
 dentro `RCLONE_PUNTO_MONTAGGIO`: altrimenti la finestra dice perché.
+
+### Video troppo grandi per LifetimeCloud
+
+LifetimeCloud non prende file oltre **20480 MB** (`File too large. Max 20480MB on 2 TB
+Lifetime.: 403 Forbidden`), e il suo nginx a volte rifiuta anche file più piccoli con un **413
+Request Entity Too Large** (la soglia vera di nginx non è scritta da nessuna parte: si tratta
+come lo stesso caso). Prima erano due errori a ogni giro del telefono; ora un video così si
+**ricomprime in H.265** su server2 e entra in FotoTimeline come ogni altro, mentre l'originale
+resta su pCloud in una cartella sua.
+
+1. **Il giro del telefono** non prova nemmeno a copiare un video oltre `FOTOTIMELINE_VIDEO_MAX_MB`
+   (20000 MB, poco sotto il limite) e mette in coda anche quelli che il cloud rifiuta per la
+   dimensione (403 "File too large" o 413: niente seconda prova, un'eventuale copia a metà si
+   toglie). Non sono errori: nel riepilogo sono "N in ricompressione". Il registro
+   `video_grandi_telefono` (MongoDB) li ricorda: un giro dopo non li riprova a copiare.
+2. **La ricompressione**, un video alla volta su un thread suo (`video-grandi`):
+   - controlla lo spazio in `$FOTOTIMELINE_DATI/video-grandi` (montata come `/video-grandi` in
+     rclone e nell'app, come `/takeout`): servono originale + ricompresso (al più la soglia) +
+     `FOTOTIMELINE_VIDEO_GRANDI_RISERVA` (2 GB). Per un video da 23 GB, fino a ~45 GB; se non ci
+     sono il video è **rimandato**: riprova da solo ogni ora finché lo spazio non c'è, e intanto
+     la voce dei telefoni in **Salute** è gialla col messaggio (quanto serve, quanto c'è). Anche
+     rclone o pCloud che non rispondono rimandano, ma dopo 5 volte di fila è un errore;
+   - rclone scarica l'originale da pCloud lì (`operations/copyfile` asincrono);
+   - ffmpeg lo ricomprime col comando provato a mano su due video da 23 GB, più i limiti per CPU
+     e memoria: `nice -n 19 ffmpeg -threads 2 -i in -map 0 -map_metadata 0 -c copy -c:v libx265
+     -crf 24 -preset fast -x265-params pools=2:frame-threads=1:rc-lookahead=5:bframes=2:ref=2:lookahead-slices=0
+     -tag:v hvc1 -movflags +use_metadata_tags -fs <limite> out.mp4`. Restano tutti i flussi e i
+     metadati del contenitore (anche `com.apple.quicktime.creationdate`), quindi la data di
+     ripresa; `-fs` ferma ffmpeg appena il risultato supera il limite;
+   - controlla il risultato: sotto il limite (la soglia, e sotto l'originale), altrimenti riprova
+     con CRF 28 e 32 (`FOTOTIMELINE_VIDEO_GRANDI_CRF`, `_CRF_MASSIMO`); **durata** uguale a quella
+     dell'originale entro un secondo, altrimenti è un errore;
+   - lo carica nella cartella automatica col nome dell'originale (`telefono/Xiaomi 25080RABDG - DCIM -
+     Camera - 20260301_195506_293.mp4`, nome libero, mai sovrascritto) e lo mette nel registro
+     delle copie segnato `ricompresso`. Se LifetimeCloud rifiuta anche lui, CRF più alto e limite
+     sotto quello rifiutato. I file su `/video-grandi` si tolgono sempre, anche dopo un errore.
+3. **L'importazione automatica** lo prende come ogni file del telefono: scheda, miniatura, data
+   dai metadati, "caricata da" il proprietario del telefono; poi la versione compatibile H.264
+   come per ogni HEVC.
+4. **Al giro dopo**, **solo se c'è una scheda con lo SHA-256 del ricompresso** (calcolato prima di
+   caricarlo), l'originale si **sposta** su pCloud, lato server (`operations/movefile`, cioè
+   `renamefile` di pCloud), in `FOTOTIMELINE_VIDEO_GRANDI_PCLOUD` (predefinita `Video originali
+   troppo grandi`, dalla radice del remote del telefono: `pcloud:Video originali troppo grandi/`).
+   Se lì c'è già un file con quel nome, `nome (2).mp4`. Nel riepilogo: "N video ricompressi" e
+   una riga per video con dimensione prima e dopo e dove è andato l'originale. La sincronizzazione
+   salta quella cartella anche per un telefono che guarda tutto pCloud.
+
+**L'originale non si cancella mai**: la pulizia dopo i giorni del telefono salta le copie
+`ricompresso`, e lo spostamento avviene solo con la scheda in archivio. Se il ricompresso sparisce
+dalla cartella automatica senza diventare una scheda, dopo un giorno è un errore e l'originale
+resta dov'è. Un video tolto da pCloud prima della ricompressione esce dalla coda da solo.
+
+**Errori veri** (durata diversa, ffmpeg che non riesce, ancora troppo grande col CRF 32, troppa
+memoria) restano errori del giro, a ogni giro, finché non si preme **Riprova**. Dove si vede:
+**Telefoni** (una sezione "Video troppo grandi" per telefono: fase e percentuale di quello in
+corso, prima e dopo, dove è l'originale, **Annulla** e **Riprova** per l'admin) e **Salute**
+(voce dei telefoni). Annulla ferma rclone o ffmpeg e toglie i file da `/video-grandi`; il video
+resta su pCloud com'era. Dopo un riavvio il video a metà ricomincia da capo.
+
+**CPU**: `nice -n 19` e `FOTOTIMELINE_VIDEO_GRANDI_THREAD` thread (2), e un ffmpeg lungo alla volta
+in tutta l'app: la conversione dei video compatibili aspetta che la ricompressione finisca e
+viceversa. Quanto dura: x265 `fast` su un 4K va a pochi fotogrammi al secondo con 2 thread (qui
+4 fps su una CPU recente), quindi un video da 20 GB (20–30 minuti di 4K) vuole **molte ore**,
+anche una notte intera. Gira in sottofondo; il giro del telefono intanto va avanti.
+
+**Memoria**: x265 tiene in memoria i fotogrammi, e ffmpeg conta nel tetto del container
+(`FOTOTIMELINE_MEMORIA_APP`, 3 GB, con 1,5 GB di heap). Misurato con i parametri qui sopra (picco
+del processo):
+
+| Video | Preset `fast` così com'è | Con i parametri dell'app |
+|---|---|---|
+| 4K a 8 bit | 1,45 GB | 0,93 GB |
+| 4K a 10 bit (HDR) | 2,4 GB | 1,5 GB |
+| 8K a 8 bit | — | 3,4 GB |
+
+Con il tetto di 3 GB c'è posto per un 4K a 8 bit (`FOTOTIMELINE_VIDEO_GRANDI_MEMORIA=1100MB`).
+Prima di cominciare l'app stima la memoria dalla risoluzione e dai bit: un video che ne vuole di
+più (4K a 10 bit, 8K) è un errore che lo dice, invece di essere ucciso dopo ore. Per un 4K a 10 bit:
+`FOTOTIMELINE_MEMORIA_APP=4g` e `FOTOTIMELINE_VIDEO_GRANDI_MEMORIA=2000MB` nel `.env`, rilascio,
+**Riprova**; con 7,8 GB di RAM su server2 restano circa 0,8 GB più lo swap, e solo mentre ffmpeg
+gira. Un 8K non sta su server2. In più ffmpeg parte con `oom_score_adj` 1000: se il container
+finisce comunque la memoria, il kernel uccide ffmpeg (errore "ucciso: memoria del container
+finita?") e non la JVM.
+
+| Variabile | Predefinito | Cosa fa |
+| --- | --- | --- |
+| `FOTOTIMELINE_VIDEO_MAX_MB` | `20000` | oltre (MB in base 1024) non si copia, si ricomprime; è anche il tetto del ricompresso |
+| `FOTOTIMELINE_VIDEO_GRANDI_PCLOUD` | `Video originali troppo grandi` | dove vanno gli originali, dalla radice del remote del telefono |
+| `FOTOTIMELINE_VIDEO_GRANDI_RISERVA` | `2GB` | spazio da lasciare libero in `/video-grandi` oltre a originale e ricompresso |
+| `FOTOTIMELINE_VIDEO_GRANDI_THREAD` | `2` | thread di ffmpeg |
+| `FOTOTIMELINE_VIDEO_GRANDI_MEMORIA` | `1100MB` | memoria che ffmpeg può prendere (stimata); oltre, errore |
+| `FOTOTIMELINE_VIDEO_GRANDI_CRF`, `_CRF_MASSIMO` | `24`, `32` | primo e ultimo CRF, a passi di 4 |
+| `FOTOTIMELINE_VIDEO_GRANDI_X265` | vedi sopra | parametri di x265 (memoria) |
+| `FOTOTIMELINE_VIDEO_GRANDI_ATTIVA` | `true` | `false`: i video troppo grandi restano errori, come prima |
+
+La cartella `$FOTOTIMELINE_DATI/video-grandi` la crea il rilascio (di `marco`, uid 1000: rclone ci
+scrive da root, l'app ci crea una sottocartella per video e la toglie). Lo spazio libero:
+`df -h ~/fototimeline`. Poi il ricompresso passa dalla cache del VFS di rclone quando
+l'importazione lo legge, come ogni video.
 
 ### Chi ha caricato cosa
 
@@ -1083,7 +1183,10 @@ L'app ha **1,5 GB di heap** (`-Xmx1536m`) in un container con un tetto di
 **3 GB** (`mem_limit`): oltre l'heap la JVM usa memoria sua (metaspace, thread,
 codice compilato, qualche centinaio di MB) e nel container contano anche i
 processi figli, cioè ffmpeg della conversione dei video e heif-convert, che
-con una foto da 48 MP decodifica centinaia di MB. Si cambiano nel `.env`:
+con una foto da 48 MP decodifica centinaia di MB. La ricompressione dei video
+troppo grandi (x265, fino a ~1 GB per un 4K) è il figlio più pesante: un ffmpeg
+lungo alla volta, e quanto può prendere lo dice `FOTOTIMELINE_VIDEO_GRANDI_MEMORIA`
+("Video troppo grandi per LifetimeCloud", sopra). Si cambiano nel `.env`:
 
 | Variabile | Predefinito | Cosa fa |
 | --- | --- | --- |

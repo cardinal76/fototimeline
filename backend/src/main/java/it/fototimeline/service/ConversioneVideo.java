@@ -31,6 +31,7 @@ import it.fototimeline.dominio.Foto;
 import it.fototimeline.dominio.StatoConversione;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.StrumentiMedia;
+import it.fototimeline.media.TurnoVideo;
 import it.fototimeline.media.VideoProperties;
 import jakarta.annotation.PreDestroy;
 
@@ -48,6 +49,10 @@ import jakarta.annotation.PreDestroy;
  * compatibile; "Converti video" ({@link #avvia()}) ci mette quelli già in
  * archivio, compresi quelli mai analizzati, che la coda prima guarda con
  * ffprobe e converte solo se serve.
+ *
+ * <p>ffmpeg aspetta il {@link TurnoVideo}: mentre si ricomprime un video
+ * troppo grande del telefono (ore, e centinaia di MB di memoria) la coda
+ * resta ferma e riparte dopo.
  */
 @Service
 public class ConversioneVideo {
@@ -75,6 +80,7 @@ public class ConversioneVideo {
     private final ArchivioFile archivio;
     private final StrumentiMedia media;
     private final VideoProperties properties;
+    private final TurnoVideo turno;
     private final Clock clock;
     private final ExecutorService esecutore = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "conversione-video");
@@ -96,11 +102,12 @@ public class ConversioneVideo {
     private final List<String> messaggi = new ArrayList<>();
 
     public ConversioneVideo(MongoTemplate mongo, ArchivioFile archivio, StrumentiMedia media,
-            VideoProperties properties, Optional<Clock> clock) {
+            VideoProperties properties, TurnoVideo turno, Optional<Clock> clock) {
         this.mongo = mongo;
         this.archivio = archivio;
         this.media = media;
         this.properties = properties;
+        this.turno = turno;
         this.clock = clock.orElse(Clock.systemDefaultZone());
     }
 
@@ -285,8 +292,15 @@ public class ConversioneVideo {
                 }
             }
             temporaneo = Files.createTempFile("fototimeline-video-", ".mp4");
-            media.converti(originale, temporaneo, properties.risoluzioneMassima(), properties.thread(),
-                    s -> secondiFatti = s, () -> annullaCorrente || chiuso);
+            if (!turno.prendi(() -> annullaCorrente || chiuso)) {
+                throw new IOException("Conversione annullata");
+            }
+            try {
+                media.converti(originale, temporaneo, properties.risoluzioneMassima(), properties.thread(),
+                        s -> secondiFatti = s, () -> annullaCorrente || chiuso);
+            } finally {
+                turno.lascia();
+            }
             archivio.salvaCompatibile(foto.getId(), temporaneo);
             if (!aggiorna(foto, new Update().set("conversione", StatoConversione.FATTA).unset("erroreConversione"))) {
                 // Eliminato mentre lo convertivamo.

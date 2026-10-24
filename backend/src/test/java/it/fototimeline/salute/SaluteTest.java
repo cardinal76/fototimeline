@@ -59,6 +59,7 @@ import it.fototimeline.telefono.SincronizzazioneTelefono;
 import it.fototimeline.telefono.SorgenteTelefono;
 import it.fototimeline.telefono.SorgenteTelefono.Esito;
 import it.fototimeline.telefono.SorgenteTelefono.Giro;
+import it.fototimeline.telefono.VideoGrande;
 
 /** Su MongoDB embedded, con rclone e Telegram finti. */
 @SpringBootTest(properties = "de.flapdoodle.mongodb.embedded.version=7.0.14")
@@ -104,6 +105,7 @@ class SaluteTest {
         mongo.remove(Query.query(Criteria.where("_id").in("sincronizzazione-telefono", "backup-metadati",
                 StatiAvvisati.ID)), "impostazioni");
         mongo.remove(new Query(), SorgenteTelefono.class);
+        mongo.remove(new Query(), VideoGrande.class);
         mongo.remove(new Query(), ZipTakeout.class);
         if (Files.isDirectory(backup.cartella())) {
             try (Stream<Path> s = Files.list(backup.cartella())) {
@@ -132,7 +134,7 @@ class SaluteTest {
     }
 
     private Giro giroOk(Duration fa) {
-        return new Giro(adesso.minus(fa), adesso.minus(fa), Esito.OK, "Fatto", 3, 3, 0, 0, 0, 0, List.of());
+        return new Giro(adesso.minus(fa), adesso.minus(fa), Esito.OK, "Fatto", 3, 3, 0, 0, 0, 0, List.of(), 0, 0, List.of());
     }
 
     @Test
@@ -220,9 +222,50 @@ class SaluteTest {
     }
 
     @Test
+    void iVideoRicompressiSiVedonoConPrimaDopoEDoveEOriginale() {
+        Giro giro = new Giro(adesso.minus(Duration.ofHours(1)), adesso, Esito.OK, "Fatto", 68, 0, 31, 35, 0, 0,
+                List.of(), 1, 1, List.of());
+        telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giro);
+        long gb = 1024L * 1024 * 1024;
+        mongo.insert(new VideoGrande("v1", "pcloud:Automatic Upload", "marco", "marco",
+                "Xiaomi 25080RABDG/DCIM/Camera/20260301_195506_293.mp4", 23 * gb, null, "telefono", "oltre i 20000 MB",
+                VideoGrande.Stato.FATTO, adesso, adesso, null, 0, 24, 6 * gb, "abc", "telefono/x.mp4", adesso,
+                "pcloud:Video originali troppo grandi/20260301_195506_293.mp4", adesso, null));
+        mongo.insert(new VideoGrande("v2", "pcloud:Automatic Upload", "marco", "marco",
+                "Xiaomi 25080RABDG/DCIM/Camera/20260301_182645_998.mp4", 19 * gb, null, "telefono", "413",
+                VideoGrande.Stato.IN_CODA, adesso, adesso, null, 0, null, null, null, null, null, null, null, null));
+
+        VoceSalute v = voce(salute.controlla(), "telefono");
+
+        assertThat(v.stato()).isEqualTo(StatoSalute.OK);
+        assertThat(v.messaggio()).contains("1 video ricompressi");
+        assertThat(v.dettagli()).contains("68 su pCloud · 0 copiati · 35 tolti da pCloud · 1 video ricompressi · "
+                + "1 in ricompressione · 0 errori");
+        assertThat(v.dettagli()).anySatisfy(d -> assertThat(d).contains("20260301_195506_293.mp4 (23,0 GB → 6,0 GB)",
+                "CRF 24", "originale in pcloud:Video originali troppo grandi/20260301_195506_293.mp4"));
+        assertThat(v.dettagli()).anySatisfy(d -> assertThat(d).contains("20260301_182645_998.mp4 (19,0 GB)",
+                "in coda per la ricompressione"));
+    }
+
+    @Test
+    void unVideoGrandeRimandatoPerLoSpazioEGiallo() {
+        telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
+        mongo.insert(new VideoGrande("v1", "pcloud:Automatic Upload", "marco", "marco", "Camera/VID_1.mp4",
+                23L * 1024 * 1024 * 1024, null, "telefono", "oltre i 20000 MB", VideoGrande.Stato.RIMANDATO, adesso,
+                adesso, adesso.plus(Duration.ofHours(1)), 0, null, null, null, null, null, null, null,
+                "spazio insufficiente in /video-grandi: servono 45,0 GB, liberi 12,0 GB"));
+
+        VoceSalute v = voce(salute.controlla(), "telefono");
+
+        assertThat(v.stato()).isEqualTo(StatoSalute.ATTENZIONE);
+        assertThat(v.messaggio()).contains("VID_1.mp4", "spazio insufficiente", "liberi 12,0 GB");
+    }
+
+    @Test
     void telefonoConIlTokenScadutoERossoELoDice() {
         Giro giro = new Giro(adesso.minus(Duration.ofHours(1)), adesso, Esito.ERRORE,
-                "operations/list: couldn't list files: Invalid 'access_token' (2094)", 0, 0, 0, 0, 0, 0, List.of());
+                "operations/list: couldn't list files: Invalid 'access_token' (2094)", 0, 0, 0, 0, 0, 0, List.of(), 0, 0,
+                List.of());
         telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
         telefono("anna", "Telefono di Anna", true, "pcloud-anna:Automatic Upload", 6, giro);
         VoceSalute v = voce(salute.controlla(), "telefono");

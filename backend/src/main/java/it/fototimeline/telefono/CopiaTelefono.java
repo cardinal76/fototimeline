@@ -23,7 +23,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * @param percorso     relativo alla sorgente, con {@code /}
  * @param modificatoIl data di modifica nella sorgente, se rclone la dà
  * @param destinazione relativo al remote del cloud ({@code telefono/Pixel - IMG_0001.jpg})
- * @param cancellatoIl quando è stato tolto dalla sorgente (o trovato già tolto)
+ * @param cancellatoIl quando è stato tolto dalla sorgente (o trovato già tolto); per un
+ *                     video ricompresso, quando l'originale è stato spostato nella cartella dedicata
+ * @param ricompresso  true se in destinazione c'è la versione ricompressa di un video troppo
+ *                     grande ({@link VideoGrandi}): l'originale non si cancella mai, si sposta
+ *                     (null per le copie di prima)
  */
 @Document("copie_telefono")
 @CompoundIndexes({
@@ -31,5 +35,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
         @CompoundIndex(name = "destinazione", def = "{'destinazione': 1, 'copiatoIl': -1}")
 })
 public record CopiaTelefono(@Id String id, String sorgente, String idSorgente, String proprietario, String percorso,
-        long dimensione, Instant modificatoIl, String destinazione, Instant copiatoIl, Instant cancellatoIl) {
+        long dimensione, Instant modificatoIl, String destinazione, Instant copiatoIl, Instant cancellatoIl,
+        Boolean ricompresso) {
 }

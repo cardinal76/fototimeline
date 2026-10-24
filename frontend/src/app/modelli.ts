@@ -352,6 +352,35 @@ export interface GiroTelefono {
   aMetaTolte?: number;
   errori: number;
   messaggiErrori: string[];
+  /** Video troppo grandi per il cloud ricompressi e importati, con l'originale spostato, in questo giro. */
+  ricompressi?: number;
+  /** Video troppo grandi ancora da finire (in coda, in corso, rimandati, in attesa dell'importazione). */
+  inRicompressione?: number;
+  /** Una riga per video troppo grande: prima e dopo, dove è l'originale. */
+  videoGrandi?: string[];
+}
+
+/** Un video del telefono troppo grande per il cloud, ricompresso in H.265 sul server. */
+export interface VideoGrande {
+  id: string;
+  nome: string;
+  percorso: string;
+  stato: 'IN_CODA' | 'IN_CORSO' | 'RIMANDATO' | 'CARICATO' | 'FATTO' | 'ERRORE' | 'ANNULLATO';
+  /** Solo per quello in corso: "ricomprimo in H.265 (CRF 24)". */
+  fase?: string;
+  percentuale?: number;
+  dimensione: number;
+  dimensioneRicompresso?: number;
+  crf?: number;
+  /** Il ricompresso nella cartella automatica. */
+  destinazione?: string;
+  /** Dove è finito l'originale su pCloud. */
+  originaleIn?: string;
+  /** Perché si ricomprime: la soglia o l'errore del cloud. */
+  motivo?: string;
+  messaggio?: string;
+  creatoIl: string;
+  aggiornatoIl: string;
 }
 
 /** Un telefono della famiglia (pCloud → cartella automatica). */
@@ -377,6 +406,8 @@ export interface StatoTelefono {
   prossimoGiroIl?: string;
   /** I contatori del giro che sta girando (esito ancora vuoto). */
   giroInCorso?: GiroTelefono;
+  /** I video troppo grandi: in corso, andati male e quelli fatti negli ultimi 30 giorni. */
+  videoGrandi?: VideoGrande[];
 }
 
 /** "Indicizza contenuto": manda a visione le foto che non sono ancora nell'indice. */
