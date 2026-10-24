@@ -9,7 +9,7 @@ dall'app.
 ```
 internet ─▶ caddy (HTTPS, Let's Encrypt) ─▶ app (Spring Boot + Angular) ─┬─▶ mongo
                                                                           ├─▶ rclone rcd ─WebDAV─▶ LifetimeCloud
-                                                                          └─▶ visione (CLIP, ricerca per contenuto)
+                                                                          └─▶ visione (CLIP e volti: contenuto, persone)
 login: Keycloak di presenze, realm "fototimeline"
 ```
 
@@ -21,6 +21,7 @@ login: Keycloak di presenze, realm "fototimeline"
 | Video compatibili (H.264) | LifetimeCloud, `FotoTimeline/.compatibili/<id>.mp4` (si rifanno con "Converti video") |
 | Metadati (date, tag, album) | MongoDB, volume `fototimeline_mongo` su server2 |
 | Indice della ricerca per contenuto | volume `fototimeline_visione-dati` su server2 (si rifà dalle miniature) |
+| Volti e persone (nomi, gruppi) | MongoDB, collezioni `volti` e `persone`; l'indice dei vicini in `fototimeline_visione-dati`, cartella `volti` (si rifà da Mongo) |
 | Configurazione e segreti | `~/fototimeline/.env` e `~/fototimeline/rclone/rclone.conf` su server2 |
 
 Il rilascio lo fa `.github/workflows/rilascio.yml` sul runner `fototimeline-build`
@@ -609,6 +610,143 @@ docker run -d -p 127.0.0.1:8000:8000 -e VISIONE_SEGRETO=prova -v visione-dati:/d
 VISIONE_URL=http://localhost:8000 VISIONE_SEGRETO=prova ./mvnw spring-boot:run   # in backend/
 ```
 
+### Riconoscimento dei volti (Persone)
+
+Strumenti → **Persone**: un volto per persona, con quante foto. Le foto si
+guardano sul server, nel container `visione`, e i volti simili si
+raggruppano da soli; tutto resta su server2 (niente servizi esterni, niente
+foto o vettori che escono).
+
+**I passi, la prima volta** (dopo il rilascio):
+
+1. da admin, Strumenti → **Riconosci volti (N)**: guarda tutte le foto in
+   sottofondo (barra "Volti %" in alto, **Annulla**). Riparte da solo dopo un
+   riavvio, da dove era arrivato; rilanciato non rifà le foto già guardate.
+   Non serve il cloud montato (usa le miniature, sul disco di server2);
+2. **Persone → Senza nome**: i gruppi, dal più grande. Clic sul **nome**
+   ("Senza nome") di un gruppo: si scrive chi è e diventa una persona. Se il
+   nome c'è già, l'app propone di unirli;
+3. **Unisci…**: si scelgono due o più volti della stessa persona (da bambina e
+   da grande, con e senza occhiali) e si uniscono; nel dettaglio di una persona
+   c'è anche "Somigliano: la stessa persona?" con i gruppi più vicini;
+4. nel dettaglio, i volti **meno somiglianti per primi**: ✕ toglie un volto
+   sbagliato (e non ci torna da solo), ★ lo usa come copertina; **Non
+   mostrare** nasconde un gruppo (sconosciuti, folla) in "Nascoste";
+5. **clic sul volto**: le foto di quella persona nella timeline; il filtro
+   **Persona** (Filtri) si combina con tag, album, luogo, date e con la
+   ricerca per contenuto. Nel visore, nel pannello dei dettagli, chi c'è nella
+   foto; su un volto senza nome **Chi è?**.
+
+Le foto nuove si guardano da sole appena entrano. Un volto nuovo molto
+simile a una persona con nome le va da solo (sopra
+`FOTOTIMELINE_VOLTI_SOGLIA_SICURA`); un po' meno simile resta una
+**proposta** ("Forse è Anna?", nel dettaglio di Anna e nel visore: ✓ o ✕).
+
+**Il modello**: due reti di OpenCV, girano con `cv2.dnn` senza torch.
+
+| | Rilevamento | Riconoscimento |
+|---|---|---|
+| Modello | YuNet (`face_detection_yunet_2023mar.onnx`) | SFace (`face_recognition_sface_2021dec.onnx`), vettore di 128 numeri |
+| Licenza | MIT | Apache 2.0 |
+| Peso | 0,2 MB | 37 MB |
+| Tempo | ~10 ms su una miniatura | ~25 ms a volto |
+
+Scelto al posto di InsightFace (buffalo_s/buffalo_l, più preciso) perché i
+pesi di InsightFace sono "solo per ricerca non commerciale", mentre YuNet e
+SFace hanno licenze libere senza condizioni; e perché stanno con CLIP nello
+stesso container senza alzare la memoria (InsightFace buffalo_l vuole
+~0,5 GB e onnxruntime). Il prezzo: SFace è meno bravo di ArcFace con i volti
+piccoli, di profilo o al buio, e con i bambini che crescono: lì nascono
+gruppi separati della stessa persona, da unire a mano (i "Somigliano" aiutano).
+I pesi si scaricano quando si costruisce l'immagine (da Hugging Face,
+`opencv/face_detection_yunet` e `opencv/face_recognition_sface`, a una
+revisione fissa, SHA-256 controllato), in uno strato a parte da quello di CLIP:
+a runtime niente download.
+
+**Cosa guarda**: solo foto e HEIC, dalla **miniatura** (480 px di lato, sul
+disco di server2), mai l'originale nel cloud e niente video. I volti con il
+lato corto sotto `FOTOTIMELINE_VOLTI_LATO_MINIMO` pixel della miniatura (32)
+si scartano: troppo pochi pixel per riconoscerli (folla, sfondo, foto di
+gruppo larghe). Se una miniatura manca la si rifà dall'originale, e lì serve
+il cloud montato.
+
+**Come raggruppa** (pacchetto `volti`, `Persone`): niente confronto di tutti
+con tutti (con 300.000 volti sarebbero 45 miliardi di coppie) né un DBSCAN
+periodico che rimescolerebbe i gruppi già nominati. Ogni volto nuovo chiede a
+visione i 14 volti più simili (indice dei vettori come quello di CLIP,
+coseno, in un colpo solo per un blocco di 8 foto) e:
+
+1. se tra loro c'è una persona con nome sopra la soglia **sicura** (0,6), è sua;
+2. se no, se c'è un gruppo senza nome (o nascosto) sopra la soglia del **gruppo** (0,5), entra lì;
+3. una persona con nome fra la soglia delle **proposte** (0,42) e quella sicura resta una proposta;
+4. se no, con i vicini ancora senza gruppo sopra 0,5 fa un gruppo nuovo.
+
+Fra più candidati vince chi ha più somiglianza in tutto fra i vicini, non il
+singolo più simile; i volti della stessa foto non contano. Le soglie sono
+coseni fra i vettori di SFace (OpenCV indica 0,363 come confine fra "stessa
+persona" e no): più alte = gruppi più puliti ma più spezzati, più basse =
+meno gruppi ma qualche estraneo dentro. Si cambiano nel `.env`
+(`FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO`, `_SICURA`, `_PROPOSTA`) e valgono per i
+volti nuovi; quelli già raggruppati restano dove sono.
+
+**Dove stanno i dati**: in MongoDB `volti` (foto, riquadro in frazioni della
+miniatura, punteggio, vettore in binario, persona, proposta, "non è lei") e
+`persone` (nome, nascosta, volto di copertina); ogni foto tiene in
+`Foto.persone` gli id (mai i nomi) delle sue persone, per il filtro.
+L'indice dei vicini è in visione (volume `visione-dati`, cartella `volti`): se
+va perso, **Persone → Ricostruisci indice** lo rifà da Mongo, senza riguardare
+le foto. Il backup dei metadati copia `foto` (con gli id delle persone), non
+`volti` e `persone`: per tenere anche i nomi,
+`docker exec fototimeline-mongo-1 mongodump ... --db fototimeline --collection persone --archive > persone.archive`.
+
+**Cestino**: le foto nel cestino non contano (né nel numero di foto di una
+persona, né nella copertina, né nel filtro) e i loro volti lasciano l'indice
+dei vicini; ripristinate tornano com'erano. Eliminate per sempre, i loro volti
+se ne vanno, e un gruppo senza nome rimasto vuoto pure (una persona con nome
+resta, con 0 foto).
+
+**Chi può fare cosa**: vedere le persone, dare i nomi, unire, nascondere,
+togliere un volto e confermare le proposte lo può **chi usa l'app** (come i
+tag e gli album: è la famiglia che riconosce la famiglia, e vede già tutte le
+foto); **Riconosci volti** e **Ricostruisci indice** sono da admin
+(`fototimeline-admin`). Nessuna API dei volti è pubblica.
+
+**Link condivisi**: chi ha un link `/c/...` non vede **niente** delle persone:
+né nomi, né gruppi, né riquadri, né ritagli. La galleria pubblica usa i suoi
+record (`FotoCondivisa`), senza `persone`; non c'è nessun percorso dei volti
+sotto `/api/condivise`, e le API `/api/persone`, `/api/volti/**`,
+`/api/foto/{id}/volti` vogliono il login (lo controlla `CondivisioniTest`).
+Le immagini dei link sono la vista ridotta di sempre: nessun riquadro disegnato.
+
+**Spegnere tutto**: nel `.env`
+
+```bash
+FOTOTIMELINE_VOLTI=false
+```
+
+e il rilascio. Spenti: il lavoro, la coda delle foto nuove, la pagina
+*Persone*, il filtro, i nomi nel visore (le API rispondono 409), e visione non
+carica nemmeno il modello (`VISIONE_VOLTI`, ~120 MB in meno). I dati restano
+in Mongo: riaccendendo si riparte da lì. Per cancellarli davvero, con l'app
+spenta o la funzione spenta:
+
+```bash
+docker exec fototimeline-mongo-1 mongosh -u ... -p ... --authenticationDatabase admin fototimeline --eval \
+  'db.volti.drop(); db.persone.drop(); db.foto.updateMany({}, {$unset: {persone: 1, voltiCercati: 1}}); db.impostazioni.deleteOne({_id: "riconosci-volti"})'
+docker exec fototimeline-visione-1 rm -rf /dati/volti
+```
+
+**Quanto costa, con 110.000 foto:**
+
+| | |
+|---|---|
+| RAM di visione | +~120 MB per OpenCV e i due modelli; l'indice dei vicini ~40 MB ogni 100.000 volti (float16). Con CLIP: ~0,45 GB a riposo, picchi ~1,3 GB (un calcolo alla volta, CLIP o volti). Sta nei 1,5 GB di prima; se `docker inspect fototimeline-visione-1 --format '{{.State.OOMKilled}}'` dice `true`, `VISIONE_MEMORIA=2g` nel `.env` (resta 1 GB per sistema e runner) |
+| RAM dell'app | quasi niente: i vettori non stanno nella JVM, solo un blocco di 8 foto alla volta |
+| MongoDB | ~1 KB a volto (vettore 512 byte): 200.000 volti ≈ 200 MB su disco |
+| Disco dell'immagine | +~90 MB (OpenCV headless 55 MB, pesi 37 MB) |
+| Tempo di "Riconosci volti" | ~40 ms a foto in visione con 2 thread (misurato su 4 vCPU, miniature da 480 px), più ricerca dei vicini e Mongo: ~0,1 s a foto, 110.000 foto ≈ 3–4 ore; su server2 con le build in mezzo 5–8. Si lascia andare di notte: riprende da solo |
+| Una foto nuova | ~0,1 s, in sottofondo, dopo la miniatura |
+
 ### Luoghi dal GPS (GeoNames)
 
 Il nome del posto (Sperlonga, Lazio · Italia) si ricava dalle coordinate sul
@@ -953,7 +1091,7 @@ con una foto da 48 MP decodifica centinaia di MB. Si cambiano nel `.env`:
 | `FOTOTIMELINE_MEMORIA_APP` | `3g` | tetto del container; oltre, Docker lo uccide |
 
 Il conto su server2 (7,8 GB di RAM, 2 GB di swap): app 3 GB al massimo,
-visione 1,5 GB (`mem_limit`), MongoDB circa 0,5 GB (cache di WiredTiger a
+visione 1,5 GB (`mem_limit`, `VISIONE_MEMORIA`; CLIP e volti insieme, vedi "Riconoscimento dei volti"), MongoDB circa 0,5 GB (cache di WiredTiger a
 0,25 GB), rclone fra 0,2 e 1 GB (i buffer dei file aperti), Caddy pochi MB:
 restano almeno 1,5 GB per il sistema e per i runner della CI. Con la RAM che
 cambia, `free -h` e `docker stats --no-stream` dicono quanto c'è e quanto si usa.
@@ -1018,10 +1156,10 @@ FOTOTIMELINE_CESTINO_GIORNI=30
   restano anche loro fino all'eliminazione definitiva.
 - **Dove non si vede**: timeline e colonna dei mesi, ricerca (anche per
   contenuto), mappa, "Accadde oggi" (anche su Telegram), tag, album, luoghi,
-  "Caricate da", quasi uguali, link condivisi (le foto nel cestino rispondono
+  "Caricate da", quasi uguali, persone (conteggi, copertine, filtro), link condivisi (le foto nel cestino rispondono
   404; ripristinate tornano nel link), numeri della pagina *Salute* (che dice
   quante sono nel cestino). "Calcola luoghi", "Calcola impronte", "Indicizza
-  contenuto" e "Converti video" le saltano (un video in coda riparte quando
+  contenuto", "Riconosci volti" e "Converti video" le saltano (un video in coda riparte quando
   lo si ripristina).
 - **Reimportarla** (dal browser, dal telefono, dalla cartella automatica, da
   Google): lo stesso contenuto (SHA-256) non rientra come nuovo e non si

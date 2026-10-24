@@ -82,6 +82,8 @@
       <app-luogo-foto [foto]="foto()" (cambiata)="cambia.emit($event)" (filtrata)="chiudi.emit()" />
     </header>
 
+    <app-persone-foto [foto]="foto()" (scelta)="chiudi.emit()" />
+
     <form (ngSubmit)="salva()" (input)="modificata.set(true)" (change)="modificata.set(true)">
       <label>
         Titolo

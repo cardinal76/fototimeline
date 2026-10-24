@@ -325,7 +325,7 @@ public class IndiceContenuto {
 
     /**
      * Le foto più simili al testo, dalla più simile, con gli altri filtri
-     * della timeline (tag, album, preferite, date; {@code q} non conta). Solo
+     * della timeline (tag, album, preferite, date, persona; {@code q} non conta). Solo
      * quelle sopra la soglia e vicine alla più simile: per "cane" i cani, non
      * tutte le foto in ordine di somiglianza.
      */
@@ -342,7 +342,8 @@ public class IndiceContenuto {
         }
         Map<String, Double> punteggi = new HashMap<>();
         simili.forEach(x -> punteggi.putIfAbsent(x.id(), x.punteggio()));
-        FiltroFoto altri = new FiltroFoto(null, filtro.tag(), filtro.album(), filtro.preferite(), filtro.dal(), filtro.al());
+        FiltroFoto altri = new FiltroFoto(null, filtro.tag(), filtro.album(), filtro.preferite(), filtro.dal(), filtro.al())
+                .conPersona(filtro.persona());
         Query query = new Query(new Criteria().andOperator(
                 Criteria.where("_id").in(punteggi.keySet()), FotoService.criteri(altri)));
         List<Foto> trovate = new ArrayList<>(mongo.find(query, Foto.class));

@@ -20,6 +20,7 @@ import { Galleria } from './galleria';
 import { durata } from './formati';
 import { LuogoFoto } from './luogo-foto';
 import { Foto } from './modelli';
+import { PersoneFoto } from './persone-foto';
 
 interface Bozza {
   titolo: string;
@@ -50,7 +51,7 @@ const SWIPE_PX = 50;
 @Component({
   selector: 'app-visore',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, EventoFoto, FormsModule, LuogoFoto],
+  imports: [DatePipe, DecimalPipe, EventoFoto, FormsModule, LuogoFoto, PersoneFoto],
   host: {
     role: 'dialog',
     'aria-modal': 'true',

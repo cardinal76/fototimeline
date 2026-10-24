@@ -151,3 +151,18 @@ def test_un_altro_modello_riparte_vuoto(tmp_path):
     nuovo.carica()
     assert len(nuovo) == 0
     assert (tmp_path / (ISTANTANEA + ".vecchio")).exists()
+
+
+def test_cerca_molti_come_cerca_una_per_volta(indice):
+    indice.metti("a", vettore(1, 0))
+    indice.metti("b", vettore(1, 1))
+    indice.metti("c", vettore(0, 1))
+    domande = np.stack([vettore(1, 0), vettore(0, 1), vettore(0, 0, 1)])
+
+    risultati = indice.cerca_molti(domande, k=2, soglia=0.5)
+
+    assert [[i for i, _ in r] for r in risultati] == [["a", "b"], ["c", "b"], []]
+    assert risultati[0] == indice.cerca(vettore(1, 0), k=2, soglia=0.5)
+    assert indice.cerca_molti(np.zeros((0, 4)), k=3) == []
+    with pytest.raises(ValueError):
+        indice.cerca_molti(np.ones((2, 3)), k=3)

@@ -3,7 +3,7 @@
 #
 #   internet ─▶ caddy (HTTPS) ─▶ app ─┬─▶ mongo
 #                                     ├─▶ rclone (API rc) ─▶ LifetimeCloud via WebDAV
-#                                     └─▶ visione (CLIP: ricerca per contenuto, indice dei vettori)
+#                                     └─▶ visione (CLIP e volti: ricerca per contenuto, persone, indici dei vettori)
 #
 # Le foto stanno nel cloud: il container rclone lo monta in $FOTOTIMELINE_DATI/cloud
 # quando un amministratore preme "Monta" nell'app, e lo smonta con "Smonta".
@@ -119,6 +119,12 @@ services:
       FOTOTIMELINE_GOOGLE_CHIAVE: ${FOTOTIMELINE_GOOGLE_CHIAVE:-}
       VISIONE_URL: http://visione:8000
       VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
+      # Riconoscimento dei volti (pagina "Persone"); false = spento del tutto. Soglie in DEPLOY.md.
+      FOTOTIMELINE_VOLTI: ${FOTOTIMELINE_VOLTI:-true}
+      FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO: ${FOTOTIMELINE_VOLTI_SOGLIA_GRUPPO:-0.5}
+      FOTOTIMELINE_VOLTI_SOGLIA_SICURA: ${FOTOTIMELINE_VOLTI_SOGLIA_SICURA:-0.6}
+      FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA: ${FOTOTIMELINE_VOLTI_SOGLIA_PROPOSTA:-0.42}
+      FOTOTIMELINE_VOLTI_LATO_MINIMO: ${FOTOTIMELINE_VOLTI_LATO_MINIMO:-32}
     # Il tetto del container: JVM (heap compreso) più ffmpeg e heif-convert. Oltre, Docker lo uccide (OOM killer).
     mem_limit: ${FOTOTIMELINE_MEMORIA_APP:-3g}
     volumes:
@@ -139,20 +145,23 @@ services:
       retries: 3
       start_period: 60s
 
-  # Ricerca per contenuto: CLIP multilingue su CPU (visione/), solo sulla rete interna.
-  # I pesi del modello sono nell'immagine; l'indice dei vettori nel volume visione-dati.
+  # Ricerca per contenuto (CLIP multilingue) e volti (YuNet + SFace) su CPU (visione/), solo sulla rete interna.
+  # I pesi dei modelli sono nell'immagine; gli indici dei vettori nel volume visione-dati (i volti in /dati/volti).
   visione:
     build:
       context: ../visione
     restart: unless-stopped
     environment:
       VISIONE_SEGRETO: ${VISIONE_SEGRETO:?}
-      # Thread di torch: pochi, server2 fa anche le build della CI.
+      # Thread di torch e di OpenCV: pochi, server2 fa anche le build della CI.
       VISIONE_THREAD: ${VISIONE_THREAD:-2}
+      # Con FOTOTIMELINE_VOLTI=false il modello dei volti non si carica nemmeno (~120 MB in meno).
+      VISIONE_VOLTI: ${FOTOTIMELINE_VOLTI:-true}
     volumes:
       - visione-dati:/dati
-    # Modello (~0,5 GB) + indice (~150 MB con 150.000 foto) + i picchi del calcolo.
-    mem_limit: 1536m
+    # CLIP (~0,5 GB) + il suo indice (~150 MB con 150.000 foto) + i volti (OpenCV ~120 MB, indice ~40 MB
+    # ogni 100.000 volti) + i picchi del calcolo, uno alla volta: ~1,3 GB. VISIONE_MEMORIA per alzarlo.
+    mem_limit: ${VISIONE_MEMORIA:-1536m}
     cpus: 2.0
     # Peso CPU basso: con le build in corso il calcolo dei vettori aspetta (e nel container gira con nice).
     cpu_shares: 256

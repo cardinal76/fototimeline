@@ -213,13 +213,39 @@ class IndiceVettori:
                 fine = min(n, inizio + blocco)
                 punteggi[inizio:fine] = self._vettori[inizio:fine].astype(np.float32) @ q
             ids = list(self._ids)
-        k = min(k, n)
-        migliori = np.argpartition(-punteggi, k - 1)[:k]
-        migliori = migliori[np.argsort(-punteggi[migliori], kind="stable")]
-        risultati = [(ids[i], float(punteggi[i])) for i in migliori]
-        if soglia is not None:
-            risultati = [r for r in risultati if r[1] >= soglia]
-        return risultati
+        return _migliori(ids, punteggi, k, soglia)
+
+    def cerca_molti(self, domande: np.ndarray, k: int, soglia: float | None = None) -> list[list[tuple[str, float]]]:
+        """Come :meth:`cerca` per più vettori insieme (una riga per domanda): l'indice si converte da
+        float16 una volta sola, ed è la parte che costa (con 150.000 volti circa 60 ms)."""
+        q = np.asarray(domande, dtype=np.float32)
+        if q.ndim != 2 or q.shape[1] != self.dimensione:
+            raise ValueError(f"Servono righe di {self.dimensione} numeri")
+        if q.shape[0] == 0:
+            return []
+        q = np.stack([normalizza(r) for r in q])
+        with self._lock:
+            n = len(self._ids)
+            if n == 0 or k <= 0:
+                return [[] for _ in range(q.shape[0])]
+            punteggi = np.empty((n, q.shape[0]), dtype=np.float32)
+            blocco = 8192
+            for inizio in range(0, n, blocco):
+                fine = min(n, inizio + blocco)
+                punteggi[inizio:fine] = self._vettori[inizio:fine].astype(np.float32) @ q.T
+            ids = list(self._ids)
+        return [_migliori(ids, punteggi[:, j], k, soglia) for j in range(q.shape[0])]
+
+
+def _migliori(ids: list[str], punteggi: np.ndarray, k: int, soglia: float | None) -> list[tuple[str, float]]:
+    """I k punteggi più alti, dal più alto, con almeno la soglia."""
+    k = min(k, len(ids))
+    migliori = np.argpartition(-punteggi, k - 1)[:k]
+    migliori = migliori[np.argsort(-punteggi[migliori], kind="stable")]
+    risultati = [(ids[i], float(punteggi[i])) for i in migliori]
+    if soglia is not None:
+        risultati = [r for r in risultati if r[1] >= soglia]
+    return risultati
 
 
 def normalizza(v: np.ndarray) -> np.ndarray:

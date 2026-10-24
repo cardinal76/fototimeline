@@ -39,6 +39,7 @@ import { daQuanto, durata } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { Cestino } from './cestino';
+import { Persone } from './persone';
 import { QuasiUguali } from './quasi-uguali';
 import { inAttesa } from './condivisi-in-attesa';
 import { RiceviCondivisi } from './ricevi-condivisi';
@@ -60,6 +61,7 @@ const ALTEZZA_RIGA = 210;
   imports: [
     Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore,
     Eventi, FiltroEvento, SceltaEvento,
+    Persone,
   ],
   host: {
     '(document:dragover)': 'trascina($event)',
@@ -103,6 +105,7 @@ export class App {
   /** La pagina Eventi e, dalla barra della selezione, "Evento…". */
   protected readonly dialogoEventi = signal(false);
   protected readonly dialogoSceltaEvento = signal(false);
+  protected readonly dialogoPersone = signal(false);
   /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
   protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
   protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
@@ -131,7 +134,7 @@ export class App {
   /** Quanti filtri sono attivi, per il numerino sul pulsante Filtri (la ricerca ha il suo campo). */
   protected readonly quantiFiltri = computed(() => {
     const f = this.galleria.filtro();
-    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.provincia || f.luogo, f.preferite, f.evento].filter(Boolean).length;
+    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.provincia || f.luogo, f.persona, f.preferite, f.evento].filter(Boolean).length;
   });
   /** Un problema da vedere a colpo d'occhio sul pulsante Strumenti: cloud smontato o salute non a posto. */
   protected readonly avvisoSistema = computed<{ stato: StatoSalute; testo: string } | null>(() => {
@@ -310,10 +313,16 @@ export class App {
     this.galleria.imposta({ caricataDa: username || undefined });
   }
 
+  protected scegliPersona(id: string): void {
+    const scelta = this.galleria.personeNominate().find((p) => p.id === id) ?? this.galleria.personaScelta();
+    this.galleria.filtraPersona(id && scelta?.id === id ? scelta : null);
+  }
+
   protected azzera(): void {
     this.ricerca = '';
     // L'interruttore "per contenuto" è un modo di cercare, non un filtro: resta com'è.
     this.galleria.filtro.set({ contenuto: this.galleria.filtro().contenuto });
+    this.galleria.personaScelta.set(null);
     this.galleria.ricarica();
   }
 
@@ -329,7 +338,7 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.provincia || f.luogo || f.evento);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.provincia || f.luogo || f.evento || f.persona);
   }
 
   // ------------------------------------------------------------ selezione
@@ -372,6 +381,8 @@ export class App {
       this.dialogoSceltaEvento.set(false);
     } else if (this.dialogoEventi()) {
       this.dialogoEventi.set(false);
+    } else if (this.dialogoPersone()) {
+      this.dialogoPersone.set(false);
     } else if (this.dialogoSalute()) {
       this.chiudiSalute();
     } else if (this.selezione()) {
@@ -608,6 +619,34 @@ export class App {
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Indicizzazione del contenuto non partita');
     }
+  }
+
+  // ------------------------------------------------------------ volti
+
+  protected async riconosciVolti(): Promise<void> {
+    const v = this.galleria.volti();
+    if (!v?.mancanti) {
+      this.dialogoPersone.set(true);
+      return;
+    }
+    if (
+      !confirm(
+        `Cerca i volti in ${v.mancanti} foto (dalle miniature, niente video). Con tante foto ci vogliono ore; ` +
+          'va avanti in sottofondo e, se il server riparte, riprende da dove era arrivato.',
+      )
+    ) {
+      return;
+    }
+    try {
+      await this.galleria.avviaVolti();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? '"Riconosci volti" non partito');
+    }
+  }
+
+  protected percentualeVolti(): number {
+    const l = this.galleria.volti()?.lavoro;
+    return l && l.daFare ? Math.round(((l.fatte + l.errori) / l.daFare) * 100) : 0;
   }
 
   protected percentualeContenuto(): number {
