@@ -310,10 +310,20 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Indicizza contenuto** (admin): la prima volta, dopo il trasloco, manda tutte le foto alla
   ricerca per contenuto. Con 150.000 foto ci vogliono ore (anche una notte): va avanti da solo,
   anche col cloud smontato, e se il server riparte riprende. Le foto nuove entrano da sole.
-- **Calcola luoghi**: dà il nome del posto (Sperlonga, Lazio · Italia) alle foto col GPS che non
-  ce l'hanno; quelle nuove lo prendono da sole. Non serve il cloud montato, 150 mila foto in meno
-  di un minuto. Dopo il primo rilascio con i luoghi va lanciato una volta; poi il filtro
-  **📍 Luogo** nella barra sceglie nazione, regione o paese (o lo cerca per nome).
+- **Calcola luoghi**: dà il luogo (Rovereto · Provincia di Trento · Trentino-Alto Adige · Italia,
+  Manchester · Inghilterra · Regno Unito) alle foto col GPS che non ce l'hanno; quelle nuove lo
+  prendono da sole. Non serve il cloud montato, 150 mila foto in meno di un minuto; se lo si
+  ferma, la volta dopo riprende da dove era rimasto. Dopo il rilascio dei luoghi con la provincia
+  va lanciato una volta. Il filtro **📍 Luogo** nella barra è l'elenco dei luoghi con quante
+  foto (nazione → regione → provincia → città) e li cerca per nome; anche la ricerca normale li
+  trova: "Trentino", "Olanda", "Manchester".
+- **Luogo a mano** (una foto senza GPS, o col luogo sbagliato): nel visore, pannello dei
+  dettagli (I), ✎ accanto al luogo o il tasto **L**; si scrive il nome ("Manch") e si sceglie
+  "Manchester, Inghilterra, Regno Unito", oppure una provincia, una regione o una nazione.
+  **Nessun luogo** lo toglie, **Usa il GPS** torna a quello automatico. Per tante foto insieme:
+  *Seleziona*, poi **📍 Luogo…** nella barra in basso. Un luogo scelto a mano non lo cambia più
+  nessun ricalcolo. Le foto senza GPS con una città scelta a mano compaiono sulla mappa lì, con il
+  bordo tratteggiato (posizione approssimativa).
 - **Condividere con chi non ha un account**: *Seleziona* le foto (o apri un album), *Condividi…*
   (o *Condividi album*), scegli titolo e scadenza, *Crea link*, *Copia* e mandalo su WhatsApp. Chi lo
   apre vede solo quelle foto, senza login. Spunta "Permetti di scaricare" solo se servono gli

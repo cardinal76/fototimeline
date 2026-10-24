@@ -1,3 +1,7 @@
 DE.02	Bavaria	Bavaria	2951839
 FR.11	Île-de-France	Ile-de-France	3012874
 IT.07	Lazio	Lazio	3174976
+GB.ENG	England	England	6269131
+IT.17	Trentino-Alto Adige	Trentino-Alto Adige	3165244
+NL.07	North Holland	North Holland	2749879
+US.NH	New Hampshire	New Hampshire	5090174

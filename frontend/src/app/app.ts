@@ -40,6 +40,7 @@ import { Cestino } from './cestino';
 import { QuasiUguali } from './quasi-uguali';
 import { inAttesa } from './condivisi-in-attesa';
 import { RiceviCondivisi } from './ricevi-condivisi';
+import { ScegliLuogo } from './scegli-luogo';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -53,7 +54,7 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
+  imports: [Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -99,6 +100,8 @@ export class App {
   protected readonly creandoLink = signal(false);
   protected readonly linkCreato = signal<string | null>(null);
   protected readonly dialogoCondivisioni = signal(false);
+  /** "Luogo…" sulla selezione: lo stesso luogo a tutte le foto scelte, anche senza GPS. */
+  protected readonly dialogoLuogo = signal(false);
   protected readonly condivisioni = signal<Condivisione[] | null>(null);
   protected readonly dialogoSalute = signal(false);
   protected readonly controlloSalute = signal(false);
@@ -119,7 +122,7 @@ export class App {
   /** Quanti filtri sono attivi, per il numerino sul pulsante Filtri (la ricerca ha il suo campo). */
   protected readonly quantiFiltri = computed(() => {
     const f = this.galleria.filtro();
-    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.luogo, f.preferite].filter(Boolean).length;
+    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.provincia || f.luogo, f.preferite].filter(Boolean).length;
   });
   /** Un problema da vedere a colpo d'occhio sul pulsante Strumenti: cloud smontato o salute non a posto. */
   protected readonly avvisoSistema = computed<{ stato: StatoSalute; testo: string } | null>(() => {
@@ -317,7 +320,7 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.luogo);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.provincia || f.luogo);
   }
 
   // ------------------------------------------------------------ selezione
@@ -344,6 +347,8 @@ export class App {
       this.dialogoCondividi.set(null);
     } else if (this.dialogoCondivisioni()) {
       this.dialogoCondivisioni.set(false);
+    } else if (this.dialogoLuogo()) {
+      this.dialogoLuogo.set(false);
     } else if (this.dialogoImporta()) {
       this.chiudiImporta();
     } else if (this.telefonoInModifica()) {
@@ -467,6 +472,20 @@ export class App {
       this.selezione.set(false);
     } catch {
       this.galleria.avvisa('Operazione non riuscita');
+    }
+  }
+
+  /**
+   * Il luogo per tutte le foto selezionate: chiave di un luogo di GeoNames,
+   * null per "nessun luogo", undefined per tornare al GPS.
+   */
+  protected async luogoSelezione(chiave: string | null | undefined): Promise<void> {
+    try {
+      await this.galleria.operazione(chiave === undefined ? 'LUOGO_DA_GPS' : 'IMPOSTA_LUOGO', chiave ?? '');
+      this.dialogoLuogo.set(false);
+      this.selezione.set(false);
+    } catch {
+      this.galleria.avvisa('Luogo non salvato');
     }
   }
 

@@ -73,21 +73,36 @@ Il server: [DEPLOY.md](DEPLOY.md).
   l'ha portata ("Caricata da Anna" nel visore): chi l'ha caricata o importata,
   o il proprietario del telefono da cui arriva. Le foto di prima restano senza.
 - **Visore** a tutto schermo: si vede solo la foto; ← → o il dito per
-  scorrere, `P` preferita, `I` pannello dei dettagli (si ricorda se lo si
+  scorrere, `P` preferita, `I` pannello dei dettagli, `L` luogo (si ricorda se lo si
   lascia aperto; sul telefono sale dal basso), `F` schermo intero, `Esc`
   chiude. Dal pannello si modificano titolo, descrizione, tag, album, data;
   si scarica l'originale o si elimina (va nel cestino).
 - **Mappa**: le foto con posizione GPS su OpenStreetMap, raggruppate quando
   sono vicine; dal popup si apre la foto. Rispetta i filtri.
-- **Luoghi**: dal GPS il nome del posto (comune o località, regione, nazione,
-  in italiano: "Sperlonga, Lazio · Italia", "Parigi, Île-de-France · Francia"),
-  calcolato sul server senza servizi esterni con i dati di
-  [GeoNames](https://www.geonames.org/) (CC BY 4.0). Si vede nel visore e nel
-  popup della mappa; il filtro **📍 Luogo** sceglie nazione, regione o luogo
-  da un elenco con i conteggi, o li cerca per nome. Le foto nuove lo prendono
-  all'importazione; per quelle già in archivio c'è **Calcola luoghi** (admin),
-  in sottofondo con la barra. Oltre 30 km dal centro abitato più vicino (mare
-  aperto) il luogo resta sconosciuto.
+- **Luoghi**: dal GPS il posto su più livelli, come tag automatici: città o
+  comune, provincia (solo in Italia), regione (all'estero il primo livello di
+  GeoNames: Inghilterra, Baviera, Olanda Settentrionale) e nazione, in
+  italiano: "Rovereto · Provincia di Trento · Trentino-Alto Adige · Italia",
+  "Manchester · Inghilterra · Regno Unito", "Amsterdam · Olanda Settentrionale
+  · Paesi Bassi". Calcolato sul server senza servizi esterni con i dati di
+  [GeoNames](https://www.geonames.org/) (CC BY 4.0). Nel visore i livelli sono
+  tag cliccabili (filtrano la timeline) e c'è il popup della mappa; il filtro
+  **📍 Luogo** è anche l'elenco dei luoghi dell'archivio, nazione → regione
+  (→ provincia) → città con i conteggi, o li cerca per nome. La ricerca libera
+  trova anche i luoghi: "Trentino" dà tutte le foto in Trentino, "Olanda"
+  quelle dei Paesi Bassi. Le foto nuove lo prendono all'importazione; per
+  quelle già in archivio c'è **Calcola luoghi** (admin), in sottofondo con la
+  barra, che riprende da dove era rimasto. Oltre 30 km dal centro abitato più
+  vicino (mare aperto) il luogo resta sconosciuto.
+- **Luogo a mano**: nel visore (✎ accanto al luogo, o il tasto `L`) si cerca
+  per nome ("Manch" → Manchester, Inghilterra, Regno Unito) una città, una
+  provincia, una regione o una nazione; o "Nessun luogo". Con la selezione,
+  **📍 Luogo…** dà lo stesso luogo a tutte le foto scelte, anche senza GPS. Un
+  luogo scelto a mano resta: "Calcola luoghi" non lo tocca finché non si
+  sceglie **Usa il GPS**. Una foto senza GPS con una città scelta a mano va
+  sulla mappa lì, con il bordo tratteggiato (posizione approssimativa); così
+  anche una col GPS a più di 30 km dalla città scelta (GPS sbagliato). Nei link
+  condivisi i luoghi non ci sono, come prima.
 - **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
   anni passati ("3 anni fa"); si chiude fino al giorno dopo. Ogni mattina
   (alle 8, si cambia) anche su Telegram, nella chat degli avvisi o in una a
@@ -259,7 +274,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `provincia`, `luogo`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
@@ -305,13 +320,16 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/foto/{id}`             | Una foto                                                   |
 | PUT    | `/api/foto/{id}`             | Modifica titolo, descrizione, tag, album, preferita, data  |
 | DELETE | `/api/foto/{id}`             | Manda la foto nel cestino (204; 404 se non c'è o è già lì; 503 col cloud smontato) |
-| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto (`ELIMINA` = nel cestino; le altre non toccano le foto nel cestino) |
+| POST   | `/api/foto/multiple`         | `{ ids, operazione, valore }` su più foto (`ELIMINA` = nel cestino; le altre non toccano le foto nel cestino; `IMPOSTA_LUOGO` con la chiave di `/api/luoghi/cerca` in `valore`, vuoto = nessun luogo; `LUOGO_DA_GPS`) |
+| PUT    | `/api/foto/{id}/luogo`       | `{ chiave }` (di `/api/luoghi/cerca`; `null` = nessun luogo): il luogo scelto a mano (`origineLuogo` MANUALE), risponde con la foto; 400 se la chiave non è un luogo, 404 se la foto non c'è o è nel cestino |
+| DELETE | `/api/foto/{id}/luogo`       | "Usa il GPS": torna al luogo calcolato dalle coordinate, risponde con la foto |
 | GET    | `/api/foto/{id}/miniatura`   | Miniatura JPEG                                             |
 | GET    | `/api/foto/{id}/file`        | Il file, con `Range` per i video: la versione compatibile se c'è, altrimenti l'originale; `?originale=true` o `?scarica=true` (allegato) per l'originale |
 | GET    | `/api/foto/{id}/vista`       | Quello che il browser sa mostrare (JPEG per gli HEIC)      |
 | GET    | `/api/tag`, `/api/album`     | Elenchi per i filtri                                       |
 | GET    | `/api/mappa`                 | Foto con GPS (stessi filtri della timeline), col nome del luogo |
-| GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, regioni: [{ nome, conteggio, luoghi: [{ nome, conteggio }] }] }] }`, i più fotografati prima |
+| GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, altriNomi, regioni: [{ nome, conteggio, province: [{ nome, conteggio }], luoghi: [{ nome, provincia, conteggio }] }] }] }`, i più fotografati prima, senza il cestino |
+| GET    | `/api/luoghi/cerca`          | `q` (almeno 2 lettere) → fino a 15 luoghi di GeoNames `{ chiave, livello: CITTA\|PROVINCIA\|REGIONE\|NAZIONE, luogo, provincia, regione, nazione, codiceNazione, latitudine, longitudine }`: prima i nomi uguali, poi i più popolosi |
 | POST   | `/api/archivio/luoghi`       | "Calcola luoghi" in sottofondo, stato come `/api/importa`; `?tutte=true` rifà anche quelle che ce l'hanno (ruolo `fototimeline-admin`; 409 senza dataset) |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
 
@@ -516,7 +534,8 @@ Solo sulla rete interna di Docker, tutte (tranne `/salute`) con l'header
 | DELETE | `/clip/indice/{id}` | Toglie (404 se non c'era) |
 | GET    | `/clip/cerca` | `q`, `k` (≤ 2000), `soglia` → `{"risultati":[{"id","punteggio"}]}` dal più simile |
 il binario di MongoDB. Per i luoghi usano un mini dataset di GeoNames in
-`src/test/resources/geonames` (Roma, Sperlonga, Parigi, ...).
+`src/test/resources/geonames` (Roma, Sperlonga, Parigi, Trento, Rovereto,
+Amsterdam, le due Manchester, ...).
 
 ### Luoghi sul PC
 
@@ -527,12 +546,13 @@ mkdir -p ~/geonames && cd ~/geonames
 curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
 curl -O https://download.geonames.org/export/dump/admin1CodesASCII.txt
 curl -O https://download.geonames.org/export/dump/countryInfo.txt
+curl https://download.geonames.org/export/dump/admin2Codes.txt | grep '^IT\.' > admin2Codes.txt   # le province
 export FOTOTIMELINE_LUOGHI=~/geonames      # poi ./mvnw spring-boot:run
 ```
 
-Così i nomi stranieri restano quelli di GeoNames (Rome, Paris); i nomi in
-italiano vengono da `alternateNames-it.txt`, che fa il Dockerfile (stage
-`geonames`).
+Così i nomi stranieri restano quelli di GeoNames (Rome, Paris, Provincia
+autonoma di Trento); i nomi in italiano (e "Olanda" nella ricerca) vengono da
+`alternateNames-it.txt`, che fa il Dockerfile (stage `geonames`).
 
 ## CI su server2
 

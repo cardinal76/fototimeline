@@ -18,6 +18,7 @@ import {
   Foto,
   Io,
   LavoroContenuto,
+  Luogo,
   FileScartato,
   LavoroImportazione,
   Modifica,
@@ -96,6 +97,21 @@ export class FotoApi {
   /** Nazioni, regioni e luoghi con i conteggi, per il filtro "Luogo". */
   luoghi(): Observable<ElencoLuoghi> {
     return this.http.get<ElencoLuoghi>('/api/luoghi');
+  }
+
+  /** Città, province, regioni e nazioni per nome, per scegliere il luogo a mano ("Manch" → Manchester). */
+  cercaLuoghi(q: string): Observable<Luogo[]> {
+    return this.http.get<Luogo[]>('/api/luoghi/cerca', { params: { q } });
+  }
+
+  /** Il luogo scelto a mano (chiave di cercaLuoghi), null per "nessun luogo". */
+  impostaLuogo(id: string, chiave: string | null): Observable<Foto> {
+    return this.http.put<Foto>(`/api/foto/${id}/luogo`, { chiave });
+  }
+
+  /** Torna al luogo calcolato dal GPS. */
+  luogoDaGps(id: string): Observable<Foto> {
+    return this.http.delete<Foto>(`/api/foto/${id}/luogo`);
   }
 
   /** "Calcola luoghi" in sottofondo (solo admin); tutte = anche quelle che il luogo ce l'hanno. */
