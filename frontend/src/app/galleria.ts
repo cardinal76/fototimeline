@@ -185,6 +185,13 @@ export class Galleria {
     this.seguiImportazione();
   }
 
+  /** "Calcola eventi": stessa barra; riprende da dove si era fermato, salvo daCapo. */
+  async avviaEventi(daCapo: boolean): Promise<void> {
+    const lavoro = await firstValueFrom(this.api.calcolaEventi(daCapo));
+    this.mostraImportazione(lavoro);
+    this.seguiImportazione();
+  }
+
   /** Un lavoro nuovo parte a tutto riquadro, quello automatico ridotto. */
   private mostraImportazione(l: LavoroImportazione): void {
     if (l.id !== this.importazione()?.id) {

@@ -50,6 +50,17 @@ public class Foto {
     @Indexed
     private String album;
     private boolean preferita;
+    /**
+     * L'evento della foto (collezione {@code eventi}); null fuori da ogni
+     * evento. Lo scrivono il calcolo degli eventi e le modifiche a mano.
+     */
+    @Indexed(sparse = true)
+    private String evento;
+    /**
+     * True se l'evento della foto (o il suo non averne, se l'hanno tolta) è
+     * stato deciso a mano: il ricalcolo automatico la salta.
+     */
+    private boolean eventoFisso;
 
     /** SHA-256 del file: la stessa foto non entra due volte. */
     @Indexed(unique = true)
@@ -160,6 +171,12 @@ public class Foto {
 
     public boolean isPreferita() { return preferita; }
     public void setPreferita(boolean preferita) { this.preferita = preferita; }
+
+    public String getEvento() { return evento; }
+    public void setEvento(String evento) { this.evento = evento; }
+
+    public boolean isEventoFisso() { return eventoFisso; }
+    public void setEventoFisso(boolean eventoFisso) { this.eventoFisso = eventoFisso; }
 
     public String getHash() { return hash; }
     public void setHash(String hash) { this.hash = hash; }

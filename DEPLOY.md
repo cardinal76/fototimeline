@@ -1018,6 +1018,80 @@ FOTOTIMELINE_CESTINO_GIORNI=30
   `fototimeline-admin`). Le preferite non si tolgono dalle quasi uguali, come
   prima.
 
+## Eventi
+
+Le foto scattate vicine nel tempo, e nei viaggi nello stesso posto, si
+raggruppano da sole in **eventi** con un nome in italiano ("Sperlonga,
+10–11 agosto 2019", "Manchester, marzo 2018", "12 maggio 2021" senza luogo).
+Si guardano da Strumenti → **Eventi** (per anno, con copertina, date e numero
+di foto), si filtrano (Filtri → Evento, insieme agli altri filtri), il visore
+dice l'evento della foto e "Accadde oggi" il suo nome. I link condivisi non li
+mostrano.
+
+**Dopo il rilascio**, una volta: da admin Strumenti → **Calcola eventi**. Gira
+in sottofondo con la barra delle importazioni, legge e scrive solo MongoDB
+(va anche col cloud smontato), 110 mila foto in meno di un minuto. Annullato,
+o fermato da un riavvio, il successivo **riprende** da dove era arrivato (la
+fine dell'ultimo gruppo scritto, in `impostazioni/eventi-calcolo`); finito,
+il successivo rifà tutto da capo (gli eventi toccati a mano restano).
+
+```bash
+# nel .env di server2, poi il rilascio (i valori qui sono quelli predefiniti)
+FOTOTIMELINE_EVENTI_PAUSA=PT4H
+FOTOTIMELINE_EVENTI_MINIMO_FOTO=12
+FOTOTIMELINE_EVENTI_GIORNI_VUOTI=1
+FOTOTIMELINE_EVENTI_CASA=
+FOTOTIMELINE_EVENTI_RICALCOLO=PT10M
+```
+
+| Variabile | Predefinito | Cosa fa |
+|---|---|---|
+| `FOTOTIMELINE_EVENTI_PAUSA` | `PT4H` | Tra due scatti più lontani di così l'evento si spezza (una festa che va oltre mezzanotte resta una) |
+| `FOTOTIMELINE_EVENTI_MINIMO_FOTO` | `12` | Meno foto di così non fanno un evento: i giorni normali con poche foto |
+| `FOTOTIMELINE_EVENTI_GIORNI_VUOTI` | `1` | In un viaggio, quanti giorni senza foto possono stare in mezzo; `0` = solo giorni consecutivi |
+| `FOTOTIMELINE_EVENTI_CASA` | (vuoto) | Il luogo di casa ("Roma"); vuoto = il luogo con più foto |
+| `FOTOTIMELINE_EVENTI_RICALCOLO` | `PT10M` | Ogni quanto si rifanno gli eventi dei giorni toccati |
+
+Cambiata una soglia, **Calcola eventi** rifà tutto.
+
+- **Come si raggruppano** (`eventi/RilevamentoEventi`): le foto con una data,
+  in ordine di scatto da un cursore di Mongo, mai tutte in memoria. Una pausa
+  più lunga di `PAUSA` chiude un pezzo; un pezzo si unisce al precedente se
+  comincia lo stesso giorno o il giorno dopo (più `GIORNI_VUOTI`) e il posto
+  continua il viaggio: stesso luogo, stessa regione o stessa nazione, **lontano
+  da casa** (a casa i giorni di fila restano separati). Le foto senza GPS in
+  mezzo a un viaggio (una fotocamera, uno scanner) restano nel viaggio: entrano
+  se il pezzo dopo col GPS lo continua, o se dopo non c'è niente di vicino. Un
+  gruppo con almeno `MINIMO_FOTO` foto è un evento. Le foto con data
+  sconosciuta e quelle nel cestino non entrano.
+- **Il nome** (`eventi/NomiEventi`): "{luogo}, {date}". Il luogo è quello con
+  almeno metà delle foto; altrimenti in Italia la regione, all'estero la
+  nazione. Le date: un giorno ("12 maggio 2021"), fino a 4 giorni giorno per
+  giorno ("9–11 marzo 2018"), oltre il mese ("agosto 2019", "luglio–agosto
+  2019"). Il luogo viene dai campi `luogo`/`regione`/`nazione` di GeoNames:
+  `LuogoFoto.di` e `NomiEventi.nomeLuogo` sono gli unici punti che li leggono e
+  li scelgono.
+- **Modifiche a mano** (pagina Eventi, e "Evento…" nella barra della
+  selezione): rinominare, unire, dividere da una foto, togliere o aggiungere
+  foto, nascondere, creare un evento dalla selezione. Un evento toccato diventa
+  *manuale* (`eventi.manuale`) e le sue foto *fisse* (`foto.eventoFisso`); una
+  foto tolta resta fissa senza evento. Il calcolo salta le foto fisse e non
+  toglie mai un evento manuale: le modifiche non si perdono. *Torna automatico*
+  scioglie l'evento e il ricalcolo lo rifà da sé.
+- **Foto nuove**: l'importazione (e il cestino, e il ripristino) segnano il
+  giorno della foto in `eventi_da_rifare`; ogni `RICALCOLO` quei giorni si
+  rifanno, coi giorni vicini e gli eventi automatici che li toccano. Una foto
+  nuova dentro le date di un evento manuale (caricata dopo la sua ultima
+  modifica) entra in lui. Cambiare a mano la data di una foto non la sposta
+  di evento: lo fa il prossimo **Calcola eventi**.
+- **Cestino**: le foto nel cestino non contano (conteggio, copertina, filtro);
+  ripristinate tornano nel loro evento al ricalcolo leggero.
+- **Collezioni**: `eventi` (un documento per evento, con il riepilogo),
+  `eventi_da_rifare`, `impostazioni/eventi-calcolo`; nelle foto `evento` (id) ed
+  `eventoFisso`. Il backup dei metadati copia le foto, quindi anche l'evento di
+  ognuna; gli eventi si rifanno con **Calcola eventi**, ma nomi e modifiche a
+  mano no.
+
 ## Backup
 
 - Gli **originali** sono su LifetimeCloud: dal sito o dall'app ogni file

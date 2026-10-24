@@ -116,6 +116,20 @@ fototimeline:
     soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
     finestra-raffica: PT10S
     soglia-raffica: 12
+  # Eventi automatici: foto vicine nel tempo (e nel posto) raggruppate con un
+  # nome. Soglie in DEPLOY.md, "Eventi".
+  eventi:
+    # Tra due scatti più lontani di così l'evento si spezza (salvo i viaggi).
+    pausa: ${FOTOTIMELINE_EVENTI_PAUSA:PT4H}
+    # Meno foto di così non fanno un evento (i giorni normali con poche foto).
+    minimo-foto: ${FOTOTIMELINE_EVENTI_MINIMO_FOTO:12}
+    # In un viaggio (giorni di fila lontano da casa) quanti giorni senza foto
+    # possono stare in mezzo; 0 = solo giorni consecutivi.
+    giorni-vuoti: ${FOTOTIMELINE_EVENTI_GIORNI_VUOTI:1}
+    # Il luogo di casa ("Roma"): lì i giorni di fila non sono un viaggio. Vuoto = il luogo con più foto.
+    casa: ${FOTOTIMELINE_EVENTI_CASA:}
+    # Ogni quanto rifare gli eventi dei giorni toccati (foto nuove, cestino).
+    ricalcolo: ${FOTOTIMELINE_EVENTI_RICALCOLO:PT10M}
   # Avvisi su Telegram quando una voce della pagina "Salute" cambia stato.
   # Token del bot (BotFather) e chat id: vuoti = avvisi spenti, la pagina c'è lo stesso.
   telegram:

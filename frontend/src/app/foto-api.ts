@@ -13,7 +13,9 @@ import {
   Condivisione,
   CopiaBackup,
   ElencoTelefoni,
+  ElencoEventi,
   ElencoLuoghi,
+  Evento,
   Filtro,
   Foto,
   Io,
@@ -101,6 +103,59 @@ export class FotoApi {
   /** "Calcola luoghi" in sottofondo (solo admin); tutte = anche quelle che il luogo ce l'hanno. */
   calcolaLuoghi(tutte: boolean): Observable<LavoroImportazione> {
     return this.http.post<LavoroImportazione>('/api/archivio/luoghi', {}, { params: tutte ? { tutte } : {} });
+  }
+
+  // ------------------------------------------------------------ eventi
+
+  /** Gli eventi dal più recente; i nascosti solo se chiesti. */
+  eventi(nascosti = false): Observable<ElencoEventi> {
+    return this.http.get<ElencoEventi>('/api/eventi', { params: nascosti ? { nascosti } : {} });
+  }
+
+  evento(id: string): Observable<Evento> {
+    return this.http.get<Evento>(`/api/eventi/${encodeURIComponent(id)}`);
+  }
+
+  /** I nomi degli eventi non nascosti tra questi id. */
+  nomiEventi(ids: string[]): Observable<Record<string, string>> {
+    return this.http.get<Record<string, string>>('/api/eventi/nomi', { params: { ids: ids.join(',') } });
+  }
+
+  /** Un evento nuovo dalle foto scelte; senza nome, quello automatico. */
+  creaEvento(ids: string[], nome?: string): Observable<Evento> {
+    return this.http.post<Evento>('/api/eventi', { nome, ids });
+  }
+
+  /** nome vuoto = torna quello automatico. */
+  modificaEvento(id: string, modifica: { nome?: string; nascosto?: boolean }): Observable<Evento> {
+    return this.http.put<Evento>(`/api/eventi/${encodeURIComponent(id)}`, modifica);
+  }
+
+  unisciEventi(ids: string[]): Observable<Evento> {
+    return this.http.post<Evento>('/api/eventi/unisci', { ids });
+  }
+
+  /** La foto e quelle dopo vanno in un evento nuovo. */
+  dividiEvento(id: string, foto: string): Observable<Evento[]> {
+    return this.http.post<Evento[]>(`/api/eventi/${encodeURIComponent(id)}/dividi`, { foto });
+  }
+
+  aggiungiAEvento(id: string, ids: string[]): Observable<{ modificate: number }> {
+    return this.http.post<{ modificate: number }>(`/api/eventi/${encodeURIComponent(id)}/foto`, { ids });
+  }
+
+  togliDaEvento(ids: string[]): Observable<{ modificate: number }> {
+    return this.http.post<{ modificate: number }>('/api/eventi/togli', { ids });
+  }
+
+  /** "Torna automatico": l'evento si scioglie, il ricalcolo rifà da sé. */
+  sciogliEvento(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/eventi/${encodeURIComponent(id)}`);
+  }
+
+  /** "Calcola eventi" in sottofondo (solo admin): riprende da dove si era fermato, salvo daCapo. */
+  calcolaEventi(daCapo: boolean): Observable<LavoroImportazione> {
+    return this.http.post<LavoroImportazione>('/api/archivio/eventi', {}, { params: daCapo ? { daCapo } : {} });
   }
 
   carica(file: File[], album?: string): Observable<HttpEvent<Caricamento[]>> {

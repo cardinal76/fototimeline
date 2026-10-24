@@ -88,6 +88,16 @@ Il server: [DEPLOY.md](DEPLOY.md).
   all'importazione; per quelle già in archivio c'è **Calcola luoghi** (admin),
   in sottofondo con la barra. Oltre 30 km dal centro abitato più vicino (mare
   aperto) il luogo resta sconosciuto.
+- **Eventi** (Strumenti → *Eventi*): le foto scattate vicine nel tempo, e nei
+  viaggi nello stesso posto, si raggruppano da sole con un nome ("Sperlonga,
+  10–11 agosto 2019", "Manchester, marzo 2018"); per anno, con copertina, date
+  e numero di foto, e un clic apre le loro foto. Filtro *Evento* combinabile
+  con gli altri, l'evento nel visore e in "Accadde oggi". Si rinominano,
+  uniscono, dividono, nascondono; dalla selezione (*Evento…*) se ne crea uno o
+  si tolgono e aggiungono foto: le modifiche a mano restano quando gli eventi
+  si rifanno. Le foto nuove entrano da sole entro pochi minuti; per l'archivio
+  c'è **Calcola eventi** (admin), in sottofondo, che si riprende se annullato.
+  Soglie e dettagli in DEPLOY.md, "Eventi".
 - **Accadde oggi**: in cima alla timeline le foto dello stesso giorno negli
   anni passati ("3 anni fa"); si chiude fino al giorno dopo. Ogni mattina
   (alle 8, si cambia) anche su Telegram, nella chat degli avvisi o in una a
@@ -229,6 +239,11 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_VIDEO_DESTINAZIONE` | `<archivio>/.compatibili`       | Dove vanno i convertiti                  |
 | `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
 | `FOTOTIMELINE_CESTINO_GIORNI` | `30`                                | Giorni nel cestino prima che una foto eliminata se ne vada per sempre, file compreso; `0` = mai |
+| `FOTOTIMELINE_EVENTI_PAUSA` | `PT4H`                                | Eventi: tra due scatti più lontani di così l'evento si spezza (salvo i viaggi) |
+| `FOTOTIMELINE_EVENTI_MINIMO_FOTO` | `12`                            | Eventi: foto minime per un evento   |
+| `FOTOTIMELINE_EVENTI_GIORNI_VUOTI` | `1`                            | Eventi: giorni senza foto che un viaggio può avere in mezzo |
+| `FOTOTIMELINE_EVENTI_CASA` | (vuoto)                                | Eventi: il luogo di casa (lì i giorni di fila non sono un viaggio); vuoto = il luogo con più foto |
+| `FOTOTIMELINE_EVENTI_RICALCOLO` | `PT10M`                           | Eventi: ogni quanto si rifanno i giorni toccati (foto nuove, cestino) |
 | `FOTOTIMELINE_TELEGRAM_TOKEN`, `FOTOTIMELINE_TELEGRAM_CHAT` | (vuoti) | Avvisi su Telegram della pagina "Salute"; vuoti = spenti |
 | `FOTOTIMELINE_TELEGRAM_ATTENZIONE` | `false`                        | Avvisa anche quando una voce diventa gialla |
 | `FOTOTIMELINE_TELEGRAM_CONTROLLO` | `PT15M`                         | Ogni quanto controllare per gli avvisi   |
@@ -259,7 +274,7 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 
 | Metodo | Percorso                     | Cosa fa                                                    |
 |--------|------------------------------|------------------------------------------------------------|
-| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `dal`, `al`, `pagina`, `dimensione` |
+| GET    | `/api/foto`                  | Pagina di foto: `q`, `tag`, `album`, `preferite`, `nazione` (codice ISO), `regione`, `luogo`, `caricataDa` (username), `evento` (id), `dal`, `al`, `pagina`, `dimensione` |
 | GET    | `/api/timeline`              | Mesi con il numero di foto (stessi filtri, senza date)     |
 | POST   | `/api/foto`                  | Caricamento multipart (`file` ripetuto, `album` opzionale) |
 | POST   | `/api/importa`               | Avvia in sottofondo: `{ "cartella": "...", "albumDaCartella": true, "sposta": false }` |
@@ -314,6 +329,17 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/luoghi`                | `{ disponibile, daCalcolare, nazioni: [{ codice, nome, conteggio, regioni: [{ nome, conteggio, luoghi: [{ nome, conteggio }] }] }] }`, i più fotografati prima |
 | POST   | `/api/archivio/luoghi`       | "Calcola luoghi" in sottofondo, stato come `/api/importa`; `?tutte=true` rifà anche quelle che ce l'hanno (ruolo `fototimeline-admin`; 409 senza dataset) |
 | GET    | `/api/ricordi`               | Stesso giorno negli anni passati (`data` opzionale)        |
+| GET    | `/api/eventi`                | `{ eventi: [{ id, nome, inizio, fine, primoGiorno, ultimoGiorno, conteggio, copertina, luogo, manuale, nascosto }], calcolo, giorniDaRifare, minimoFoto }`, dal più recente; `nascosti=true` anche i nascosti |
+| GET    | `/api/eventi/{id}`           | Un evento (404 se non c'è)                                 |
+| GET    | `/api/eventi/nomi`           | `ids=a,b`: `{ id: nome }` degli eventi non nascosti         |
+| POST   | `/api/eventi`                | `{ nome, ids }`: un evento nuovo dalle foto scelte (201; senza nome, quello automatico) |
+| PUT    | `/api/eventi/{id}`           | `{ nome, nascosto }` (null = com'è; nome vuoto = quello automatico) |
+| DELETE | `/api/eventi/{id}`           | "Torna automatico": l'evento si scioglie, il ricalcolo lo rifà (204) |
+| POST   | `/api/eventi/unisci`         | `{ ids }`: tutto nel più vecchio (400 con meno di due)      |
+| POST   | `/api/eventi/{id}/dividi`    | `{ foto }`: lei e quelle dopo in un evento nuovo; i due eventi |
+| POST   | `/api/eventi/{id}/foto`      | `{ ids }`: le foto entrano nell'evento; `{ modificate }`     |
+| POST   | `/api/eventi/togli`          | `{ ids }`: le foto escono dal loro evento e ci restano fuori; `{ modificate }` |
+| POST   | `/api/archivio/eventi`       | "Calcola eventi" in sottofondo, stato come `/api/importa`; riprende dove si era fermato, `?daCapo=true` rifà tutto (ruolo `fototimeline-admin`) |
 
 Google Foto (dietro login; il Takeout solo `fototimeline-admin`; mai client
 secret né token nelle risposte):

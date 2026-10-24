@@ -13,6 +13,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { EventoFoto } from './evento-foto';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { durata } from './formati';
@@ -47,7 +48,7 @@ const SWIPE_PX = 50;
 @Component({
   selector: 'app-visore',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, EventoFoto, FormsModule],
   host: {
     role: 'dialog',
     'aria-modal': 'true',

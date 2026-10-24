@@ -13,6 +13,8 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
+import { Eventi } from './eventi';
+import { FiltroEvento } from './filtro-evento';
 import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
@@ -40,6 +42,7 @@ import { Cestino } from './cestino';
 import { QuasiUguali } from './quasi-uguali';
 import { inAttesa } from './condivisi-in-attesa';
 import { RiceviCondivisi } from './ricevi-condivisi';
+import { SceltaEvento } from './scelta-evento';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
 import { Visore } from './visore';
@@ -53,7 +56,10 @@ const ALTEZZA_RIGA = 210;
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore],
+  imports: [
+    Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, TimelineNav, Visore,
+    Eventi, FiltroEvento, SceltaEvento,
+  ],
   host: {
     '(document:dragover)': 'trascina($event)',
     '(document:dragleave)': 'esci($event)',
@@ -93,6 +99,9 @@ export class App {
   private telefoniTimer?: ReturnType<typeof setTimeout>;
   protected readonly dialogoQuasiUguali = signal(false);
   protected readonly dialogoCestino = signal(false);
+  /** La pagina Eventi e, dalla barra della selezione, "Evento…". */
+  protected readonly dialogoEventi = signal(false);
+  protected readonly dialogoSceltaEvento = signal(false);
   /** "Condividi": le foto scelte (selezione o album) e, dopo la creazione, il link. */
   protected readonly dialogoCondividi = signal<{ ids?: string[]; album?: string; descrizione: string } | null>(null);
   protected moduloCondividi = { titolo: '', giorni: 7 as number | null, download: false, posizione: false };
@@ -119,7 +128,7 @@ export class App {
   /** Quanti filtri sono attivi, per il numerino sul pulsante Filtri (la ricerca ha il suo campo). */
   protected readonly quantiFiltri = computed(() => {
     const f = this.galleria.filtro();
-    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.luogo, f.preferite].filter(Boolean).length;
+    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.luogo, f.preferite, f.evento].filter(Boolean).length;
   });
   /** Un problema da vedere a colpo d'occhio sul pulsante Strumenti: cloud smontato o salute non a posto. */
   protected readonly avvisoSistema = computed<{ stato: StatoSalute; testo: string } | null>(() => {
@@ -317,7 +326,7 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.luogo);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.luogo || f.evento);
   }
 
   // ------------------------------------------------------------ selezione
@@ -354,6 +363,10 @@ export class App {
       this.dialogoQuasiUguali.set(false);
     } else if (this.dialogoCestino()) {
       this.dialogoCestino.set(false);
+    } else if (this.dialogoSceltaEvento()) {
+      this.dialogoSceltaEvento.set(false);
+    } else if (this.dialogoEventi()) {
+      this.dialogoEventi.set(false);
     } else if (this.dialogoSalute()) {
       this.chiudiSalute();
     } else if (this.selezione()) {
@@ -616,6 +629,18 @@ export class App {
     }
   }
 
+  /** "Calcola eventi": riprende se il calcolo di prima si era fermato a metà. */
+  protected async calcolaEventi(): Promise<void> {
+    if (!confirm('Raggruppa in eventi le foto di tutto l\'archivio (gli eventi toccati a mano restano come sono).' + this.fermaAutomatica())) {
+      return;
+    }
+    try {
+      await this.galleria.avviaEventi(false);
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Calcolo degli eventi non partito');
+    }
+  }
+
   protected async convertiVideo(): Promise<void> {
     if (
       !confirm(
@@ -691,6 +716,8 @@ export class App {
         return 'Indicizzazione';
       case 'LUOGHI':
         return 'Luoghi';
+      case 'EVENTI':
+        return 'Eventi';
       default:
         return 'Importazione';
     }
