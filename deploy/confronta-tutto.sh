@@ -26,6 +26,11 @@
 #   3 zip           ogni zip in LAVORO/confronto/tmp, ZIP_PARALLELI insieme (predefinito 3): se ne
 #                   estraggono le foto e i video, se ne calcola lo SHA-256, poi la copia si
 #                   cancella. Gli zip rovinati si segnano come tali.
+#                   Un file che era nell'elenco ma non si scarica perché pCloud dice che non c'è
+#                   (directory o object not found, anche sulla cartella che lo contiene, e un
+#                   rclone lsf del percorso esatto lo conferma) si segna in confronto/assenti.tsv
+#                   e si va avanti: nel rapporto è "sparito", non più su pCloud (era nell'elenco).
+#                   Gli altri errori di scaricamento (rete, timeout, spazio) fermano il passo.
 #   4 fototimeline  da MongoDB su server2, in sola lettura (find), hash e percorso di ogni scheda;
 #                   l'elenco dei file in DESTINAZIONE (lifetime:FotoTimeline); CAMPIONE file
 #                   (predefinito 20) riscaricati da LifetimeCloud: il loro SHA-256 dev'essere
@@ -53,6 +58,9 @@
 #   mai-visto                 raccogli non l'ha mai visto, e la data è di prima: da capire
 #   cambiato-dopo-raccogli    raccogli l'ha preso, ma ora su pCloud il contenuto è un altro
 #   hash-non-letto            pCloud non l'ha dato e lo scaricamento non è riuscito: rilancia
+# e i "non più su pCloud" (esito "sparito", motivo "non-piu-su-pcloud"): nell'elenco del passo 1,
+# ma pCloud dice che non ci sono (assenti.tsv). Spiegati, contati a parte; un rilancio li riprova
+# una volta (sciolti al passo 2, zip al 3) e, se pCloud dice ancora che non ci sono, restano così.
 # e i "probabili, contenuto diverso" (esito "probabile"): stesso nome e stessa data di una scheda
 # (o lo stesso percorso in ordinate/), hash diverso. Sopra RICOMPRESSI_SOPRA byte (20 GB) un
 # video così è uno di quelli ricompressi in H.265 prima di carica: "ricompresso-h265", spiegato.
@@ -122,6 +130,7 @@ MODO="$CONF/modo-hash"               # server | scarica
 CACHE_S="$CONF/sha-sciolti.tsv"      # sha256 \t dimensione \t data \t percorso
 CACHE_Z="$CONF/sha-zip.tsv"          # M \t dim zip \t data zip \t zip \t sha256 \t dim \t giorno \t membro
                                      # F \t dim zip \t data zip \t zip \t esito unzip \t media \t ._ dei Mac
+ASSENTI="$CONF/assenti.tsv"          # sciolto|zip \t dimensione \t data \t percorso \t quando: nell'elenco, non su pCloud
 DB="$CONF/fototimeline-db.tsv"       # id \t hash \t dimensione \t giorno \t video \t conversione \t nome \t percorso
 LT="$CONF/lifetime.tsv"              # dimensione \t percorso in DESTINAZIONE
 CAMPIONATI="$CONF/campione.tsv"      # esito \t hash della scheda \t hash del file \t percorso
@@ -162,6 +171,30 @@ in_corso() {
 }
 # Una riga di rclone hashsum ("sha256  percorso"), senza {64}: il mawk di Ubuntu 22.04 non lo sa.
 AWK_SHA='function e_sha(s) { return length(s) >= 67 && substr(s, 1, 64) !~ /[^0-9a-f]/ && substr(s, 65, 2) == "  " }'
+
+# assente REL: vero se pCloud dice che il file non c'è, lui o la cartella che lo contiene. Si
+# chiede con un rclone lsf del percorso esatto: "directory not found" (uscita 3) o "object not
+# found" (4). Un altro errore (rete, timeout, 5xx) non è un'assenza: falso, e chi chiama si ferma.
+# Succede con i file "fantasma" di pCloud: nell'elenco ricorsivo, ma né lsf né copyto li trovano.
+assente() {
+    local st=0 out
+    out="$(rc lsf --files-only "$(remoto "$1")" 2>&1 < /dev/null)" || st=$?
+    case "$st" in
+        0) return 1 ;;
+        3|4) return 0 ;;
+    esac
+    printf '%s\n' "$out" | grep -Eq '^.*Failed to lsf.*(directory not found|object not found)'
+}
+# segna_assente TIPO DIM DATA REL: in assenti.tsv (con flock: gli zip sono più d'uno insieme).
+segna_assente() {
+    { flock 9; printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(date +%s)" >> "$ASSENTI"; } 9>> "$ASSENTI.lock"
+}
+# Quanti dei da fare (dim \t data \t percorso, nel file $2) sono in assenti.tsv per il tipo $1.
+assenti_fra() {
+    touch "$ASSENTI"
+    awk -F'\t' -v t="$1" 'FILENAME == ARGV[1] { if ($1 == t) a[$2 SUBSEP $3 SUBSEP $4] = 1; next }
+        (($1 SUBSEP $2 SUBSEP $3) in a) { n++ } END { print n + 0 }' "$ASSENTI" "$2"
+}
 
 # --- 1. elenca ---------------------------------------------------------------------------
 # I filtri di rclone: le stesse esclusioni di foto-da-pcloud.sh, ma RIMASTI e ESCLUDI dentro.
@@ -266,6 +299,11 @@ stima() {
         echo "Da fare: $n_s sciolti (SHA-256 lato server, niente da scaricare) e $n_z zip ($(gb "$b_z"))."
     fi
     echo "Scaricherà più o meno $(gb "$tot") (quello già fatto in un giro di prima non si riscarica)."
+    local a_s a_z
+    a_s="$(assenti_fra sciolto "$CONF/da-fare-sciolti.tsv")"; a_z="$(assenti_fra zip "$CONF/da-fare-zip.tsv")"
+    if [ $((a_s + a_z)) -gt 0 ]; then
+        echo "  di cui $a_s sciolti e $a_z zip non più su pCloud a un giro di prima (erano nell'elenco): si riprovano una volta."
+    fi
     echo "Sul PC servono al massimo $ZIP_PARALLELI zip insieme, più le loro foto estratte (spazio libero: $(df -h --output=avail "$LAVORO" | tail -1 | tr -d ' '))."
 }
 
@@ -284,7 +322,7 @@ unisci_blocco() {
 }
 
 sciolti() {
-    richiede "$RCLONE"
+    richiede "$RCLONE" flock
     controlla_impostazioni
     [ -f "$OGGETTI" ] && [ -f "$MODO" ] || errore "prima il passo 1: $0 stima"
     unisci_blocco
@@ -308,8 +346,17 @@ sciolti() {
         fi
     fi
     da_fare
-    n="$(wc -l < "$CONF/da-fare-sciolti.tsv")"
-    echo "Fatto: $(wc -l < "$CACHE_S") sciolti con il loro SHA-256$([ "$n" -gt 0 ] && echo "; $n non riusciti (spariti da pCloud o illeggibili): nel rapporto come hash-non-letto")."
+    # Quelli non riusciti: pCloud dice che non ci sono? Allora sono spariti dopo l'elenco.
+    local dim data rel spariti=0
+    while IFS=$'\t' read -r dim data rel; do
+        if assente "$rel"; then
+            segna_assente sciolto "$dim" "$data" "$rel"
+            spariti=$((spariti + 1))
+            echo "  $rel: non più su pCloud (era nell'elenco), lo segno e vado avanti"
+        fi
+    done < "$CONF/da-fare-sciolti.tsv"
+    n=$(( $(wc -l < "$CONF/da-fare-sciolti.tsv") - spariti ))
+    echo "Fatto: $(wc -l < "$CACHE_S") sciolti con il loro SHA-256$([ "$spariti" -gt 0 ] && echo "; $spariti non più su pCloud (erano nell'elenco): nel rapporto come sparito")$([ "$n" -gt 0 ] && echo "; $n non riusciti: nel rapporto come hash-non-letto (rilancia da 2)")."
 }
 
 blocchi() {
@@ -361,11 +408,14 @@ zip_tutti() {
     tr '\n' '\0' < "$CONF/da-fare-zip.tsv" | xargs -0 -r -n 1 -P "$ZIP_PARALLELI" "$SE" _zip || stato=$?
     rm -rf "$TMPC"
     da_fare
-    n="$(wc -l < "$CONF/da-fare-zip.tsv")"
+    # Gli zip che pCloud dice di non avere (segnati da uno_zip in questo giro) sono spiegati.
+    local spariti
+    spariti="$(assenti_fra zip "$CONF/da-fare-zip.tsv")"
+    n=$(( $(wc -l < "$CONF/da-fare-zip.tsv") - spariti ))
     if [ "$stato" -ne 0 ] || [ "$n" -gt 0 ]; then
         errore "$n zip non sono riusciti (vedi sopra): rilancia $0 da 3, quelli fatti non si rifanno"
     fi
-    echo "Fatto: $(grep -c '^F' "$CACHE_Z" || true) zip aperti."
+    echo "Fatto: $(grep -c '^F' "$CACHE_Z" || true) zip aperti$([ "$spariti" -gt 0 ] && echo "; $spariti non più su pCloud (erano nell'elenco): nel rapporto come sparito, elenco in $ASSENTI")."
 }
 
 # Uno zip (dim \t data \t percorso), lanciato da xargs: scarica, estrae solo foto e video,
@@ -383,7 +433,15 @@ uno_zip() {
         echo "Spazio finito sul PC per $zrel ($(gb "$zdim")): libera spazio o abbassa ZIP_PARALLELI, poi $0 da 3" >&2
         exit 255
     fi
-    if ! rc copyto "$(remoto "$zrel")" "$d/z.zip" < /dev/null; then
+    if ! rc copyto "$(remoto "$zrel")" "$d/z.zip" < /dev/null 2> "$d/copyto.err"; then
+        # Non c'è più (lui o la sua cartella): si segna e si va avanti. Altrimenti è un errore vero.
+        if assente "$zrel"; then
+            segna_assente zip "$zdim" "$zdata" "$zrel"
+            { flock 9; printf '1\t%s\n' "$zdim" >> "$FATTI"; } 9>> "$CACHE_Z.lock"
+            echo "  [zip $(wc -l < "$FATTI")] $zrel: non più su pCloud (era nell'elenco), lo segno e vado avanti"
+            exit 0
+        fi
+        grep -v NOTICE "$d/copyto.err" | tail -n 3 >&2 || true
         echo "non riesco a scaricare $zrel" >&2; exit 1
     fi
     if [ "$(stat -c %s "$d/z.zip")" != "$zdim" ]; then
@@ -504,7 +562,7 @@ confronto() {
     for f in "$OGGETTI" "$DB" "$LT"; do
         [ -f "$f" ] || errore "manca $f: prima i passi da 1 a 4 ($0)"
     done
-    touch "$CACHE_S" "$CACHE_Z" "$CAMPIONATI"
+    touch "$CACHE_S" "$CACHE_Z" "$CAMPIONATI" "$ASSENTI"
     local vuoto="$CONF/vuoto" dopo="" quando="" stato=0
     : > "$vuoto"
     if [ -f "$LAVORO/fase-scarica.ok" ]; then
@@ -519,7 +577,7 @@ confronto() {
         -v rapporto="$RAPPORTO" -v dest="$DESTINAZIONE" -v nome_rimasti="${RIMASTI#"$RADICE"/}" \
         f=imp "$(esiste "$IMPRONTE" "$vuoto")" f=fonti "$(esiste "$FONTI" "$vuoto")" \
         f=dc "$(esiste "$DA_CONTROLLARE" "$vuoto")" f=db "$DB" f=lt "$LT" f=cs "$CACHE_S" \
-        f=cz "$CACHE_Z" f=camp "$CAMPIONATI" f=ogg "$OGGETTI" > "$RIEPILOGO" || stato=$?
+        f=cz "$CACHE_Z" f=camp "$CAMPIONATI" f=ass "$ASSENTI" f=ogg "$OGGETTI" > "$RIEPILOGO" || stato=$?
     rm -f "$vuoto"
     cat "$RIEPILOGO"
     echo
@@ -650,6 +708,7 @@ f == "cz" {
     next
 }
 f == "camp" { if ($1 == "uguale") camp_ok++; else camp_ko++; next }
+f == "ass"  { ASS[$1 SUBSEP $2 SUBSEP $3 SUBSEP $4] = 1; next }
 f == "ogg" {
     tipo = $1; classe = $2; dim = $3; data = $4; rel = $5; k = dim SUBSEP data SUBSEP rel
     fonte = radice "/" rel
@@ -658,6 +717,12 @@ f == "ogg" {
         if (tipo == "zip") riga("pcloud", "escluso", "escluso-di-proposito", "", dim, radice "/" rel, "(zip non aperto)", "", "in ESCLUDI")
         else riga("pcloud", "escluso", "escluso-di-proposito", "", dim, radice "/" rel, "", "", "in ESCLUDI")
         if (tipo == "zip") zip_esclusi++; else media_esclusi++
+        next
+    }
+    # Nell'elenco, ma pCloud dice che non c'è più (e non si è letto in un giro di prima).
+    if ((tipo SUBSEP k) in ASS && !(tipo == "sciolto" ? (k in SCI) : (k in ZFATTO))) {
+        spariti++
+        riga("pcloud", "sparito", "non-piu-su-pcloud", "", dim, radice "/" rel, (tipo == "zip" ? "(zip non aperto)" : ""), "", "era nell'elenco di pCloud, ma pCloud dice che non c'è (directory not found): un fantasma, guardalo dal sito di pCloud")
         next
     }
     if (tipo == "sciolto") {
@@ -710,6 +775,7 @@ END {
     printf "  esclusi apposta: %d foto e video e %d zip in ESCLUDI, non confrontati\n", media_esclusi, zip_esclusi
     if (mac > 0) printf "  copie ._ dei Mac negli zip (non sono foto, raccogli le butta): %d\n", mac
     if (zip_rovinati > 0) printf "  zip rovinati:    %d\n", zip_rovinati
+    if (spariti > 0) printf "Non più su pCloud: %d (erano nell'elenco, ma pCloud dice che non ci sono: fantasmi, non contati sopra)\n", spariti
     if (per_esito["senza-foto"] > 0) printf "  zip senza foto né video dentro: %d\n", per_esito["senza-foto"]
     printf "Trovati:           %d (il loro SHA-256 è in una scheda di FotoTimeline)\n", per_esito["trovato"]
     printf "Probabili:         %d (stesso nome e data, contenuto diverso)\n", per_esito["probabile"]
@@ -734,6 +800,13 @@ END {
     if (per_motivo["nuovo-dopo-scarica"] > 0) print "Da fare: arrivate su pCloud dopo lo scarica: un nuovo giro di foto-da-pcloud.sh (scarica, raccogli, carica)."
     nonsp = non_spiegati + senza_file + camp_ko
     if (nonsp > 0) { printf "RISULTATO: %d cose NON SPIEGATE (righe con quei motivi nel rapporto).\n", nonsp; exit 3 }
+    if (spariti > 0) {
+        printf "Attenzione: %d file erano nell'elenco di pCloud ma pCloud dice che non ci sono più (lui o la sua cartella).\n", spariti
+        printf "  Quali:  awk -F'\\t' '$2 == \"sparito\"' %s | cut -f6\n", rapporto
+        print "  Guardali dal sito di pCloud: se non ci sono neanche lì, sono fantasmi dell'elenco e non c'è niente da fare."
+        printf "RISULTATO: tutto quello che c'è su pCloud è in FotoTimeline, o manca per un motivo noto (%d non più su pCloud, erano nell'elenco).\n", spariti
+        exit
+    }
     print "RISULTATO: tutto quello che c'è su pCloud è in FotoTimeline, o manca per un motivo noto."
 }
 function strftime_no(   d) { "date \"+%d/%m/%Y %H:%M\"" | getline d; close("date \"+%d/%m/%Y %H:%M\""); return d }
@@ -779,7 +852,10 @@ esegui() {   # esegui DA: i passi da DA alla fine (lanciato da avvia, nel regist
         fi
         echo "[$n/$TOTALE] ${NOMI[$((n - 1))]}: finito $(ora)" > "$PASSO"
     done
-    echo "FATTO $(ora): tutto trovato o mancante per un motivo noto. Riepilogo in $RIEPILOGO" > "$PASSO"
+    local spariti
+    spariti="$(sed -n 's/^Non più su pCloud: \([0-9]*\).*/\1/p' "$RIEPILOGO" 2>/dev/null | head -1)"
+    [ -n "$spariti" ] && spariti=" ($spariti non più su pCloud, erano nell'elenco)"
+    echo "FATTO $(ora): tutto trovato o mancante per un motivo noto$spariti. Riepilogo in $RIEPILOGO" > "$PASSO"
     rm -f "$PID"
 }
 

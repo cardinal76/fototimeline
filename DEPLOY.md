@@ -606,13 +606,25 @@ sottofondo come `verifica-tutto.sh`, in cinque passi:
   abbinamento per nome e giorno (o stesso percorso in `ordinate/`) dà i "probabili, contenuto
   diverso": un video oltre `RICOMPRESSI_SOPRA` (20 GB) più piccolo in FotoTimeline è
   `ricompresso-h265`, spiegato. `manifest.tsv` non si usa.
+- **Non più su pCloud** (esito `sparito`, motivo `non-piu-su-pcloud`): file che l'elenco
+  ricorsivo del passo 1 mostra, ma che pCloud poi dice di non avere. `copyto` (o `hashsum`) fallisce
+  con `directory not found` o `object not found`, e un `rclone lsf` del percorso esatto lo conferma
+  (uscita 3 o 4: manca lui o la cartella che lo contiene). Sono i "fantasmi" di pCloud, gli stessi
+  che `metti-da-parte` segnala come "non c'è più su pCloud". Si segnano in
+  `~/foto-da-pcloud/confronto/assenti.tsv` e il giro va avanti: sono spiegati, il riepilogo li conta
+  a parte con il comando per vederli, e la riga RISULTATO dice quanti sono. Un rilancio (`da 2` per
+  gli sciolti, `da 3` per gli zip) li riprova una volta; se pCloud dice ancora che non ci sono,
+  restano `sparito`. Ogni altro errore di scaricamento (rete, timeout, 5xx, spazio sul PC) è un errore
+  vero e ferma il passo 3 con "rilancia da 3", come prima. Cosa fare: guardarli dal sito di pCloud;
+  se non ci sono neanche lì, non c'è niente da fare. `stima` (e `da 1`) rifà l'elenco da capo; solo
+  il lancio senza argomenti riusa un elenco più giovane di `FRESCO_ORE` (6).
 - **Video compatibili e HEIC**: la conversione scrive `FotoTimeline/.compatibili/<id>.mp4` e le
   viste JPEG degli HEIC stanno sul disco di server2; l'originale e la sua scheda non cambiano, quindi
   l'hash resta quello del file caricato. Il confronto salta le cartelle col punto e conta a parte le
   versioni compatibili (e le schede `FATTA` senza il file).
 - **Codice d'uscita**: 3 se c'è qualcosa di non spiegato (`mai-visto`, `cambiato-dopo-raccogli`,
   `stesso-nome-e-data`, `hash-non-letto`, zip non confrontati, schede senza file, campione
-  diverso), 0 altrimenti. `confronto.passo` lo dice.
+  diverso), 0 altrimenti, anche con dei `sparito`. `confronto.passo` lo dice.
 - Per i test, `FT_DB_FILE` è un elenco già esportato (stesso formato) al posto di server2;
   `HASH_PCLOUD=server|scarica` salta la prova del passo 1.
 
