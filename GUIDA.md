@@ -230,9 +230,18 @@ awk -F'\t' '$2 == "mancante" || $2 == "probabile"' ~/foto-da-pcloud/confronto-ra
 | `ricompresso-h265` | i due video oltre i 20 GB, ricompressi prima di carica | niente: è normale che l'hash sia diverso |
 | `stesso-nome-e-data` (probabile) | stesso nome e giorno di una foto in FotoTimeline, contenuto diverso | guardarle tutte e due |
 | `mai-visto`, `cambiato-dopo-raccogli`, `hash-non-letto` | da capire | guardare il file; `hash-non-letto`: `da 2` |
+| `non-piu-su-pcloud` (esito `sparito`) | era nell'elenco di pCloud, ma pCloud dice che non c'è (lui o la sua cartella): un "fantasma" | guardarlo dal sito di pCloud; se non c'è neanche lì, niente |
 
 Se il riepilogo finisce con "RISULTATO: tutto quello che c'è su pCloud è in FotoTimeline, o manca
 per un motivo noto" (e lo script esce con 0), la prova è fatta.
+
+pCloud a volte mette nell'elenco file che poi non dà: `rclone copyto` e `rclone lsf` di quel percorso
+rispondono `directory not found`, spesso anche per la cartella che li contiene. Lo script li segna
+come **non più su pCloud (erano nell'elenco)** e va avanti senza fermarsi; il riepilogo li conta a
+parte (`Non più su pCloud: N`), dice il comando per vederli e la riga RISULTATO aggiunge "(N non più
+su pCloud, erano nell'elenco)". Sono gli stessi che `metti-da-parte` dice "non c'è più su pCloud".
+Un rilancio li riprova una volta. Se invece si ferma al passo 3 con "rilancia da 3" è un errore vero
+(rete, spazio): sistemato, `./deploy/confronta-tutto.sh da 3`.
 
 ---
 
@@ -279,13 +288,39 @@ rilascio compare da solo come "Telefono", con le sue impostazioni, e non ricopia
 `FOTOTIMELINE_TELEFONO_PROPRIETARIO` (nel `.env`) o, se vuoto, del primo amministratore che entra;
 da **Modifica** gli si cambia nome e proprietario.
 
-**3.3 Video troppo grandi.** LifetimeCloud non prende file oltre 20 GB (e a volte rifiuta con
-"413" anche più piccoli). Quei video l'app li ricomprime da sola in H.265 su server2, uno alla volta
-e anche per ore, e li importa come gli altri; l'originale resta su pCloud, spostato in
-`Video originali troppo grandi` solo dopo che il ricompresso è in archivio. In **Telefoni**, sotto
-ogni telefono, "Video troppo grandi" dice a che punto è, quanto pesava e quanto pesa; da admin
-**Annulla** e **Riprova**. Dettagli e limiti (spazio, memoria) in DEPLOY.md, "Video troppo grandi
-per LifetimeCloud".
+**3.3 Video troppo grandi (si ricomprimono sul PC).** LifetimeCloud non prende file oltre 20 GB
+(e a volte rifiuta con "413" anche più piccoli). Quei video l'app li riconosce e li mette in coda,
+ma non li tocca: su server2 non c'è lo spazio. **Salute** e **Telefoni** dicono "N video da
+ricomprimere sul PC", e sul PC li ricomprime in H.265 `deploy/ricomprimi-video-grandi.sh`, uno
+alla volta e anche per ore. Lo script carica il ricompresso su LifetimeCloud e lo dice al server,
+che lo importa come gli altri; l'originale resta su pCloud, spostato in
+`Video originali troppo grandi` solo dopo che il ricompresso è in archivio. **Non si cancella mai.**
+
+La prima volta, sul PC: ffmpeg e la prova che `ssh server2` e i due remote ci sono.
+
+```bash
+sudo apt install -y ffmpeg
+ffmpeg -hide_banner -encoders | grep libx265   # deve esserci
+ssh server2 docker ps --format '{{.Names}}' | grep mongo   # fototimeline-mongo-1
+rclone listremotes                             # pcloud: e lifetime:
+```
+
+Ogni volta che ce ne sono (con 950 GB liberi sul PC ne sta uno da 23 GB con ampio margine):
+
+```bash
+cd ~/projects/fototimeline && git pull
+./deploy/ricomprimi-video-grandi.sh elenco     # la coda su server2 e lo spazio che serve (sola lettura)
+./deploy/ricomprimi-video-grandi.sh avvia      # in sottofondo: si può chiudere il terminale
+./deploy/ricomprimi-video-grandi.sh stato      # a che punto è, velocità, quanto manca
+tail -f ~/video-grandi/ricomprimi.log          # per seguirlo
+./deploy/ricomprimi-video-grandi.sh ferma      # se serve il PC: poi "avvia" riprende da lì
+```
+
+Un video da 20 GB di 4K vuole diverse ore (anche una notte). Finito, entro 5 minuti il video
+compare in **Telefoni** come "ricompresso sul PC, aspetta l'importazione", con il prima e il dopo;
+dopo l'importazione, al giro del telefono, l'originale va in `Video originali troppo grandi`. Se
+l'app dice "non riuscito" (per esempio una durata diversa), da admin **Riprova** lo rimette in coda
+per il PC. Dettagli in DEPLOY.md, "Video troppo grandi per LifetimeCloud".
 
 Controllo da server2:
 
@@ -688,7 +723,10 @@ backup): un'altra cartella di lavoro per ogni giro, per esempio
 | "La ricerca per contenuto non risponde" | il container visione riparte o è fermo | `docker logs fototimeline-visione-1` su server2; si riprova dopo un minuto |
 | il rilascio dice "Manca VISIONE_SEGRETO" | `.env` di prima della ricerca per contenuto | aggiungere `VISIONE_SEGRETO=$(openssl rand -hex 32)` in `~/fototimeline/.env` |
 | scarica: `file name too long` | su pCloud un nome oltre 255 byte (didascalie lunghe), che il disco di Linux non accetta | `git pull` e rilanciare `scarica`: quei file arrivano col nome accorciato (`…~1a2b3c4d.jpg`), e `pulisci` cancella comunque l'originale |
-| Video troppo grande "rimandato: spazio insufficiente in /video-grandi" | su server2 non c'è posto per originale e ricompresso | liberare spazio (`df -h ~/fototimeline`): riprova da solo ogni ora |
+| "N video da ricomprimere sul PC" in Salute | video oltre 20 GB, o rifiutati con 413 | sul PC: `./deploy/ricomprimi-video-grandi.sh avvia` (3.3) |
+| `ricomprimi-video-grandi.sh`: "spazio insufficiente in ~/video-grandi" | sul PC non c'è posto per originale e ricompresso (+2 GB) | liberare spazio sul disco di WSL, poi di nuovo `avvia`: riprende |
+| `ricomprimi-video-grandi.sh`: "non riesco a leggere la coda su server2" | `ssh server2` non va dal PC | `ssh server2 docker ps` deve rispondere senza chiedere la password |
+| Video troppo grande "rimandato: spazio insufficiente in /video-grandi" | solo con `FOTOTIMELINE_VIDEO_GRANDI_DOVE=server`: su server2 non c'è posto | liberare spazio (`df -h ~/fototimeline`), o tornare a `pc` |
 | Video troppo grande "ffmpeg vuole circa ... di memoria" | un 4K a 10 bit (HDR) o un 8K | DEPLOY.md, "Video troppo grandi per LifetimeCloud", Memoria; poi **Riprova** |
 | Takeout: "Spazio insufficiente in /takeout ..." | su server2 non c'è posto per lo zip | liberare spazio (`df -h ~`) o rifare Takeout con zip più piccoli (6.1), poi **Avvia** |
 | Takeout: `didn't find section in config file` per `gdrive:` | il remote non è in `rclone.conf` di server2, o rclone non è stato riavviato | rifare 6.2 |

@@ -25,7 +25,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.unit.DataSize;
@@ -51,6 +53,7 @@ import it.fototimeline.telefono.SincronizzazioneTelefonoTest.Orologio;
 import it.fototimeline.telefono.SorgenteTelefono.Esito;
 import it.fototimeline.telefono.SorgenteTelefono.Giro;
 import it.fototimeline.telefono.VideoGrande.Stato;
+import it.fototimeline.telefono.VideoGrandiProperties.Dove;
 
 /**
  * I video del telefono troppo grandi per LifetimeCloud: riconosciuti,
@@ -123,8 +126,13 @@ class VideoGrandiTest {
         prepara(finto);
     }
 
-    /** Sincronizzazione e video grandi con questo ffmpeg; soglia 2 MB, cloud "montato" in {@link #montaggio}. */
+    /** Come {@link #prepara(StrumentiMedia, Dove)}, con la ricompressione sul server. */
     private void prepara(StrumentiMedia media) {
+        prepara(media, Dove.SERVER);
+    }
+
+    /** Sincronizzazione e video grandi con questo ffmpeg; soglia 2 MB, cloud "montato" in {@link #montaggio}. */
+    private void prepara(StrumentiMedia media, Dove dove) {
         mongo.remove(new Query(), SorgenteTelefono.class);
         RestClient.Builder builder = RestClient.builder();
         rclone = new FintoRclone(builder);
@@ -133,7 +141,7 @@ class VideoGrandiTest {
         var cloud = new CloudProperties("http://rclone:5572", "fototimeline", "password-di-prova", "lifetime:",
                 montaggio.toString(), false, 0);
         var properties = new VideoGrandiProperties(true, 2L, null, lavoro, null, DataSize.ofKilobytes(1), null, null,
-                null, null, 1, null, null, null, null, null, null, null);
+                null, null, 1, null, null, null, null, null, null, null, dove, null);
         videoGrandi = new VideoGrandi(new Rclone(cloud, builder), cloud, mongo, media, new TurnoVideo(), properties,
                 Optional.of(orologio));
         videoGrandi.perTest(Duration.ofMillis(5), Duration.ofSeconds(30), p -> spazio);
@@ -625,6 +633,258 @@ class VideoGrandiTest {
         assertThat(mongo.count(new Query(), VideoGrande.class)).isZero();
     }
 
+    // ------------------------------------------------------------ sul PC
+
+    private static final String SHA_DAL_PC = "ab".repeat(32);
+
+    /** Come fa deploy/ricomprimi-video-grandi.sh: il ricompresso nella cartella dal PC, poi il video segnato in Mongo. */
+    private void ricompressoDalPc(VideoGrande v, long dimensione, long scritta) {
+        rclone.lifetime.put("video-grandi-dal-pc/" + v.id() + ".mp4", dimensione);
+        mongo.updateFirst(Query.query(
+                Criteria.where("_id").is(v.id())
+                        .and("stato").is(Stato.DA_RICOMPRIMERE_PC)),
+                new Update().set("stato", Stato.RICOMPRESSO_PC)
+                        .set("hash", SHA_DAL_PC).set("crf", 24).set("dimensioneRicompresso", scritta)
+                        .set("sulPc", "sul PC: caricato"),
+                VideoGrande.class);
+    }
+
+    @Test
+    void sulPcIlServerMetteInCodaMaNonScaricaNeRicomprime() throws IOException {
+        // Un server senza ffmpeg: sul PC non serve, i video troppo grandi si riconoscono lo stesso.
+        finto.disponibile = false;
+        prepara(finto, Dove.PC);
+        rclone.pcloud.put(XIAOMI + "20260301_195506_293.mp4", 5 * MB);
+        rclone.pcloud.put(XIAOMI + "20260301_182645_998.mp4", MB + 1);
+        rclone.rifiutaOltre = MB;
+        rclone.rifiuto = TROPPO_GRANDE_413.substring("operations/copyfile: ".length());
+
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.errori()).isZero();
+        assertThat(giro.inRicompressione()).isEqualTo(2);
+        assertThat(giro.videoGrandi()).hasSize(2).allMatch(r -> r.contains("da ricomprimere sul PC")
+                && r.contains("./deploy/ricomprimi-video-grandi.sh avvia"));
+        assertThat(mongo.findAll(VideoGrande.class)).extracting(VideoGrande::stato)
+                .containsOnly(Stato.DA_RICOMPRIMERE_PC);
+
+        // La coda del server non fa niente: niente download, niente ffmpeg, niente nel disco del server.
+        videoGrandi.lavoraTutti();
+        videoGrandi.segnala();
+        videoGrandi.controlla();
+        sincronizzazione.sincronizza(marco);
+        assertThat(finto.chiamate).isZero();
+        assertThat(rclone.chiamate("operations/copyfile")).noneMatch(p -> ((String) p.get("dstFs")).startsWith("/"));
+        assertThat(caricamentiDalDisco()).isEmpty();
+        assertThat(mongo.findAll(VideoGrande.class)).extracting(VideoGrande::stato)
+                .containsOnly(Stato.DA_RICOMPRIMERE_PC);
+        try (Stream<Path> dentro = Files.list(lavoro)) {
+            assertThat(dentro).isEmpty();
+        }
+        // Il giro dopo non riprova la copia, e nella pagina si vedono con il loro stato.
+        assertThat(rclone.chiamate("operations/copyfile")).hasSize(1);
+        assertThat(sincronizzazione.stato(sincronizzazione.sorgente(marco).orElseThrow()).videoGrandi())
+                .hasSize(2).allSatisfy(v -> {
+                    assertThat(v.stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+                    assertThat(v.dalPc()).isFalse();
+                });
+        nienteCancellatoDaPcloud();
+    }
+
+    @Test
+    void ricompressoDalPcImportatoEOriginaleSpostatoSenzaCancellareNiente() {
+        prepara(finto, Dove.PC);
+        String percorso = XIAOMI + "20260301_195506_293.mp4";
+        rclone.pcloud.put(percorso, 5 * MB);
+        sincronizzazione.sincronizza(marco);
+        VideoGrande v = unico();
+        assertThat(v.stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+
+        // Il PC carica nella sua cartella e segna il video; il giro del telefono lo prende.
+        ricompressoDalPc(v, MB, MB);
+        Giro preso = sincronizzazione.sincronizza(marco);
+
+        String destinazione = "telefono/Xiaomi 25080RABDG - DCIM - Camera - 20260301_195506_293.mp4";
+        assertThat(preso.esito()).isEqualTo(Esito.OK);
+        assertThat(preso.videoGrandi()).singleElement().asString()
+                .contains("ricompresso sul PC", "5 MB → 1 MB", "aspetta l'importazione");
+        assertThat(rclone.chiamate("operations/movefile")).containsExactly(Map.of(
+                "srcFs", "lifetime:", "srcRemote", "video-grandi-dal-pc/" + v.id() + ".mp4",
+                "dstFs", "lifetime:", "dstRemote", destinazione));
+        assertThat(rclone.lifetime).containsEntry(destinazione, MB)
+                .doesNotContainKey("video-grandi-dal-pc/" + v.id() + ".mp4");
+        VideoGrande caricato = unico();
+        assertThat(caricato.stato()).isEqualTo(Stato.CARICATO);
+        assertThat(caricato.dalPc()).isTrue();
+        assertThat(caricato.destinazione()).isEqualTo(destinazione);
+        assertThat(caricato.hash()).isEqualTo(SHA_DAL_PC);
+        assertThat(mongo.findAll(CopiaTelefono.class)).singleElement().satisfies(c -> {
+            assertThat(c.ricompresso()).isTrue();
+            assertThat(c.dimensione()).isEqualTo(5 * MB);
+            assertThat(c.destinazione()).isEqualTo(destinazione);
+            assertThat(c.proprietario()).isEqualTo("marco");
+        });
+        // Prima dell'importazione l'originale resta dov'è, anche dopo i giorni per cancellare.
+        sincronizzazione.salva(marco, new Modifica(null, null, null, null, null, 7, null));
+        orologio.avanti(Duration.ofHours(2));
+        rclone.chiamate.clear();
+        Giro inAttesa = sincronizzazione.sincronizza(marco);
+        assertThat(inAttesa.ricompressi()).isZero();
+        assertThat(rclone.chiamate("operations/movefile")).isEmpty();
+        assertThat(rclone.pcloud).containsEntry(percorso, 5 * MB);
+
+        // Importato: al giro dopo l'originale va nella cartella dedicata, come per quelli del server.
+        importato(caricato);
+        orologio.avanti(Duration.ofDays(10));
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.cancellati()).isZero();
+        assertThat(giro.ricompressi()).isEqualTo(1);
+        assertThat(giro.videoGrandi()).singleElement().asString().contains("20260301_195506_293.mp4: ricompresso sul PC",
+                "5 MB → 1 MB", "CRF 24", "originale in pcloud:Video originali troppo grandi/20260301_195506_293.mp4");
+        assertThat(rclone.pcloud).containsEntry("Video originali troppo grandi/20260301_195506_293.mp4", 5 * MB)
+                .doesNotContainKey(percorso);
+        assertThat(unico().stato()).isEqualTo(Stato.FATTO);
+        assertThat(sincronizzazione.stato(sincronizzazione.sorgente(marco).orElseThrow()).videoGrandi())
+                .singleElement().satisfies(vista -> {
+                    assertThat(vista.stato()).isEqualTo(Stato.FATTO);
+                    assertThat(vista.dalPc()).isTrue();
+                    assertThat(vista.dimensione()).isEqualTo(5 * MB);
+                    assertThat(vista.dimensioneRicompresso()).isEqualTo(MB);
+                });
+        // Niente cancellato, né su pCloud né su LifetimeCloud; e ffmpeg mai chiamato sul server.
+        assertThat(rclone.chiamate("operations/deletefile")).isEmpty();
+        nienteCancellatoDaPcloud();
+        assertThat(finto.chiamate).isZero();
+    }
+
+    @Test
+    void ilControlloPeriodicoPrendeIlRicompressoSenzaAspettareIlGiro() {
+        prepara(finto, Dove.PC);
+        rclone.pcloud.put(XIAOMI + "VID_1.mp4", 5 * MB);
+        sincronizzazione.sincronizza(marco);
+        ricompressoDalPc(unico(), MB, MB);
+        rclone.chiamate.clear();
+
+        videoGrandi.controlla();
+
+        assertThat(unico().stato()).isEqualTo(Stato.CARICATO);
+        assertThat(rclone.lifetime).containsEntry("telefono/Xiaomi 25080RABDG - DCIM - Camera - VID_1.mp4", MB);
+        // Una seconda volta (o il giro subito dopo) non lo riprende.
+        videoGrandi.controlla();
+        assertThat(rclone.chiamate("operations/movefile")).hasSize(1);
+        assertThat(rclone.chiamate("operations/copyfile")).isEmpty();
+    }
+
+    @Test
+    void unRicompressoDalPcCheNonTornaTornaAlPcEOriginaleResta() {
+        prepara(finto, Dove.PC);
+        String percorso = XIAOMI + "VID_1.mp4";
+        rclone.pcloud.put(percorso, 5 * MB);
+        sincronizzazione.sincronizza(marco);
+        VideoGrande v = unico();
+
+        // Caricato a metà: il PC dice 1 MB, nella cartella ce n'è mezzo.
+        ricompressoDalPc(v, MB / 2, MB);
+        Giro giro = sincronizzazione.sincronizza(marco);
+
+        assertThat(giro.esito()).isEqualTo(Esito.OK);
+        assertThat(giro.videoGrandi()).singleElement().asString().contains("da ricomprimere di nuovo sul PC",
+                "caricato a metà");
+        assertThat(unico().stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+        assertThat(unico().messaggio()).contains("caricato a metà");
+        assertThat(unico().hash()).isNull();
+        assertThat(rclone.chiamate("operations/movefile")).isEmpty();
+        assertThat(mongo.count(new Query(), CopiaTelefono.class)).isZero();
+
+        // Senza file, o più grande dell'originale: lo stesso.
+        rclone.lifetime.clear();
+        ricompressoDalPc(v, MB, MB);
+        rclone.lifetime.clear();
+        videoGrandi.controlla();
+        assertThat(unico().stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+        assertThat(unico().messaggio()).contains("non è in lifetime:video-grandi-dal-pc/" + v.id() + ".mp4");
+        ricompressoDalPc(v, 6 * MB, 6 * MB);
+        videoGrandi.controlla();
+        assertThat(unico().stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+        assertThat(unico().messaggio()).contains("non è più piccolo dell'originale");
+        assertThat(rclone.chiamate("operations/movefile")).isEmpty();
+
+        // Rifatto bene, si prende.
+        rclone.lifetime.clear();
+        ricompressoDalPc(v, MB, MB);
+        videoGrandi.controlla();
+        assertThat(unico().stato()).isEqualTo(Stato.CARICATO);
+        assertThat(rclone.pcloud).containsEntry(percorso, 5 * MB);
+        assertThat(rclone.chiamate("operations/deletefile")).isEmpty();
+        nienteCancellatoDaPcloud();
+    }
+
+    @Test
+    void unRicompressoDalPcGiaImportatoNonSiRifa() {
+        // L'app si è fermata dopo lo spostamento e l'importazione l'ha già preso: c'è la scheda col suo SHA-256.
+        prepara(finto, Dove.PC);
+        rclone.pcloud.put(XIAOMI + "VID_1.mp4", 5 * MB);
+        sincronizzazione.sincronizza(marco);
+        ricompressoDalPc(unico(), MB, MB);
+        rclone.lifetime.clear();
+        Foto foto = new Foto();
+        foto.setNomeOriginale("Xiaomi 25080RABDG - DCIM - Camera - VID_1.mp4");
+        foto.setPercorso("2026/03/01/Xiaomi 25080RABDG - DCIM - Camera - VID_1.mp4");
+        foto.setHash(SHA_DAL_PC);
+        foto.setCaricataIl(Instant.now());
+        fotoRepository.save(foto);
+
+        videoGrandi.controlla();
+
+        assertThat(unico().stato()).isEqualTo(Stato.CARICATO);
+        assertThat(mongo.findAll(CopiaTelefono.class)).singleElement()
+                .satisfies(c -> assertThat(c.ricompresso()).isTrue());
+        // E al giro l'originale va nella cartella dedicata.
+        assertThat(sincronizzazione.sincronizza(marco).ricompressi()).isEqualTo(1);
+        assertThat(rclone.pcloud).containsKey("Video originali troppo grandi/VID_1.mp4");
+        nienteCancellatoDaPcloud();
+    }
+
+    @Test
+    void sulPcLaCodaDelServerPassaAlPcEAnnullaERiprovaVannoLi() {
+        prepara(finto, Dove.SERVER);
+        rclone.pcloud.put(XIAOMI + "VID_1.mp4", 5 * MB);
+        rclone.pcloud.put(XIAOMI + "VID_2.mp4", 5 * MB);
+        rclone.pcloud.put(XIAOMI + "VID_3.mp4", 5 * MB);
+        sincronizzazione.sincronizza(marco);
+        List<VideoGrande> tre = mongo.findAll(VideoGrande.class);
+        assertThat(tre).extracting(VideoGrande::stato).containsOnly(Stato.IN_CODA);
+        String errore = tre.get(2).id();
+        mongo.updateFirst(Query.query(
+                Criteria.where("_id").is(tre.get(1).id())),
+                Update.update("stato", Stato.RIMANDATO), VideoGrande.class);
+        mongo.updateFirst(Query.query(
+                Criteria.where("_id").is(errore)),
+                Update.update("stato", Stato.ERRORE), VideoGrande.class);
+
+        // Il rilascio con dove=pc: all'avvio quelli in coda e rimandati passano al PC, l'errore aspetta Riprova.
+        prepara(finto, Dove.PC);
+        videoGrandi.riprendi();
+
+        assertThat(mongo.findById(tre.get(0).id(), VideoGrande.class).stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+        assertThat(mongo.findById(tre.get(1).id(), VideoGrande.class).stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+        assertThat(mongo.findById(errore, VideoGrande.class).stato()).isEqualTo(Stato.ERRORE);
+        assertThat(videoGrandi.riprova(errore)).isTrue();
+        assertThat(mongo.findById(errore, VideoGrande.class).stato()).isEqualTo(Stato.DA_RICOMPRIMERE_PC);
+        assertThat(videoGrandi.annulla(errore)).isTrue();
+        assertThat(mongo.findById(errore, VideoGrande.class).stato()).isEqualTo(Stato.ANNULLATO);
+        videoGrandi.lavoraTutti();
+        assertThat(finto.chiamate).isZero();
+
+        // E indietro: con dove=server tornano in coda qui.
+        prepara(finto, Dove.SERVER);
+        videoGrandi.riprendi();
+        assertThat(mongo.findById(tre.get(0).id(), VideoGrande.class).stato()).isEqualTo(Stato.IN_CODA);
+    }
+
     /** Come se l'importazione automatica l'avesse preso: una scheda con il suo SHA-256, fuori dalla cartella automatica. */
     private void importato(VideoGrande v) {
         Foto foto = new Foto();
@@ -661,6 +921,10 @@ class VideoGrandiTest {
         double durataRicompresso = 10;
         FormatoVideo originale = new FormatoVideo(null, 3840, 2160, "yuv420p");
         boolean fallisce;
+        /** False: come un server senza ffmpeg. */
+        boolean disponibile = true;
+        /** Quante volte si è chiesto qualcosa a ffmpeg o ffprobe. */
+        int chiamate;
 
         FintoMedia() {
             super(new MediaProperties(null, null, null));
@@ -668,13 +932,14 @@ class VideoGrandiTest {
 
         @Override
         public boolean videoDisponibile() {
-            return true;
+            return disponibile;
         }
 
         @Override
         public void ricomprimi(Path video, Path mp4, int crf, String preset, int thread, String parametriX265,
                 long limite, DoubleConsumer secondiFatti, BooleanSupplier annullata) throws IOException {
             this.crf.add(crf);
+            chiamate++;
             if (fallisce) {
                 throw new IOException("ffmpeg è uscito con 1: Conversion failed!");
             }
@@ -685,6 +950,7 @@ class VideoGrandiTest {
 
         @Override
         public FormatoVideo formato(Path video) {
+            chiamate++;
             boolean primo = video.getFileName().toString().startsWith("originale");
             return new FormatoVideo(primo ? durataOriginale : durataRicompresso, originale.larghezza(),
                     originale.altezza(), originale.pixel());

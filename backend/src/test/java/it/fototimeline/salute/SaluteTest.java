@@ -230,10 +230,11 @@ class SaluteTest {
         mongo.insert(new VideoGrande("v1", "pcloud:Automatic Upload", "marco", "marco",
                 "Xiaomi 25080RABDG/DCIM/Camera/20260301_195506_293.mp4", 23 * gb, null, "telefono", "oltre i 20000 MB",
                 VideoGrande.Stato.FATTO, adesso, adesso, null, 0, 24, 6 * gb, "abc", "telefono/x.mp4", adesso,
-                "pcloud:Video originali troppo grandi/20260301_195506_293.mp4", adesso, null));
+                "pcloud:Video originali troppo grandi/20260301_195506_293.mp4", adesso, null, null, null));
         mongo.insert(new VideoGrande("v2", "pcloud:Automatic Upload", "marco", "marco",
                 "Xiaomi 25080RABDG/DCIM/Camera/20260301_182645_998.mp4", 19 * gb, null, "telefono", "413",
-                VideoGrande.Stato.IN_CODA, adesso, adesso, null, 0, null, null, null, null, null, null, null, null));
+                VideoGrande.Stato.IN_CODA, adesso, adesso, null, 0, null, null, null, null, null, null, null, null, null,
+                null));
 
         VoceSalute v = voce(salute.controlla(), "telefono");
 
@@ -253,12 +254,39 @@ class SaluteTest {
         mongo.insert(new VideoGrande("v1", "pcloud:Automatic Upload", "marco", "marco", "Camera/VID_1.mp4",
                 23L * 1024 * 1024 * 1024, null, "telefono", "oltre i 20000 MB", VideoGrande.Stato.RIMANDATO, adesso,
                 adesso, adesso.plus(Duration.ofHours(1)), 0, null, null, null, null, null, null, null,
-                "spazio insufficiente in /video-grandi: servono 45,0 GB, liberi 12,0 GB"));
+                "spazio insufficiente in /video-grandi: servono 45,0 GB, liberi 12,0 GB", null, null));
 
         VoceSalute v = voce(salute.controlla(), "telefono");
 
         assertThat(v.stato()).isEqualTo(StatoSalute.ATTENZIONE);
         assertThat(v.messaggio()).contains("VID_1.mp4", "spazio insufficiente", "liberi 12,0 GB");
+    }
+
+    @Test
+    void iVideoDaRicomprimereSulPcSonoGialliColComando() {
+        telefono("marco", "Telefono di Marco", true, "pcloud:Automatic Upload", 6, giroOk(Duration.ofHours(1)));
+        long gb = 1024L * 1024 * 1024;
+        mongo.insert(new VideoGrande("v1", "pcloud:Automatic Upload", "marco", "marco",
+                "Xiaomi 25080RABDG/DCIM/Camera/20260301_195506_293.mp4", 23 * gb, null, "telefono", "oltre i 20000 MB",
+                VideoGrande.Stato.DA_RICOMPRIMERE_PC, adesso, adesso, null, 0, null, null, null, null, null, null,
+                null, null, null, "sul PC: ricomprimo in H.265 (CRF 24) 37%"));
+        mongo.insert(new VideoGrande("v2", "pcloud:Automatic Upload", "marco", "marco",
+                "Xiaomi 25080RABDG/DCIM/Camera/20260301_182645_998.mp4", 19 * gb, null, "telefono", "413",
+                VideoGrande.Stato.DA_RICOMPRIMERE_PC, adesso, adesso, null, 0, null, null, null, null, null, null,
+                null, null, null, null));
+        mongo.insert(new VideoGrande("v3", "pcloud:Automatic Upload", "marco", "marco", "Camera/VID_3.mp4", 21 * gb,
+                null, "telefono", "oltre i 20000 MB", VideoGrande.Stato.FATTO, adesso, adesso, null, 0, 28, 5 * gb,
+                "abc", "telefono/Camera - VID_3.mp4", adesso, "pcloud:Video originali troppo grandi/VID_3.mp4", adesso,
+                null, true, null));
+
+        VoceSalute v = voce(salute.controlla(), "telefono");
+
+        assertThat(v.stato()).isEqualTo(StatoSalute.ATTENZIONE);
+        assertThat(v.messaggio()).contains("2 video da ricomprimere sul PC", "./deploy/ricomprimi-video-grandi.sh avvia");
+        assertThat(v.dettagli()).anySatisfy(d -> assertThat(d).contains("20260301_195506_293.mp4 (23,0 GB)",
+                "da ricomprimere sul PC", "CRF 24) 37%"));
+        assertThat(v.dettagli()).anySatisfy(d -> assertThat(d).contains("VID_3.mp4 (21,0 GB → 5,0 GB)",
+                "ricompresso sul PC (CRF 28)", "originale in pcloud:Video originali troppo grandi/VID_3.mp4"));
     }
 
     @Test

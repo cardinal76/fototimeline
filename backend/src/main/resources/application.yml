@@ -91,10 +91,15 @@ fototimeline:
     # vuoto = al primo amministratore che entra.
     proprietario: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:}
     # Video troppo grandi per LifetimeCloud (oltre 20480 MB, o rifiutati con
-    # "File too large"/413): si ricomprimono in H.265 sul server, uno alla
-    # volta, e l'originale va su pCloud in una cartella sua (DEPLOY.md).
+    # "File too large"/413): si ricomprimono in H.265, uno alla volta, e
+    # l'originale va su pCloud in una cartella sua (DEPLOY.md).
     video-grandi:
       attiva: ${FOTOTIMELINE_VIDEO_GRANDI_ATTIVA:true}
+      # pc: il server li mette in coda e li ricomprime il PC (deploy/ricomprimi-video-grandi.sh),
+      # qui niente download né ffmpeg; server: li ricomprime il server, come prima.
+      dove: ${FOTOTIMELINE_VIDEO_GRANDI_DOVE:pc}
+      # Dove il PC carica i ricompressi, dalla radice del remote del cloud (fuori dalla cartella automatica).
+      cartella-dal-pc: ${FOTOTIMELINE_VIDEO_GRANDI_DAL_PC:video-grandi-dal-pc}
       # Oltre questi MB non si prova nemmeno a copiare; è anche il tetto del ricompresso.
       massimo-mb: ${FOTOTIMELINE_VIDEO_MAX_MB:20000}
       # Dalla radice del remote del telefono (pcloud:...): la sincronizzazione la salta.

@@ -390,6 +390,18 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   (`FormatoVideo.memoriaX265`) oltre `memoria-massima` è un errore che lo dice.
   `inCopia` (le destinazioni in scrittura) è di `VideoGrandi` e condiviso col giro: un nome si
   prenota lì prima di scriverci.
+- **Sul PC** (`fototimeline.telefono.video-grandi.dove`, `FOTOTIMELINE_VIDEO_GRANDI_DOVE`, predefinito
+  `pc`; `server` è quello sopra): il giro mette in coda come `DA_RICOMPRIMERE_PC` e il server non
+  scarica né lancia ffmpeg (`ricomprimeQui`, anche `prossimo` lo guarda; ffmpeg non serve per
+  `attiva`). `deploy/ricomprimi-video-grandi.sh` (sul PC) legge la coda via `ssh server2 ... mongosh`,
+  ricomprime con lo stesso comando, carica in `cartella-dal-pc/<id>.mp4` sul remote del cloud e con
+  un `updateOne` condizionato (solo da `DA_RICOMPRIMERE_PC`) scrive `RICOMPRESSO_PC`, `hash`, `crf`,
+  `dimensioneRicompresso`, `sulPc` (o `ERRORE` col motivo). `prendiDalPc` (giro e `controlla`,
+  `synchronized`) ricontrolla file e dimensione, lo sposta con `movefile` nella cartella automatica
+  (nome prenotato in `inCopia`), `registra` nel registro `ricompresso` e mette `CARICATO`, `dalPc`;
+  se non torna, di nuovo `DA_RICOMPRIMERE_PC` col motivo. Il PC non sceglie destinazioni né tocca
+  il registro: tenere così. All'avvio `riprendi` passa la coda alla modalità attuale (gli `ERRORE`
+  aspettano Riprova). Test dello script nella sezione 9 di `deploy/test-foto.sh`.
 - **Di chi è un file importato**: `LavoriImportazione` passa all'importazione
   automatica i `ProvenienzaFile` (oggi solo `SincronizzazioneTelefono.caricataDa`):
   si cerca nel registro la copia con quella `destinazione` (la più recente) e

@@ -95,10 +95,14 @@ services:
       FOTOTIMELINE_VIDEO_ATTIVA: ${FOTOTIMELINE_VIDEO_ATTIVA:-true}
       FOTOTIMELINE_VIDEO_THREAD: ${FOTOTIMELINE_VIDEO_THREAD:-2}
       FOTOTIMELINE_VIDEO_RISOLUZIONE: ${FOTOTIMELINE_VIDEO_RISOLUZIONE:-1080}
-      # Video del telefono troppo grandi per LifetimeCloud (oltre 20480 MB, o 413): ricompressi in H.265 qui,
-      # un video alla volta, originale scaricato in /video-grandi (disco di server2) e poi spostato su pCloud
-      # nella cartella FOTOTIMELINE_VIDEO_GRANDI_PCLOUD (DEPLOY.md, "Video troppo grandi").
+      # Video del telefono troppo grandi per LifetimeCloud (oltre 20480 MB, o 413): ricompressi in H.265,
+      # di predefinito sul PC (deploy/ricomprimi-video-grandi.sh, che carica in lifetime:video-grandi-dal-pc);
+      # con FOTOTIMELINE_VIDEO_GRANDI_DOVE=server qui, un video alla volta, originale scaricato in
+      # /video-grandi (disco di server2). Poi l'originale si sposta su pCloud nella cartella
+      # FOTOTIMELINE_VIDEO_GRANDI_PCLOUD (DEPLOY.md, "Video troppo grandi").
       FOTOTIMELINE_VIDEO_GRANDI_ATTIVA: ${FOTOTIMELINE_VIDEO_GRANDI_ATTIVA:-true}
+      FOTOTIMELINE_VIDEO_GRANDI_DOVE: ${FOTOTIMELINE_VIDEO_GRANDI_DOVE:-pc}
+      FOTOTIMELINE_VIDEO_GRANDI_DAL_PC: ${FOTOTIMELINE_VIDEO_GRANDI_DAL_PC:-video-grandi-dal-pc}
       FOTOTIMELINE_VIDEO_MAX_MB: ${FOTOTIMELINE_VIDEO_MAX_MB:-20000}
       FOTOTIMELINE_VIDEO_GRANDI_PCLOUD: ${FOTOTIMELINE_VIDEO_GRANDI_PCLOUD:-Video originali troppo grandi}
       FOTOTIMELINE_VIDEO_GRANDI_CARTELLA: /video-grandi

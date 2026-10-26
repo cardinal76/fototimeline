@@ -925,14 +925,25 @@ export class App {
       case 'RIMANDATO':
         return `rimandato: ${v.messaggio ?? ''}`;
       case 'CARICATO':
-        return "ricompresso, aspetta l'importazione";
+        return `ricompresso${v.dalPc ? ' sul PC' : ''}, aspetta l'importazione`;
       case 'FATTO':
-        return 'ricompresso e importato';
+        return `ricompresso${v.dalPc ? ' sul PC' : ''} e importato`;
+      case 'DA_RICOMPRIMERE_PC':
+        return 'da ricomprimere sul PC' + (v.sulPc ? `, ${v.sulPc}` : v.messaggio ? `, ${v.messaggio}` : '');
+      case 'RICOMPRESSO_PC':
+        return 'ricompresso sul PC, entra a momenti nella cartella automatica';
       case 'ERRORE':
         return `non riuscito: ${v.messaggio ?? ''}`;
       case 'ANNULLATO':
         return 'annullato';
     }
+  }
+
+  /** Il comando da lanciare sul PC per i video che lo aspettano (DEPLOY.md, "Video troppo grandi"). */
+  protected readonly comandoVideoGrandi = './deploy/ricomprimi-video-grandi.sh avvia';
+
+  protected daRicomprimereSulPc(t: StatoTelefono): number {
+    return (t.videoGrandi ?? []).filter((v) => v.stato === 'DA_RICOMPRIMERE_PC').length;
   }
 
   protected async annullaVideoGrande(v: VideoGrande): Promise<void> {

@@ -925,8 +925,14 @@
               @if (t.videoGrandi?.length) {
                 <h4>Video troppo grandi per il cloud</h4>
                 <p class="tenue">
-                  Ricompressi in H.265 sul server, uno alla volta; l'originale resta su pCloud, nella sua cartella.
+                  Ricompressi in H.265 sul PC, uno alla volta; l'originale resta su pCloud, nella sua cartella.
                 </p>
+                @if (daRicomprimereSulPc(t); as n) {
+                  <p>
+                    {{ n }} video da ricomprimere sul PC: <code>{{ comandoVideoGrandi }}</code>
+                    (poi <code>./deploy/ricomprimi-video-grandi.sh stato</code> per seguirlo).
+                  </p>
+                }
                 <ul class="video-grandi">
                   @for (v of t.videoGrandi; track v.id) {
                     <li>
@@ -946,7 +952,12 @@
                         <br /><span class="tenue">Originale in <code>{{ v.originaleIn }}</code></span>
                       }
                       @if (galleria.io()?.admin) {
-                        @if (v.stato === 'IN_CODA' || v.stato === 'IN_CORSO' || v.stato === 'RIMANDATO') {
+                        @if (
+                          v.stato === 'IN_CODA' ||
+                          v.stato === 'IN_CORSO' ||
+                          v.stato === 'RIMANDATO' ||
+                          v.stato === 'DA_RICOMPRIMERE_PC'
+                        ) {
                           <button type="button" class="piccolo" (click)="annullaVideoGrande(v)">Annulla</button>
                         }
                         @if (v.stato === 'ERRORE' || v.stato === 'ANNULLATO' || v.stato === 'RIMANDATO') {
