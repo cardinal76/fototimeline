@@ -204,7 +204,11 @@ final class RilevamentoEventi {
     }
 
     private void assorbiSospesi() {
-        sospesi.forEach(gruppo::unisci);
+        // Senza nessuna foto (un tratto rimasto vuoto, per esempio dopo il cestino) non c'è un gruppo:
+        // gruppo::unisci su null lanciava anche con sospesi vuoto, e il ricalcolo leggero restava fermo lì.
+        if (gruppo != null) {
+            sospesi.forEach(gruppo::unisci);
+        }
         sospesi.clear();
     }
 

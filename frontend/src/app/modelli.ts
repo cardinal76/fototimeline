@@ -174,6 +174,41 @@ export type StatoImportazione = 'IN_CORSO' | 'FINITA' | 'ANNULLATA' | 'FALLITA';
  * "Indicizza archivio" o "Calcola luoghi" (lì importate = con un luogo,
  * duplicate = senza, cioè in mare aperto).
  */
+/** Un lavoro del giro notturno (GiroNotturno.Risultato). */
+export interface RisultatoNotte {
+  passo: 'INDICIZZA' | 'LUOGHI' | 'EVENTI' | 'CONTENUTO' | 'VOLTI' | 'IMPRONTE';
+  esito: 'FATTO' | 'SPENTO' | 'ANNULLATO' | 'FALLITO';
+  quanti: number;
+  cosa: string;
+  errori: number;
+  nota?: string | null;
+  iniziatoIl: string;
+  finitoIl: string;
+}
+
+export interface GiroNotte {
+  esito: 'IN_CORSO' | 'FINITO' | 'SALTATO' | 'ANNULLATO' | 'FALLITO';
+  aMano: boolean;
+  chi?: string | null;
+  iniziatoIl: string;
+  finitoIl?: string | null;
+  passo?: RisultatoNotte['passo'] | null;
+  messaggio?: string | null;
+  passi: RisultatoNotte[];
+}
+
+/** Il giro notturno (GET /api/notte, admin): acceso o no, quando, l'ultimo. */
+export interface StatoNotte {
+  attivo: boolean;
+  cron?: string | null;
+  fuso: string;
+  /** "ogni notte alle 02:30"; null se spento. */
+  orario?: string | null;
+  prossimo?: string | null;
+  inCorso: boolean;
+  ultimo?: GiroNotte | null;
+}
+
 export interface LavoroImportazione {
   id: string;
   cartella: string;

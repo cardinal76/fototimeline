@@ -12,6 +12,7 @@ import {
   Foto,
   Giorno,
   Io,
+  StatoNotte,
   LavoroImportazione,
   Modifica,
   Operazione,
@@ -63,6 +64,8 @@ export class Galleria {
   readonly caricamento = signal<StatoCaricamento | null>(null);
   readonly avviso = signal<string | null>(null);
   readonly io = signal<Io | null>(null);
+  /** Il giro notturno, per Strumenti (solo amministratore). */
+  readonly notte = signal<StatoNotte | null>(null);
   readonly cloud = signal<StatoCloud | null>(null);
   readonly cambioCloud = signal(false);
   /** Ultimo backup dei metadati (solo per gli admin). */
@@ -172,6 +175,7 @@ export class Galleria {
         this.ricarica();
         this.aggiornaLuoghi();
         if (io.admin) {
+          this.aggiornaNotte();
           this.aggiornaBackup();
           this.seguiConversioni();
           this.seguiSalute();
@@ -188,6 +192,18 @@ export class Galleria {
       },
       error: () => this.avvisa('Il server non risponde: è acceso?'),
     });
+  }
+
+  // ------------------------------------------------------------ giro notturno
+
+  aggiornaNotte(): void {
+    this.api.notte().subscribe({ next: (n) => this.notte.set(n), error: () => this.notte.set(null) });
+  }
+
+  /** "Lancia ora il giro notturno": i suoi lavori compaiono nella barra come quelli lanciati a mano. */
+  async lanciaGiroNotturno(): Promise<void> {
+    this.notte.set(await firstValueFrom(this.api.avviaNotte()));
+    this.seguiImportazione();
   }
 
   // ------------------------------------------------------------ importazioni in sottofondo

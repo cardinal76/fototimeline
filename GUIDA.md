@@ -338,7 +338,10 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Carica foto**: dal browser, direttamente in archivio. Dal telefono Android anche con
   **Condividi → FotoTimeline** dalla galleria (qui sotto).
 - **Importa cartella**: una cartella di LifetimeCloud (caricata via WebDAV), con "sposta".
-- **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`.
+- **Indicizza archivio**: per le foto messe a mano in `FotoTimeline/AAAA/MM/GG`. Di notte lo fa
+  già da solo il **giro notturno** (alle 2:30, con luoghi, eventi, contenuto e volti delle foto
+  nuove): a mano serve solo per non aspettare. **Lancia ora il giro notturno** fa tutto il giro
+  subito; l'esito, con quante foto nuove ha trovato, è in **Salute**.
 - **Converti video**: una volta, dopo il trasloco o l'indicizzazione, per i video vecchi in HEVC
   (iPhone) che Firefox e Chrome non sempre riproducono. La coda gira in sottofondo, uno alla volta
   (in basso a sinistra quanti fatti e quanti da fare); i video nuovi ci entrano da soli. Col cloud

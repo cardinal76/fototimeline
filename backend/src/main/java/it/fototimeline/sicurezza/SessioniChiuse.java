@@ -19,8 +19,9 @@ import jakarta.servlet.http.HttpSession;
  * Il ruolo entra nella sessione al login, e la sessione dura ore: dopo un
  * cambio dalla pagina Utenti (ruolo, disattivato, password nuova, eliminato)
  * le sessioni aperte prima non valgono più. La richiesta prosegue come se
- * non fosse entrato: le API rispondono 401 (Angular torna al login) e le
- * pagine portano a Keycloak, che dà il ruolo nuovo o rifiuta chi è disattivato.
+ * non fosse entrato: le API rispondono 401 e le pagine portano alla pagina di
+ * accesso (Angular fa lo stesso); da lì Keycloak dà il ruolo nuovo o rifiuta
+ * chi è disattivato.
  */
 final class SessioniChiuse extends OncePerRequestFilter {
 

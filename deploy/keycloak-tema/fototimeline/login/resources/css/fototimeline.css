@@ -1,0 +1,197 @@
+/*
+ * FotoTimeline sul login di Keycloak (tema "keycloak", template classici).
+ * Gli stessi colori dell'app (frontend/src/styles.css): scuro di base, chiaro
+ * se il telefono o il computer è in modalità chiara.
+ */
+:root {
+  --ft-sfondo: #0f1115;
+  --ft-superficie: #16181d;
+  --ft-superficie-2: #22252c;
+  --ft-bordo: #2a2d35;
+  --ft-testo: #e8eaee;
+  --ft-testo-tenue: #9aa0ab;
+  --ft-accento: #4f8cff;
+  --ft-accento-forte: #8db4ff;
+  --ft-pericolo: #e5484d;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ft-sfondo: #f6f7f9;
+    --ft-superficie: #ffffff;
+    --ft-superficie-2: #eceef2;
+    --ft-bordo: #dcdfe5;
+    --ft-testo: #1b1d22;
+    --ft-testo-tenue: #636a75;
+    --ft-accento: #2f6fe8;
+    --ft-accento-forte: #1f55c0;
+    color-scheme: light;
+  }
+}
+
+/* ---- Pagina: niente immagine di sfondo di Keycloak. */
+html.login-pf,
+.login-pf body {
+  background: var(--ft-sfondo) none !important;
+  color: var(--ft-testo);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.login-pf-page {
+  padding-top: clamp(24px, 6vh, 64px);
+}
+
+/* ---- Intestazione: logo e nome dell'app (il nome viene dal "Display name" del realm). */
+#kc-header {
+  color: var(--ft-testo);
+  text-transform: none;
+}
+#kc-header-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px 24px;
+  color: var(--ft-testo);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: normal;
+}
+#kc-header-wrapper::before {
+  content: '';
+  width: 76px;
+  height: 76px;
+  border-radius: 19px;
+  background: url(../img/fototimeline.png) center / cover no-repeat;
+  box-shadow: 0 10px 28px -10px var(--ft-accento);
+}
+
+/* ---- La scheda del modulo */
+.login-pf-page .card-pf {
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 28px 32px 32px;
+  background: var(--ft-superficie);
+  color: var(--ft-testo);
+  border: 1px solid var(--ft-bordo);
+  border-top: 1px solid var(--ft-bordo);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.5);
+}
+.login-pf-page .login-pf-header {
+  margin-bottom: 18px;
+}
+#kc-page-title {
+  color: var(--ft-testo);
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ---- Campi */
+.login-pf-page label,
+.login-pf-page .control-label,
+.pf-c-form__label-text {
+  color: var(--ft-testo);
+  font-weight: 500;
+}
+.login-pf-page .form-control,
+.login-pf-page .pf-c-form-control,
+#username,
+#password,
+#password-new,
+#password-confirm,
+#otp {
+  min-height: 44px;
+  background: var(--ft-superficie-2);
+  color: var(--ft-testo);
+  border: 1px solid var(--ft-bordo);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.login-pf-page .form-control:focus,
+.login-pf-page .pf-c-form-control:focus,
+#username:focus,
+#password:focus {
+  border-color: var(--ft-accento);
+  outline: 2px solid color-mix(in srgb, var(--ft-accento) 40%, transparent);
+  outline-offset: 1px;
+}
+.pf-c-button.pf-m-control,
+.pf-c-input-group button {
+  background: var(--ft-superficie-2);
+  color: var(--ft-testo-tenue);
+  border-color: var(--ft-bordo);
+}
+
+/* ---- Pulsante "Accedi" */
+#kc-login,
+.login-pf-page .btn-primary,
+.login-pf-page .pf-c-button.pf-m-primary {
+  min-height: 48px;
+  background: var(--ft-accento);
+  border: 1px solid var(--ft-accento);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  box-shadow: none;
+}
+#kc-login:hover,
+.login-pf-page .btn-primary:hover,
+.login-pf-page .pf-c-button.pf-m-primary:hover {
+  filter: brightness(1.1);
+}
+
+/* ---- Link, avvisi, lingua */
+.login-pf-page a,
+#kc-form-options a,
+#kc-registration a {
+  color: var(--ft-accento-forte);
+}
+#kc-form-options,
+#kc-form-options .checkbox label,
+.login-pf-page .help-block,
+#kc-info,
+#kc-info-wrapper {
+  color: var(--ft-testo-tenue);
+  background: transparent;
+}
+.alert,
+.pf-c-alert {
+  border-radius: 10px;
+}
+.alert-error,
+.pf-c-alert.pf-m-danger {
+  background: color-mix(in srgb, var(--ft-pericolo) 14%, var(--ft-superficie));
+  border-color: var(--ft-pericolo);
+  color: var(--ft-testo);
+}
+#kc-locale ul {
+  background: var(--ft-superficie);
+  border: 1px solid var(--ft-bordo);
+}
+#kc-locale-dropdown a,
+#kc-current-locale-link {
+  color: var(--ft-testo-tenue);
+}
+
+/* ---- Telefono: la scheda prende la larghezza, con 16px di margine. */
+@media (max-width: 767px) {
+  .login-pf-page {
+    padding: 16px;
+  }
+  .login-pf-page .card-pf {
+    padding: 24px 20px 28px;
+    border-radius: 18px;
+  }
+  #kc-header-wrapper {
+    font-size: 24px;
+    padding-bottom: 18px;
+  }
+}

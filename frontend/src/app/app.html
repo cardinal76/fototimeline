@@ -3,19 +3,9 @@
   il resto (importazioni, archivio, sistema) sta nel menu Strumenti.
   Sul telefono (sotto gli 800px) resta una riga sola e il menu ☰ prende anche vista, Seleziona e utente.
 -->
-<!-- Entrato su Keycloak ma senza nessuno dei tre ruoli: il server risponde 403 a tutto. -->
+<!-- Entrato su Keycloak ma senza nessuno dei tre ruoli: il server risponde 403 a tutto. Stesso aspetto della pagina di accesso. -->
 @if (galleria.senzaAccesso()) {
-  <div class="senza-accesso" role="alertdialog" aria-labelledby="titolo-accesso" aria-modal="true">
-    <div class="riquadro">
-      <p class="logo" aria-hidden="true">◐</p>
-      <h1 id="titolo-accesso">Chiedi l'accesso</h1>
-      <p>
-        Ciao {{ galleria.io()?.nome }}: il tuo account (<code>{{ galleria.io()?.username }}</code>) non ha ancora un ruolo in
-        FotoTimeline. Chiedi a un amministratore di dartelo, poi esci e rientra.
-      </p>
-      <button type="button" class="primario" (click)="logout()">Esci</button>
-    </div>
-  </div>
+  <app-accesso modo="chiedi" [nome]="galleria.io()?.nome" [username]="galleria.io()?.username" />
 }
 
 <header class="barra" #barra>
@@ -314,6 +304,19 @@
             >
               Calcola eventi
             </button>
+            @if (galleria.notte(); as n) {
+              <button
+                type="button"
+                class="voce"
+                role="menuitem"
+                [disabled]="n.inCorso || galleria.lavoroOccupato() || !galleria.archivioDisponibile()"
+                [title]="titoloNotte(n)"
+                (click)="chiudiMenu(); lanciaNotte()"
+              >
+                {{ n.inCorso ? 'Giro notturno in corso…' : 'Lancia ora il giro notturno' }}
+                <small class="tenue">{{ n.attivo ? n.orario : 'automatico spento' }}</small>
+              </button>
+            }
             @if (galleria.archivioDisponibile()) {
               <button
                 type="button"

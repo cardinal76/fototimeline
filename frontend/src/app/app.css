@@ -570,34 +570,3 @@ main[hidden] {
   gap: 0.4rem;
 }
 
-/* "Chiedi l'accesso": entrato su Keycloak senza un ruolo di FotoTimeline. Copre tutta l'app. */
-.senza-accesso {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  background: var(--sfondo, var(--superficie));
-}
-.senza-accesso .riquadro {
-  width: min(460px, 100%);
-  display: grid;
-  gap: 0.9rem;
-  justify-items: center;
-  text-align: center;
-  padding: 1.6rem;
-  background: var(--superficie);
-  border: 1px solid var(--bordo);
-  border-radius: 14px;
-}
-.senza-accesso h1 {
-  margin: 0;
-  font-size: 1.4rem;
-}
-.senza-accesso p {
-  margin: 0;
-}
-.senza-accesso .logo {
-  font-size: 2rem;
-}

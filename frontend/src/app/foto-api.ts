@@ -20,6 +20,7 @@ import {
   Filtro,
   Foto,
   Io,
+  StatoNotte,
   LavoroContenuto,
   Luogo,
   FileScartato,
@@ -241,6 +242,16 @@ export class FotoApi {
 
   cartelle(percorso?: string): Observable<Cartella> {
     return this.http.get<Cartella>('/api/cartelle', { params: percorso ? { percorso } : {} });
+  }
+
+  /** Il giro notturno (admin): orario e ultimo giro. */
+  notte(): Observable<StatoNotte> {
+    return this.http.get<StatoNotte>('/api/notte');
+  }
+
+  /** "Lancia ora il giro notturno" (admin): 409 se è già in corso o il cloud è smontato. */
+  avviaNotte(): Observable<StatoNotte> {
+    return this.http.post<StatoNotte>('/api/notte/avvia', {});
   }
 
   io(): Observable<Io> {

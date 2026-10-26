@@ -121,6 +121,7 @@ class SicurezzaTest {
     static final String INVENTARIO = """
             *      /error                                         PUBBLICO
             GET    /salute                                        PUBBLICO
+            GET    /accesso                                       PUBBLICO
             GET    /c/{token}                                     PUBBLICO
             GET    /api/condivise/{token}                         PUBBLICO
             GET    /api/condivise/{token}/foto/{id}/miniatura     PUBBLICO
@@ -196,6 +197,9 @@ class SicurezzaTest {
             POST   /api/archivio/video/annulla                    ADMIN
             POST   /api/archivio/luoghi                           ADMIN
             POST   /api/archivio/eventi                           ADMIN
+            GET    /api/notte                                     ADMIN
+            POST   /api/notte/avvia                               ADMIN
+            POST   /api/notte/annulla                             ADMIN
             POST   /api/contenuto/indicizza                       ADMIN
             POST   /api/contenuto/annulla                         ADMIN
             POST   /api/volti/riconosci                           ADMIN
@@ -363,17 +367,128 @@ class SicurezzaTest {
 
 
     @Test
-    void senzaLoginLeApiRispondono401ELePagineMandanoAKeycloak() throws Exception {
-        mvc.perform(get("/api/foto")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/")).andExpect(status().isFound())
-                .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+    void senzaLoginLeApiRispondono401ELePagineMandanoAllaPaginaDiAccesso() throws Exception {
+        // Le API: 401 senza redirect né HTML, così Angular riconosce la sessione che manca.
+        mvc.perform(get("/api/foto").accept(MediaType.TEXT_HTML))
+                .andExpect(status().isUnauthorized())
+                .andExpect(r -> assertThat(r.getResponse().getHeader("Location")).isNull());
+        mvc.perform(get("/api/io")).andExpect(status().isUnauthorized());
+        // Le pagine: la pagina di accesso dell'app, non Keycloak; la radice nuda senza "torna".
+        mvc.perform(get("/")).andExpect(status().isFound()).andExpect(redirectedUrl("/accesso"));
+        mvc.perform(get("/").queryParam("ricordi", "oggi")).andExpect(status().isFound())
+                .andExpect(redirectedUrl("/accesso?torna=%2F%3Fricordi%3Doggi"));
         mvc.perform(get("/salute")).andExpect(status().isOk()).andExpect(content().string("ok"));
         mvc.perform(get("/api/salute")).andExpect(status().isUnauthorized());
-        // I file della PWA non chiedono il login: 200 se il frontend è compilato in static/, 404 se no
-        // (in CI), mai 401 o il redirect a Keycloak.
-        for (String pubblico : new String[] {"/manifest.webmanifest", "/sw.js", "/icone/icona-192.png"}) {
+        // La pagina di accesso e i file della PWA non chiedono il login: 200 se il frontend è compilato in
+        // static/, 404 se no (in CI), mai 401 o un redirect.
+        for (String pubblico : new String[] {"/accesso", "/accesso?torna=%2Fx", "/manifest.webmanifest", "/sw.js",
+                "/icone/icona-192.png", "/main-ABCDEF.js", "/styles-ABCDEF.css"}) {
             mvc.perform(get(pubblico)).andExpect(r -> assertThat(r.getResponse().getStatus()).as(pubblico).isIn(200, 404));
         }
+        // Solo GET: niente altro si apre sulla pagina di accesso.
+        mvc.perform(post("/accesso").with(csrf())).andExpect(status().isFound()).andExpect(redirectedUrl("/accesso"));
+    }
+
+    @Test
+    void iLinkCondivisiNonPassanoDallaPaginaDiAccesso() throws Exception {
+        // Un link che non c'è risponde lui (404), senza login e senza redirect: la pagina di accesso non c'entra.
+        mvc.perform(get("/c/token-che-non-esiste"))
+                .andExpect(r -> assertThat(r.getResponse().getStatus()).isIn(200, 404))
+                .andExpect(r -> assertThat(r.getResponse().getHeader("Location")).isNull());
+        mvc.perform(get("/api/condivise/token-che-non-esiste")).andExpect(status().isNotFound())
+                .andExpect(r -> assertThat(r.getResponse().getHeader("Location")).isNull());
+    }
+
+    @Test
+    void accediPortaAKeycloakEPoiTornaDoveEri() throws Exception {
+        var sessione = new org.springframework.mock.web.MockHttpSession();
+        mvc.perform(get("/oauth2/authorization/keycloak").param("torna", "/?ricordi=oggi").session(sessione))
+                .andExpect(status().isFound())
+                .andExpect(r -> assertThat(r.getResponse().getRedirectedUrl()).startsWith("https://kc.invalid/auth"));
+        assertThat(sessione.getAttribute(PaginaDiAccesso.ATTRIBUTO)).isEqualTo("/?ricordi=oggi");
+        // Tornati da Keycloak si va lì; senza niente da ricordare alla timeline.
+        var risposta = new org.springframework.mock.web.MockHttpServletResponse();
+        var richiesta = new org.springframework.mock.web.MockHttpServletRequest("GET", "/login/oauth2/code/keycloak");
+        richiesta.setSession(sessione);
+        PaginaDiAccesso.dopoIlLogin().onAuthenticationSuccess(richiesta, risposta,
+                new TestingAuthenticationToken("marco", "x"));
+        assertThat(risposta.getRedirectedUrl()).isEqualTo("/?ricordi=oggi");
+        assertThat(sessione.getAttribute(PaginaDiAccesso.ATTRIBUTO)).isNull();
+        risposta = new org.springframework.mock.web.MockHttpServletResponse();
+        PaginaDiAccesso.dopoIlLogin().onAuthenticationSuccess(richiesta, risposta,
+                new TestingAuthenticationToken("marco", "x"));
+        assertThat(risposta.getRedirectedUrl()).isEqualTo("/");
+        // Un altro sito non si ricorda: si torna alla timeline.
+        var altra = new org.springframework.mock.web.MockHttpSession();
+        mvc.perform(get("/oauth2/authorization/keycloak").param("torna", "//cattivo.example/x").session(altra))
+                .andExpect(status().isFound());
+        assertThat(altra.getAttribute(PaginaDiAccesso.ATTRIBUTO)).isNull();
+    }
+
+    @Test
+    void doveTornareSoloDentroLApp() {
+        assertThat(PaginaDiAccesso.sicuro("/")).isEqualTo("/");
+        assertThat(PaginaDiAccesso.sicuro("/?ricordi=oggi")).isEqualTo("/?ricordi=oggi");
+        assertThat(PaginaDiAccesso.sicuro("/?condivisi=abc-1")).isEqualTo("/?condivisi=abc-1");
+        for (String no : new String[] {null, "", "x", "https://altro.example/", "//altro.example", "/\\altro.example",
+                "/a\\b", "/a\r\nSet-Cookie:x", "/accesso", "/accesso?torna=/", "/oauth2/authorization/keycloak",
+                "/login/oauth2/code/keycloak", "/logout", "/api/foto", "/error", "/" + "x".repeat(2100)}) {
+            assertThat(PaginaDiAccesso.sicuro(no)).as(String.valueOf(no)).isNull();
+        }
+        // "/accessorio" non è la pagina di accesso.
+        assertThat(PaginaDiAccesso.sicuro("/accessorio")).isEqualTo("/accessorio");
+    }
+
+    @Test
+    void esciChiudeLaSessioneDellAppEQuellaDiKeycloak() throws Exception {
+        // Nell'app: la sessione si chiude e si torna (qui, senza Keycloak vero) alla radice, che porta all'accesso.
+        var sessione = new org.springframework.mock.web.MockHttpSession();
+        mvc.perform(post("/logout").with(ADMIN).with(csrf()).session(sessione)).andExpect(status().isFound());
+        assertThat(sessione.isInvalid()).isTrue();
+        // Senza il token CSRF no: un sito non può far uscire nessuno.
+        mvc.perform(post("/logout").with(ADMIN)).andExpect(status().isForbidden());
+        // Con il Keycloak vero (end_session_endpoint dalla discovery): end_session con l'ID token e ritorno a "/".
+        var registrazione = org.springframework.security.oauth2.client.registration.ClientRegistration
+                .withRegistrationId("keycloak")
+                .clientId("fototimeline").clientSecret("segreto")
+                .authorizationGrantType(org.springframework.security.oauth2.core.AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+                .scope("openid")
+                .authorizationUri("https://kc.invalid/auth").tokenUri("https://kc.invalid/token")
+                .jwkSetUri("https://kc.invalid/certs").userNameAttributeName("sub")
+                .providerConfigurationMetadata(java.util.Map.of("end_session_endpoint", "https://kc.invalid/logout"))
+                .build();
+        var uscita = ConfigurazioneSicurezza.uscita(
+                new org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository(registrazione));
+        var idToken = new org.springframework.security.oauth2.core.oidc.OidcIdToken("id-token-di-prova", Instant.now(),
+                Instant.now().plusSeconds(60), java.util.Map.of("sub", "marco"));
+        var utente = new org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser(List.of(), idToken);
+        var entrato = new org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken(utente,
+                List.of(), "keycloak");
+        var richiesta = new org.springframework.mock.web.MockHttpServletRequest("POST", "/logout");
+        var risposta = new org.springframework.mock.web.MockHttpServletResponse();
+        uscita.onLogoutSuccess(richiesta, risposta, entrato);
+        assertThat(risposta.getRedirectedUrl()).startsWith("https://kc.invalid/logout?")
+                .contains("id_token_hint=id-token-di-prova")
+                .contains("post_logout_redirect_uri=http://localhost/");
+    }
+
+    @Test
+    void ilGiroNotturnoLoLanciaSoloLAmministratore() throws Exception {
+        mvc.perform(get("/api/notte")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/notte/avvia").with(csrf())).andExpect(status().isUnauthorized());
+        for (var chi : List.of(SENZA_RUOLO, UTILIZZATORE, GESTORE)) {
+            mvc.perform(get("/api/notte").with(chi)).andExpect(status().isForbidden());
+            mvc.perform(post("/api/notte/avvia").with(chi).with(csrf())).andExpect(status().isForbidden());
+            mvc.perform(post("/api/notte/annulla").with(chi).with(csrf())).andExpect(status().isForbidden());
+        }
+        // L'amministratore vede l'orario (qui il cron è spento: src/test/resources/application.properties).
+        mvc.perform(get("/api/notte").with(ADMIN)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.attivo").value(false))
+                .andExpect(jsonPath("$.inCorso").value(false));
+        // Senza token CSRF non parte.
+        mvc.perform(post("/api/notte/avvia").with(ADMIN)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/notte/annulla").with(ADMIN).with(csrf())).andExpect(status().isNoContent());
     }
 
     @Test
@@ -728,10 +843,10 @@ class SicurezzaTest {
         mvc.perform(multipart("/ricevi-condivisi").file(file).param("titolo", "x"))
                 .andExpect(status().isSeeOther())
                 .andExpect(redirectedUrl("/?condivisi=senza-app"));
-        // Anche con un token valido, senza login non si passa: Keycloak.
+        // Anche con un token valido, senza login non si passa: la pagina di accesso (la POST non si ripete).
         mvc.perform(multipart("/ricevi-condivisi").file(file).with(csrf()))
                 .andExpect(status().isFound())
-                .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+                .andExpect(redirectedUrl("/accesso"));
         // Con login: di nuovo all'app, i file non si leggono.
         mvc.perform(multipart("/ricevi-condivisi").file(file).with(ANNA))
                 .andExpect(status().isSeeOther())
@@ -746,9 +861,9 @@ class SicurezzaTest {
         mvc.perform(multipart("/api/foto").file(file)).andExpect(status().isForbidden());
         mvc.perform(post("/api/cloud/smonta").with(ANNA)).andExpect(status().isForbidden());
         assertThat(mongo.count(new Query(), it.fototimeline.dominio.Foto.class)).isEqualTo(prima);
-        // Una GET non è la condivisione: per chi non è entrato, il login come ogni pagina.
+        // Una GET non è la condivisione: per chi non è entrato, la pagina di accesso come ogni pagina.
         mvc.perform(get("/ricevi-condivisi")).andExpect(status().isFound())
-                .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+                .andExpect(redirectedUrl("/accesso?torna=%2Fricevi-condivisi"));
     }
 
     @Test
@@ -979,10 +1094,9 @@ class SicurezzaTest {
                 .authorities(new SimpleGrantedAuthority("ROLE_fototimeline-gestore"));
         mvc.perform(get("/api/foto").with(prima)).andExpect(status().isOk());
         registro.chiudiSessioni("rita");
-        // Le API rispondono 401 (Angular torna al login), le pagine portano a Keycloak.
+        // Le API rispondono 401 (Angular mostra la pagina di accesso), le pagine portano lì.
         mvc.perform(get("/api/foto").with(prima)).andExpect(status().isUnauthorized());
-        mvc.perform(get("/").with(prima)).andExpect(status().isFound())
-                .andExpect(redirectedUrl("http://localhost/oauth2/authorization/keycloak"));
+        mvc.perform(get("/").with(prima)).andExpect(status().isFound()).andExpect(redirectedUrl("/accesso"));
         // Rientrata dopo: vale.
         var dopo = oidcLogin()
                 .idToken(t -> t.claim("preferred_username", "rita").issuedAt(Instant.now().plusSeconds(2)))

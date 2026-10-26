@@ -211,8 +211,21 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - **Login acceso** (profilo `server`): OIDC con `oauth2Login` sul Keycloak di
   presenze, **realm `fototimeline`**, client confidenziale `fototimeline`.
   Sessione con cookie, non token Bearer: le foto si caricano con `<img>`, che
-  non può mandare header. Le API senza sessione rispondono 401 (Angular manda
-  a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
+  non può mandare header. Le API senza sessione rispondono 401 (Angular mostra
+  la pagina di accesso, `sessione.ts`), le pagine fanno il redirect a `/accesso`.
+- **Pagina di accesso** (`PaginaDiAccesso`, `AccessoController`, `accesso.ts`):
+  `/accesso` è pubblica, è l'app Angular (main.ts avvia solo `Accesso`, che
+  chiede solo `/api/io` per tornare all'app se la sessione c'è già). Una pagina
+  senza sessione va a `/accesso?torna=<pagina>` (solo GET; la radice nuda senza
+  `torna`), "Accedi" a `/oauth2/authorization/keycloak?torna=...`, un filtro
+  mette `torna` in sessione e `dopoIlLogin` ci torna. Niente RequestCache di
+  Spring (ricorderebbe una miniatura chiesta da un `<img>`). `torna` passa da
+  `PaginaDiAccesso.sicuro` (e `percorsoSicuro` nel frontend): solo percorsi
+  dell'app, mai `//altro`, `/\altro`, a capo o le pagine del login. Esci:
+  `uscita()`, end_session di Keycloak e ritorno a `/` (l'unico
+  `post.logout.redirect.uris` del client). "Chiedi l'accesso" è lo stesso
+  componente (`modo="chiedi"`). Il tema del login di Keycloak è in
+  `deploy/keycloak-tema/` (DEPLOY.md: si installa a mano sul Keycloak di presenze).
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
   token: li legge `RuoliKeycloak`. Tre ruoli (`Ruolo`, nomi in `LoginProperties`):
   `fototimeline-admin` (tutto: utenti e menu Strumenti), `fototimeline-gestore`
@@ -246,7 +259,7 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
   (`sessione.ts`), perché la risposta porta a Keycloak, su un'altra origine.
-- **Path pubblici** (senza login, solo GET): `/salute`, `/error`, i file della
+- **Path pubblici** (senza login, solo GET): `/salute`, `/error`, `/accesso`, i file della
   PWA, e per i link di condivisione `/c/*`, `/api/condivise/**` e i bundle di
   Angular (`/main-*.js`, `/chunk-*.js`, `/polyfills-*.js`, `/styles-*.css`:
   codice, niente dati; `index.html` lo serve `CondiviseController` solo da
@@ -373,6 +386,34 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   scarica niente di quello che è già fatto.
 - Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
   entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
+
+## Giro notturno
+
+- Pacchetto `notte`. `GiroNotturno` ogni minuto guarda il cron
+  (`fototimeline.notte.cron`, `FOTOTIMELINE_NOTTE_CRON`, predefinito `0 30 2 * * *`
+  in `Europe/Rome`; vuoto o `-` = spento) e lancia, su un thread suo
+  (`giro-notturno`) e **uno dopo l'altro**, i lavori che ci sono già: Indicizza
+  archivio, Calcola luoghi (`tutte` false), Calcola eventi (il ricalcolo leggero
+  dei giorni toccati, o il calcolo completo se uno di prima era `interrotto`),
+  Indicizza contenuto, Riconosci volti (le foto senza segno), Calcola impronte
+  (solo se ne mancano). Non fa lavoro suo: li avvia e aspetta che finiscano.
+  Niente parallelismo nuovo.
+- Prima di ogni lavoro aspetta che non ne giri uno chiesto da qualcuno
+  (`occupato()`: importazioni tranne l'automatica, contenuto, volti, impronte,
+  calcolo eventi) al più `attesa-massima`; l'automatica la annulla il primo
+  lavoro, come a mano, e durante il giro non riparte
+  (`LavoriImportazione.sospendiAutomatica`). Cloud smontato: SALTATO. Un lavoro
+  ANNULLATO ferma il giro; uno FALLITO no (il giro finisce FALLITO).
+- L'ultimo giro sta in `impostazioni/giro-notturno` (`Giro`, `Risultato` per
+  lavoro) e si scrive a ogni passo: al riavvio `riprendi` riparte dal lavoro
+  dove era (un giro di più di 20 ore fa si chiude FALLITO). La voce `notte` di
+  Salute è `voceSalute()`: rossa se FALLITO, gialla se SALTATO, ANNULLATO o
+  fermo da più di 49 ore col cron acceso; da lì gli avvisi Telegram.
+- `/api/notte/**` è da admin (Strumenti, "Lancia ora il giro notturno"; col
+  cloud smontato 409). Un lavoro nuovo in Strumenti che vale la pena fare di
+  notte va aggiunto a `Passo`, a `occupato()` e ad `annulla()`.
+- Nei test il cron è spento (`src/test/resources/application.properties`):
+  `GiroNotturnoTest` lo lancia a mano o con un orologio suo.
 
 ## Telefoni (pCloud) e archivio di famiglia
 

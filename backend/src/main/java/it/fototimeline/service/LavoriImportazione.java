@@ -103,6 +103,11 @@ public class LavoriImportazione {
         return t;
     });
     private final AtomicReference<Lavoro> ultimo = new AtomicReference<>();
+    /**
+     * Il giro notturno mette in fila i suoi lavori: fra uno e l'altro
+     * l'importazione automatica non parte, riprende al primo controllo dopo.
+     */
+    private volatile boolean automaticaSospesa;
 
     public LavoriImportazione(ImportazioneCartelle importazione, ImportazioneAutomaticaProperties automatica,
             MemoriaImportazione memoria, ArchivioFile archivio, List<ProvenienzaFile> provenienze, LuoghiService luoghi,
@@ -312,6 +317,15 @@ public class LavoriImportazione {
                 + (lavoro.ricerca ? "ricerca dei file" : "fuori dai file") + "), chiuso senza aspettarlo", clock.instant());
     }
 
+    /**
+     * Il giro notturno: con {@code true} la cartella automatica non parte
+     * da sola finché non torna {@code false} (i lavori chiesti partono come
+     * sempre, e un'automatica già in corso la annulla il primo di loro).
+     */
+    public void sospendiAutomatica(boolean sospesa) {
+        automaticaSospesa = sospesa;
+    }
+
     /** I file della cartella automatica che non si rileggono finché non cambiano, dal più recente. */
     public List<FileScartato> scartati() {
         return memoria.elenco();
@@ -333,7 +347,7 @@ public class LavoriImportazione {
             initialDelayString = "${fototimeline.importazione-automatica.ritardo-iniziale:PT2M}")
     public void controllaCartellaAutomatica() {
         Path cartella = automatica.cartella();
-        if (cartella == null || !archivio.disponibile()) {
+        if (cartella == null || automaticaSospesa || !archivio.disponibile()) {
             return;
         }
         Lavoro attuale = ultimo.get();

@@ -14,13 +14,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.access.RequestMatcherDelegatingAccessDeniedHandler;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
-import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfException;
@@ -28,6 +28,7 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.savedrequest.NullRequestCache;
 import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -54,7 +55,6 @@ import jakarta.servlet.http.HttpServletResponse;
 @Configuration
 public class ConfigurazioneSicurezza {
 
-    static final String REGISTRAZIONE = "keycloak";
     /** {@code share_target} del manifest: "Condividi → FotoTimeline" dal telefono. */
     public static final String RICEVI_CONDIVISI = "/ricevi-condivisi";
     /** Dove torna una condivisione che il service worker non ha preso: l'app dice di riprovare. */
@@ -74,19 +74,24 @@ public class ConfigurazioneSicurezza {
 
         permessi(http, login);
         http.addFilterBefore(new SessioniChiuse(utenti), AuthorizationFilter.class);
-        http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login))));
-        // Le chiamate XHR prendono 401 (Angular manda al login), le pagine il redirect a Keycloak.
+        // La pagina di accesso dell'app (PaginaDiAccesso) al posto di quella generata da Spring; dopo
+        // Keycloak si torna alla pagina da cui si veniva, e un login rifiutato torna lì con ?error.
+        http.oauth2Login(o -> o
+                .loginPage(PaginaDiAccesso.PAGINA)
+                .successHandler(PaginaDiAccesso.dopoIlLogin())
+                .userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login))));
+        http.addFilterBefore(PaginaDiAccesso.ricordaDoveTornare(), OAuth2AuthorizationRequestRedirectFilter.class);
+        // La pagina da riaprire la porta "torna", non la RequestCache (vedi PaginaDiAccesso).
+        http.requestCache(r -> r.requestCache(new NullRequestCache()));
+        // Le API prendono 401 (Angular mostra la pagina di accesso), le pagine vanno a /accesso.
         http.exceptionHandling(e -> e
                 .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
                         new AntPathRequestMatcher("/api/**"))
-                .defaultAuthenticationEntryPointFor(
-                        new LoginUrlAuthenticationEntryPoint("/oauth2/authorization/" + REGISTRAZIONE),
-                        new AntPathRequestMatcher("/**")));
-        http.logout(l -> {
-            var uscita = new OidcClientInitiatedLogoutSuccessHandler(registrazioni.getObject());
-            uscita.setPostLogoutRedirectUri("{baseUrl}/");
-            l.logoutSuccessHandler(uscita);
-        });
+                .defaultAuthenticationEntryPointFor(PaginaDiAccesso.ingresso(), new AntPathRequestMatcher("/**")));
+        // Esci: chiude la sessione dell'app e quella di Keycloak (end_session con l'ID token), poi
+        // Keycloak torna a "/", che senza sessione porta alla pagina di accesso. "/" resta l'unico
+        // post.logout.redirect.uris registrato sul client (DEPLOY.md, passo 3).
+        http.logout(l -> l.logoutSuccessHandler(uscita(registrazioni.getObject())));
         return http.build();
     }
 
@@ -110,6 +115,9 @@ public class ConfigurazioneSicurezza {
         String[] lettura = login.almeno(Ruolo.UTILIZZATORE);
         http.authorizeHttpRequests(a -> {
             a.requestMatchers("/salute", "/error").permitAll();
+            // La pagina di accesso: nome, logo e "Accedi". È l'app Angular (index.html e i bundle sotto),
+            // senza dati: main.ts vede /accesso e non chiama nessuna API privata.
+            a.requestMatchers(HttpMethod.GET, PaginaDiAccesso.PAGINA).permitAll();
             // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
             a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
                     .permitAll();
@@ -130,6 +138,8 @@ public class ConfigurazioneSicurezza {
             // (anche lo stato della coda), Importa cartella col suo navigatore e lo stato dei lavori.
             a.requestMatchers("/api/archivio/**", "/api/importa", "/api/importazioni/**", "/api/cartelle")
                     .hasAuthority(admin);
+            // Il giro notturno, che li mette in fila: stato e orario, "Lancia ora", Annulla.
+            a.requestMatchers("/api/notte", "/api/notte/**").hasAuthority(admin);
             a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/contenuto/**", "/api/volti/riconosci",
                     "/api/volti/annulla").hasAuthority(admin);
             a.requestMatchers("/api/backup", "/api/backup/**", "/api/salute", "/api/salute/**",
@@ -175,6 +185,13 @@ public class ConfigurazioneSicurezza {
         });
     }
 
+    /** Dopo l'uscita dall'app: end_session di Keycloak con l'ID token, che poi torna a "/". */
+    static OidcClientInitiatedLogoutSuccessHandler uscita(ClientRegistrationRepository registrazioni) {
+        var uscita = new OidcClientInitiatedLogoutSuccessHandler(registrazioni);
+        uscita.setPostLogoutRedirectUri("{baseUrl}/");
+        return uscita;
+    }
+
     /** {@code ?scarica=true} o {@code ?originale=true}: l'originale da scaricare, non il video da guardare. */
     static boolean chiedeLOriginale(HttpServletRequest richiesta) {
         return vero(richiesta.getParameter("scarica")) || vero(richiesta.getParameter("originale"));
@@ -210,7 +227,7 @@ public class ConfigurazioneSicurezza {
      * service worker non c'è (prima apertura, browser senza), la POST del
      * telefono arriva qui senza token CSRF: il CSRF la respinge come sempre (i
      * file non entrano) e invece di un 403 si torna all'app, che dice di
-     * riprovare. Senza login quell'indirizzo porta poi a Keycloak.
+     * riprovare. Senza login quell'indirizzo porta poi alla pagina di accesso.
      */
     private static void condivisiSenzaApp(HttpSecurity http) throws Exception {
         AccessDeniedHandler respinta = new AccessDeniedHandlerImpl();

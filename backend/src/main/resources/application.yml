@@ -138,6 +138,20 @@ fototimeline:
   cestino:
     giorni: ${FOTOTIMELINE_CESTINO_GIORNI:30}
     controllo: ${FOTOTIMELINE_CESTINO_CONTROLLO:PT1H}
+  # Giro notturno: Indicizza archivio, Calcola luoghi, Calcola eventi, Indicizza
+  # contenuto, Riconosci volti e Calcola impronte, uno dopo l'altro e solo su
+  # quello che c'è da fare (DEPLOY.md, "Giro notturno"). Cron di Spring a sei
+  # campi (secondi minuti ore giorno mese giorno-della-settimana) nel fuso;
+  # vuoto o "-" = spento.
+  notte:
+    cron: ${FOTOTIMELINE_NOTTE_CRON:0 30 2 * * *}
+    fuso: Europe/Rome
+    # Se a quell'ora gira un lavoro chiesto da qualcuno, quanto aspettarlo prima di saltare.
+    attesa-massima: ${FOTOTIMELINE_NOTTE_ATTESA:PT2H}
+    # Ogni quanto si guarda se il lavoro del giro è finito.
+    controllo: PT5S
+    # Ogni quanto si guarda se è l'ora del giro.
+    controllo-orario: PT1M
   # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
   # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
   quasi-uguali:

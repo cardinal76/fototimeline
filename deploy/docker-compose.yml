@@ -93,6 +93,10 @@ services:
       FOTOTIMELINE_TEMPO_MASSIMO_PER_GB: ${FOTOTIMELINE_TEMPO_MASSIMO_PER_GB:-PT5M}
       # Dopo Annulla, quanto si aspettano i file già cominciati prima di abbandonarli.
       FOTOTIMELINE_ATTESA_ANNULLAMENTO: ${FOTOTIMELINE_ATTESA_ANNULLAMENTO:-PT1M}
+      # Giro notturno (DEPLOY.md): cron di Spring a sei campi, ora italiana; "-" o vuoto = spento.
+      # Senza i due punti: una riga vuota nel .env resta vuota (spento), una che manca vale le 2:30.
+      FOTOTIMELINE_NOTTE_CRON: ${FOTOTIMELINE_NOTTE_CRON-0 30 2 * * *}
+      FOTOTIMELINE_NOTTE_ATTESA: ${FOTOTIMELINE_NOTTE_ATTESA:-PT2H}
       # Di chi è il telefono di quando era uno solo; vuoto = del primo admin che entra.
       FOTOTIMELINE_TELEFONO_PROPRIETARIO: ${FOTOTIMELINE_TELEFONO_PROPRIETARIO:-}
       # Versione compatibile (H.264) dei video HEVC: thread di ffmpeg e lato corto massimo.

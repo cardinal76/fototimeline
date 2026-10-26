@@ -1124,12 +1124,68 @@ serve sul server.
   foto*: doppioni saltati, "caricate da" chi sceglie, `createTime` di Google come
   data se l'EXIF non c'è. Serve il cloud montato.
 
+## Giro notturno
+
+Ogni notte, alle **2:30 ora italiana** (`FOTOTIMELINE_NOTTE_CRON`, predefinito
+`0 30 2 * * *`, nel fuso `Europe/Rome`), l'app lancia da sola i lavori di Strumenti,
+**uno dopo l'altro** e ognuno solo su quello che c'è da fare:
+
+1. **Indicizza archivio**: i file dell'archivio senza scheda (quelli che ce l'hanno si
+   saltano senza scaricarli);
+2. **Calcola luoghi**: solo le foto da calcolare (mai "tutte"); senza GeoNames si salta;
+3. **Calcola eventi**: i giorni toccati (foto nuove, cestino); se un "Calcola eventi" di
+   prima si era fermato a metà, riprende quello;
+4. **Indicizza contenuto**: le foto non ancora nell'indice (senza visione si salta);
+5. **Riconosci volti**: le foto non ancora guardate (con `FOTOTIMELINE_VOLTI=false` o
+   senza visione si salta);
+6. **Calcola impronte**: solo se qualche foto non ce l'ha.
+
+Sono gli stessi lavori dei pulsanti, con le loro regole: uno alla volta (i primi tre sul
+thread delle importazioni, con la barra e **Annulla**), nessun parallelismo in più (di
+notte server2 fa anche le build della CI), ffmpeg e i lavori lunghi restano a priorità
+bassa come sempre. Il giro passa avanti all'importazione automatica come "Indicizza
+archivio" a mano (la annulla, finisce i file già cominciati) e, finché gira, la cartella
+automatica non riparte: riprende al primo controllo dopo.
+
+- **Cloud smontato**: il giro salta e lo scrive (voce gialla in Salute).
+- **Un lavoro già in corso** a quell'ora (lanciato da qualcuno): il giro lo aspetta fino
+  a `FOTOTIMELINE_NOTTE_ATTESA` (predefinito `PT2H`), poi salta e lo scrive.
+- **Annulla** sulla barra del lavoro in corso ferma anche il giro: i lavori dopo non
+  partono.
+- **Riavvio a metà giro** (rilascio): al riavvio riparte dal lavoro dove era arrivato.
+- **Un lavoro fallito** (visione che non risponde, per esempio): gli altri vanno avanti,
+  la voce in Salute è **rossa** e, con Telegram configurato, arriva l'avviso come per le
+  altre voci.
+
+In **Salute** la voce "Giro notturno": l'ultimo giro (quando, se lanciato a mano, l'esito
+e quanto è durato), per ogni lavoro quante foto ha trovato o fatto (le foto nuove di
+Indicizza archivio, i luoghi calcolati, i giorni rifatti, le foto messe nell'indice, le
+foto guardate e i volti trovati, le impronte), e il prossimo giro. Gialla anche se con il
+giro acceso non ne gira uno da più di due giorni (l'app era spenta a quell'ora: un'ora persa
+non si recupera, si aspetta la notte dopo).
+
+In **Strumenti → Archivio**, solo per l'amministratore: **Lancia ora il giro notturno**,
+con accanto l'orario ("ogni notte alle 02:30", o "automatico spento"); col cloud smontato
+non parte.
+
+```bash
+# nel .env di server2, poi il rilascio
+FOTOTIMELINE_NOTTE_CRON="0 30 2 * * *" # secondi minuti ore giorno mese giorno-della-settimana
+FOTOTIMELINE_NOTTE_CRON=-              # spento ("Lancia ora" resta)
+FOTOTIMELINE_NOTTE_ATTESA=PT2H         # quanto aspettare un lavoro già in corso
+```
+
+Il cron è quello di Spring, a **sei campi** (i secondi per primi): `0 0 3 * * *` sono le
+3:00, `0 30 2 * * SUN` le 2:30 di domenica. Un cron sbagliato ferma l'avvio con il motivo nel
+log. Anche vuoto (`FOTOTIMELINE_NOTTE_CRON=` nel `.env`) lo spegne; se la riga manca vale
+il predefinito.
+
 ## Salute e avvisi su Telegram
 
 Il bottone **Salute** in alto a destra (solo admin) mostra con un pallino
 verde, giallo o rosso: rclone, cloud montato, ultimo backup dei metadati,
 sincronizzazione dei telefoni, importazioni (e file in attesa nella cartella
-automatica), spazio sul disco delle miniature, su `lifetime:` e sui remote dei
+automatica), giro notturno (sopra), spazio sul disco delle miniature, su `lifetime:` e sui remote dei
 telefoni (`pcloud:`, ...),
 numeri dell'archivio. Il pallino sul bottone è lo stato peggiore; si aggiorna
 ogni 5 minuti. `/salute` resta l'healthcheck di Docker e non cambia.
@@ -1410,6 +1466,68 @@ Se risponde 403 o 404 il Caddy di presenze chiude `/auth/admin` verso internet: 
 almeno per l'IP di server2, oppure `FOTOTIMELINE_UTENTI_KEYCLOAK` punta a un issuer
 raggiungibile. Finché manca qualcosa la pagina Utenti lo dice (segreto mancante, client
 senza permessi, Keycloak che non risponde) e gli utenti si gestiscono dalla console.
+
+## Pagina di accesso ed Esci
+
+Chi apre l'app senza sessione non finisce più dritto su Keycloak: vede la
+**pagina di accesso** dell'app (`/accesso`, pubblica), con il logo, il nome, una
+frase e il pulsante **Accedi**. Accedi porta al login di Keycloak
+(`/oauth2/authorization/keycloak?torna=<pagina>`) e poi si torna alla pagina da cui
+si veniva (per esempio `/?ricordi=oggi` dal link di Telegram); `torna` vale solo se è
+un percorso dell'app, mai un altro sito (`PaginaDiAccesso.sicuro`). Le API senza
+sessione rispondono 401 come prima e l'app, quando ne riceve uno (sessione scaduta),
+mostra la stessa pagina con "La sessione è scaduta". I link condivisi (`/c/<token>`)
+restano pubblici e non passano di lì.
+
+**Esci** chiude la sessione dell'app e quella di Keycloak (end_session con l'ID token):
+Keycloak torna a `https://$DOMINIO/`, che senza sessione porta alla pagina di accesso.
+Per questo `post.logout.redirect.uris` sul client resta `https://$DOMINIO/` (passo 3):
+non serve cambiarlo. Chi è nel realm senza ruolo vede "Chiedi l'accesso", con lo stesso
+aspetto e **Esci e cambia utente**.
+
+Sul PC (login spento) `/accesso` riporta subito alla timeline.
+
+### Tema del login su Keycloak
+
+La pagina vera del login (utente e password) è di Keycloak. Nel repository c'è un tema
+con i colori e il logo di FotoTimeline, chiaro o scuro come il dispositivo:
+`deploy/keycloak-tema/fototimeline/` (`login/theme.properties`, che eredita il tema
+`keycloak`, più `login/resources/css/fototimeline.css` e il logo). Il Keycloak è quello
+di presenze, sul **server di produzione** e in un altro progetto: il tema va installato
+lì, a mano, e questo repository non tocca niente di presenze.
+
+1. Copia il tema sul server di produzione e nel container di Keycloak (dal PC, nella
+   cartella del repository):
+
+   ```bash
+   PROD=marco@<server di produzione>   # quello di presenze, dove gira presenze-keycloak
+   ssh $PROD 'mkdir -p ~/keycloak-temi'
+   scp -r deploy/keycloak-tema/fototimeline $PROD:~/keycloak-temi/
+   ssh $PROD 'docker cp ~/keycloak-temi/fototimeline presenze-keycloak:/opt/keycloak/themes/ \
+     && docker restart presenze-keycloak'
+   ```
+
+   Il riavvio serve perché Keycloak in produzione tiene i temi in cache. `docker cp`
+   non sopravvive a una ricreazione del container (un rilascio di presenze): per tenerlo,
+   nel compose di presenze va montata la cartella, per esempio
+   `~/keycloak-temi/fototimeline:/opt/keycloak/themes/fototimeline:ro`. È una modifica
+   del repository di presenze: va fatta lì.
+2. Console di Keycloak (`tunnel-kc-up`, poi `http://localhost:18081`), realm
+   **fototimeline** → **Realm settings**:
+   - **General → Display name**: `FotoTimeline` (è il nome sopra il modulo);
+   - **Themes → Login theme**: `fototimeline`, poi **Save**;
+   - **Localization**: internazionalizzazione accesa, lingua predefinita `it`
+     (facoltativo: le scritte di Keycloak in italiano).
+
+   Oppure con `kcadm.sh`, come al passo 3:
+   `$KC update realms/fototimeline -s loginTheme=fototimeline -s displayName=FotoTimeline`.
+3. Apri l'app in una finestra anonima, **Accedi**: il modulo deve avere logo e colori
+   dell'app. Per tornare indietro: Login theme vuoto (il tema di Keycloak).
+
+Il tema usa i template classici di Keycloak (`parent=keycloak`) e cambia solo il CSS: se
+un aggiornamento di Keycloak cambia i nomi delle classi, il modulo resta usabile ma perde
+qualche colore. Non è stato provato su un Keycloak vero prima di questa versione: guardalo
+dopo l'installazione, chiaro e scuro, anche dal telefono.
 
 ## Cestino
 

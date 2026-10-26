@@ -14,6 +14,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
+import { Accesso } from './accesso';
 import { Eventi } from './eventi';
 import { FiltroEvento } from './filtro-evento';
 import { FiltroLuogo } from './filtro-luogo';
@@ -30,6 +31,7 @@ import {
   ModificaTelefono,
   RicordiTelegram,
   StatoContenuto,
+  StatoNotte,
   StatoSalute,
   StatoTelefono,
   VideoGrande,
@@ -62,6 +64,7 @@ const ALTEZZA_RIGA = 210;
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    Accesso,
     Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore,
     Eventi, FiltroEvento, SceltaEvento,
     Persone, Utenti,
@@ -427,6 +430,10 @@ export class App {
     }
     this.innesco = evento.currentTarget as HTMLElement;
     this.menu.set(m);
+    if (this.galleria.admin()) {
+      // Il giro notturno può essere passato da quando l'app è aperta: stato e prossimo orario freschi.
+      this.galleria.aggiornaNotte();
+    }
     afterNextRender(
       () => {
         const voci = this.vociMenu();
@@ -793,6 +800,31 @@ export class App {
       },
       error: (e: unknown) => this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito'),
     });
+  }
+
+  // ------------------------------------------------------------ giro notturno
+
+  protected titoloNotte(n: StatoNotte): string {
+    const quando = n.attivo
+      ? `Da solo ${n.orario}` + (n.prossimo ? ` (il prossimo: ${new Date(n.prossimo).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })})` : '')
+      : 'Il giro automatico è spento (FOTOTIMELINE_NOTTE_CRON)';
+    return `${quando}. Uno dopo l'altro: Indicizza archivio, Calcola luoghi, Calcola eventi, Indicizza contenuto, Riconosci volti, Calcola impronte, solo su quello che c'è da fare. L'esito in Salute.`;
+  }
+
+  protected async lanciaNotte(): Promise<void> {
+    const domanda =
+      "Lancia adesso il giro notturno: Indicizza archivio, Calcola luoghi, Calcola eventi, Indicizza contenuto, Riconosci volti e Calcola impronte, uno dopo l'altro e solo su quello che c'è da fare. Può richiedere tempo; l'esito si vede in Salute.";
+    if (!confirm(domanda + this.fermaAutomatica())) {
+      return;
+    }
+    try {
+      await this.galleria.lanciaGiroNotturno();
+      this.galleria.avvisa('Giro notturno partito: i lavori compaiono nella barra uno alla volta');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Giro notturno non partito');
+    } finally {
+      this.galleria.aggiornaNotte();
+    }
   }
 
   /** Per le domande prima di un lavoro: se gira l'importazione automatica, che cosa le succede. */
