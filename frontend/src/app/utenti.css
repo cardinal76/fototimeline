@@ -1,0 +1,98 @@
+/* La pagina "Utenti": dialogo, bottoni, avvisi e comandi vengono da cestino.css. */
+.dialogo {
+  width: min(860px, 100%);
+}
+input,
+select {
+  font: inherit;
+  color: var(--testo);
+  background: var(--superficie-2);
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  min-width: 0;
+}
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: 1px;
+}
+label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+.spunta-riga {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.modulo {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+  background: var(--superficie-2);
+}
+.modulo input,
+.modulo select {
+  background: var(--superficie);
+}
+.campi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.7rem;
+}
+.utenti {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.utenti li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+}
+.utenti li.spento .chi b {
+  color: var(--testo-tenue);
+}
+.chi {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.chi .tenue {
+  overflow-wrap: anywhere;
+}
+.azioni {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.utenti .password {
+  grid-column: 1 / -1;
+}
+.nascosto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+@media (max-width: 560px) {
+  .utenti li {
+    grid-template-columns: 1fr;
+  }
+}

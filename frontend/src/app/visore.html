@@ -10,8 +10,11 @@
       autoplay
       playsinline
       preload="metadata"
+      [attr.controlslist]="gestione() ? null : 'nodownload noremoteplayback'"
+      [attr.disableremoteplayback]="gestione() ? null : ''"
       (error)="videoIllegibile.set(true)"
       (click)="$event.stopPropagation()"
+      (contextmenu)="soloGuardare($event)"
     ></video>
     @if (senzaCompatibile() || videoIllegibile()) {
       <p class="avviso-video" role="status" (click)="$event.stopPropagation()">
@@ -26,7 +29,11 @@
         } @else {
           Questo browser non riesce a riprodurre il video:
         }
-        <a [href]="scarica()">scarica l'originale</a>.
+        @if (gestione()) {
+          <a [href]="scarica()">scarica l'originale</a>.
+        } @else {
+          chiedi a chi gestisce le foto di convertirlo.
+        }
       </p>
     }
   } @else {
@@ -37,6 +44,7 @@
       [alt]="foto().titolo || foto().nomeOriginale"
       (load)="caricata.set(true)"
       (click)="$event.stopPropagation()"
+      (contextmenu)="soloGuardare($event)"
     />
   }
   @if (!caricata() && !foto().video) {
@@ -51,14 +59,21 @@
   }
 
   <div class="comandi" (click)="$event.stopPropagation()">
-    <button type="button" (click)="preferita()" [attr.aria-pressed]="foto().preferita" title="Preferita (P)" aria-label="Preferita">
-      {{ foto().preferita ? '★' : '☆' }}
-    </button>
-    <a [href]="scarica()" title="Scarica l'originale" aria-label="Scarica l'originale">⤓</a>
+    <!-- Solo chi gestisce le foto (gestore, amministratore): il server rifiuta comunque il resto. -->
+    @if (gestione()) {
+      <button type="button" (click)="preferita()" [attr.aria-pressed]="foto().preferita" title="Preferita (P)" aria-label="Preferita">
+        {{ foto().preferita ? '★' : '☆' }}
+      </button>
+      <a [href]="scarica()" title="Scarica l'originale" aria-label="Scarica l'originale">⤓</a>
+    } @else if (foto().preferita) {
+      <span class="stella-sola" title="Preferita" aria-label="Preferita">★</span>
+    }
     <button type="button" (click)="dettagli()" [attr.aria-pressed]="pannello()" title="Dettagli (I)" aria-label="Dettagli">ⓘ</button>
-    <button type="button" (click)="ruota(-90)" title="Ruota a sinistra (Maiusc+R)" aria-label="Ruota a sinistra">↺</button>
-    <button type="button" (click)="ruota(90)" title="Ruota a destra (R)" aria-label="Ruota a destra">↻</button>
-    <button type="button" (click)="elimina()" title="Elimina, va nel cestino (Canc)" aria-label="Elimina">🗑</button>
+    @if (gestione()) {
+      <button type="button" (click)="ruota(-90)" title="Ruota a sinistra (Maiusc+R)" aria-label="Ruota a sinistra">↺</button>
+      <button type="button" (click)="ruota(90)" title="Ruota a destra (R)" aria-label="Ruota a destra">↻</button>
+      <button type="button" (click)="elimina()" title="Elimina, va nel cestino (Canc)" aria-label="Elimina">🗑</button>
+    }
     @if (puoSchermoIntero) {
       <button
         type="button"
@@ -87,6 +102,7 @@
 
     <app-persone-foto [foto]="foto()" (scelta)="chiudi.emit()" />
 
+    @if (gestione()) {
     <form (ngSubmit)="salva()" (input)="modificata.set(true)" (change)="modificata.set(true)">
       <label>
         Titolo
@@ -125,6 +141,27 @@
         <button type="button" class="pericolo" (click)="elimina()">Elimina</button>
       </div>
     </form>
+    } @else {
+      <!-- Chi guarda soltanto: i dati, senza campi da cambiare. -->
+      <div class="sola-lettura">
+        @if (foto().titolo) {
+          <p class="titolo">{{ foto().titolo }}</p>
+        }
+        @if (foto().descrizione) {
+          <p>{{ foto().descrizione }}</p>
+        }
+        @if (foto().tag.length || foto().album) {
+          <p class="tenue">
+            @for (t of foto().tag; track t) {
+              <span class="tag">#{{ t }}</span>
+            }
+            @if (foto().album) {
+              <span>Album: {{ foto().album }}</span>
+            }
+          </p>
+        }
+      </div>
+    }
 
     <dl>
       <dt>File</dt>
@@ -133,7 +170,9 @@
         <dt>Rotazione</dt>
         <dd>
           {{ foto().rotazione }}° a destra, solo qui: il file nell'archivio non cambia.
-          @if (foto().video) {
+          @if (!gestione()) {
+            Il file nell'archivio resta com'è.
+          } @else if (foto().video) {
             Il video si gira solo a vederlo; si scarica com'è.
           } @else if (foto().contentType === 'image/jpeg') {
             ⤓ lo scarica girato senza perdita; <a [href]="scaricaNonRuotata()">l'originale non girato</a>.
@@ -180,6 +219,12 @@
       <dd>{{ caricataDa() ?? '—' }}</dd>
     </dl>
     <app-evento-foto [foto]="foto()" (scelto)="chiudi.emit()" />
-    <p class="scorciatoie">← → scorri · P preferita · I dettagli · L luogo · R / Maiusc+R ruota · Canc elimina · F schermo intero · Esc chiudi</p>
+    <p class="scorciatoie">
+      @if (gestione()) {
+        ← → scorri · P preferita · I dettagli · L luogo · R / Maiusc+R ruota · Canc elimina · F schermo intero · Esc chiudi
+      } @else {
+        ← → scorri · I dettagli · F schermo intero · Esc chiudi
+      }
+    </p>
   </aside>
 }

@@ -32,11 +32,11 @@ public class RuoliKeycloak extends OidcUserService {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final RegistroUtenti registro;
-    private final String ruoloAdmin;
+    private final LoginProperties login;
 
-    public RuoliKeycloak(RegistroUtenti registro, String ruoloAdmin) {
+    public RuoliKeycloak(RegistroUtenti registro, LoginProperties login) {
         this.registro = registro;
-        this.ruoloAdmin = ruoloAdmin;
+        this.login = login;
     }
 
     @Override
@@ -45,11 +45,10 @@ public class RuoliKeycloak extends OidcUserService {
         Set<GrantedAuthority> autorita = new HashSet<>(utente.getAuthorities());
         autorita.addAll(ruoliDiRealm(richiesta.getAccessToken().getTokenValue()));
         var conRuoli = new DefaultOidcUser(autorita, utente.getIdToken(), utente.getUserInfo(), "preferred_username");
-        boolean admin = autorita.stream().anyMatch(a -> a.getAuthority().equals("ROLE_" + ruoloAdmin));
         try {
             registro.registra(conRuoli.getPreferredUsername(),
                     conRuoli.getFullName() != null ? conRuoli.getFullName() : conRuoli.getPreferredUsername(),
-                    conRuoli.getEmail(), admin);
+                    conRuoli.getEmail(), login.ruoloDi(autorita));
         } catch (RuntimeException e) {
             // Il registro serve per i nomi: un Mongo lento non deve impedire il login.
         }

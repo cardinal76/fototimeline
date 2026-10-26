@@ -111,8 +111,10 @@ $KC create clients -r fototimeline -s clientId=fototimeline -s enabled=true \
   -s "redirectUris=[\"https://$DOMINIO/login/oauth2/code/keycloak\"]" \
   -s "attributes={\"post.logout.redirect.uris\":\"https://$DOMINIO/\"}"
 
-# Il ruolo per montare e smontare il cloud.
+# I tre ruoli (sotto, "Utenti e ruoli"): amministratore, gestore, utilizzatore.
 $KC create roles -r fototimeline -s name=fototimeline-admin
+$KC create roles -r fototimeline -s name=fototimeline-gestore
+$KC create roles -r fototimeline -s name=fototimeline-utilizzatore
 
 # Il tuo utente (password temporanea: Keycloak la fa cambiare al primo accesso).
 $KC create users -r fototimeline -s username=marco -s enabled=true
@@ -124,13 +126,15 @@ ID=$($KC get clients -r fototimeline -q clientId=fototimeline --fields id --form
 $KC get clients/$ID/client-secret -r fototimeline
 ```
 
-Altri utenti (i familiari): `create users` e `set-password` come sopra,
-meglio con nome e email (`-s firstName=Anna -s lastName=Rossi -s email=...`):
-il nome è quello che l'app mostra in "Caricata da". Senza `fototimeline-admin`
-vedono e gestiscono le foto ma non montano né smontano, e dei telefoni vedono
-solo il proprio. Il telefono si aggiunge poi nell'app (GUIDA.md, "Aggiungere
-un familiare").
-Chi riceve il ruolo deve uscire e rientrare: il ruolo entra nel token al login.
+Altri utenti (i familiari): dall'app, Strumenti → **Utenti** (sotto, "Utenti e
+ruoli"), oppure `create users`, `set-password` e `add-roles` come sopra con
+`fototimeline-gestore` o `fototimeline-utilizzatore`, meglio con nome e email
+(`-s firstName=Anna -s lastName=Rossi -s email=...`): il nome è quello che
+l'app mostra in "Caricata da". **Senza nessuno dei tre ruoli si entra ma non si
+vede niente** ("Chiedi l'accesso"). Il telefono si aggiunge poi nell'app
+(GUIDA.md, "Aggiungere un familiare").
+Chi riceve un ruolo dalla console di Keycloak deve uscire e rientrare: il ruolo
+entra nel token al login (dalla pagina Utenti le sue sessioni si chiudono da sole).
 
 Se il deploy di presenze riconcilia i realm (`riconcilia-realm.py`), controlla
 che lasci stare il realm `fototimeline`.
@@ -271,8 +275,8 @@ prossimo. **Elimina** toglie il telefono ma non il suo registro: rimesso con la
 stessa cartella, non ricopia niente. Telefoni e stato stanno in MongoDB
 (`sorgenti_telefono`).
 
-Chi non è admin vede in **Telefoni** solo i telefoni di cui è proprietario e
-può lanciarne un giro, ma non cambiarli né aggiungerne.
+**Telefoni** sta in Strumenti: solo l'amministratore lo apre (il gestore no,
+nemmeno per il suo telefono: "Utenti e ruoli").
 
 **Dal telefono unico all'elenco.** Prima la sincronizzazione era una sola
 (`impostazioni/sincronizzazione-telefono`). All'avvio quel documento diventa il
@@ -469,7 +473,8 @@ chi l'ha caricata dal browser o ha lanciato "Importa cartella", e per la
 cartella automatica il proprietario del telefono (i file messi lì a mano
 restano senza). Le foto di prima restano senza ("—" nel visore). Gli utenti si
 registrano da soli in MongoDB (`utenti`) quando entrano: username, nome, email,
-ultimo accesso, admin. Non serve l'API admin di Keycloak.
+ultimo accesso, ruolo; quelli creati dalla pagina Utenti ci sono da subito, e
+uno eliminato resta lì (solo per il nome in "Caricata da").
 
 ### Foto già ordinate nel cloud
 
@@ -895,11 +900,12 @@ dei vicini; ripristinate tornano com'erano. Eliminate per sempre, i loro volti
 se ne vanno, e un gruppo senza nome rimasto vuoto pure (una persona con nome
 resta, con 0 foto).
 
-**Chi può fare cosa**: vedere le persone, dare i nomi, unire, nascondere,
-togliere un volto e confermare le proposte lo può **chi usa l'app** (come i
-tag e gli album: è la famiglia che riconosce la famiglia, e vede già tutte le
-foto); **Riconosci volti** e **Ricostruisci indice** sono da admin
-(`fototimeline-admin`). Nessuna API dei volti è pubblica.
+**Chi può fare cosa**: vedere le persone (visore, filtro "Persona") lo può
+chiunque abbia un ruolo; dare il nome a un volto dal visore, confermare o
+rifiutare una proposta lì, il **gestore**; la pagina **Persone** di Strumenti
+(rinominare, unire, nascondere, togliere un volto, copertina, proposte) e
+**Riconosci volti** / **Ricostruisci indice** l'**amministratore**. Nessuna API
+dei volti è pubblica.
 
 **Link condivisi**: chi ha un link `/c/...` non vede **niente** delle persone:
 né nomi, né gruppi, né riquadri, né ritagli. La galleria pubblica usa i suoi
@@ -1057,7 +1063,7 @@ leggere e più veloci.
 I passi per l'utente sono in [GUIDA.md](GUIDA.md), sezione 6. Qui quello che
 serve sul server.
 
-**Importa da Google Takeout** (admin, pulsante *Google Foto*):
+**Importa da Google Takeout** (admin, Strumenti → *Google Foto*):
 
 - Takeout consegna gli zip su Google Drive (cartella `Takeout`). Serve un
   remote di rclone di tipo `drive`, nome a scelta (predefinito `gdrive`),
@@ -1097,7 +1103,7 @@ serve sul server.
   da Drive, solo se lì c'è ancora lo stesso file (stessa dimensione). Serve lo
   scope `drive` completo nel remote.
 
-**Scegli da Google Foto** (chiunque sia entrato):
+**Scegli da Google Foto** (anche questo in Strumenti: solo l'amministratore):
 
 - Un progetto Google Cloud con la **Google Photos Picker API** abilitata, un
   client OAuth **Applicazione web** col redirect
@@ -1329,6 +1335,82 @@ automatica: un errore che parla di memoria (`OutOfMemoryError`, `Java heap
 space`) non è un errore del file, e un ricordo vecchio con quel motivo si
 rilegge da solo al giro dopo. Per gli altri c'è sempre **Riprova tutti**.
 
+## Utenti e ruoli
+
+Tre ruoli di realm su Keycloak (`fototimeline.login.ruolo-*`, `FOTOTIMELINE_RUOLO_ADMIN`,
+`_GESTORE`, `_UTILIZZATORE` se servissero altri nomi). Chi ne ha più d'uno vale per il più
+alto; chi è nel realm **senza nessuno** entra ma vede solo "Chiedi l'accesso" (e il server
+gli risponde 403 su tutto tranne `/api/io`).
+
+| Ruolo | Può |
+|---|---|
+| `fototimeline-admin` (amministratore) | tutto: anche Strumenti (lavori, cloud, backup, salute, telefoni, Google Foto, cestino, quasi uguali, pagine Persone ed Eventi, le condivisioni di tutti) e la pagina **Utenti** |
+| `fototimeline-gestore` (gestore) | le foto: vedere, scaricare gli originali, caricare foto e video, cambiare data, tag, album, luogo, evento e persone dal visore e dalla selezione, ruotare, preferite, eliminare (nel cestino), condividere con un link. **Niente Strumenti né utenti** |
+| `fototimeline-utilizzatore` (utilizzatore) | **solo guardare**: timeline, ricerca, filtri, mappa, visore, "Accadde oggi". Niente ⤓ né originali (il server dà la foto ridotta a 2048 px senza EXIF, e i video solo da guardare), niente modifiche, eliminazioni, link, selezione, Strumenti. Uno screenshot resta possibile: non lo si impedisce |
+
+Il permesso di ogni indirizzo è in `ConfigurazioneSicurezza.permessi` e, riga per riga,
+in `SicurezzaTest.INVENTARIO` (un indirizzo nuovo che non c'è fa fallire i test).
+
+**Dopo un cambio** dalla pagina Utenti (ruolo, disattivato, password, eliminato) le
+sessioni già aperte di quell'utente non valgono più, nell'app (`SessioniChiuse`) e su
+Keycloak (logout): rientra col ruolo nuovo, o non rientra. L'ultimo amministratore attivo
+non perde il ruolo, non si disattiva e non si elimina. Eliminare un utente non tocca le sue
+foto: "Caricata da" resta col suo nome.
+
+### Configurazione, una volta sola
+
+Gli utenti stanno su Keycloak, non in MongoDB: la pagina Utenti li crea e cambia con
+l'**Admin REST API**, col service account di un client a parte, `fototimeline-utenti`
+(il client del login non riceve permessi in più). Dalla console di Keycloak: dal PC
+`tunnel-kc-up`, poi `http://localhost:18081`, utente amministratore del realm `master`.
+
+1. Realm **fototimeline** → *Realm roles* → *Create role*: `fototimeline-gestore`, poi
+   `fototimeline-utilizzatore` (`fototimeline-admin` c'è già).
+2. **Prima del rilascio**, a chi entra già: *Users* → l'utente → *Role mapping* → *Assign
+   role* → `fototimeline-gestore` (fa quello che faceva prima, senza Strumenti) o
+   `fototimeline-utilizzatore`. Chi resta senza vede "Chiedi l'accesso". Il tuo utente tiene
+   `fototimeline-admin`.
+3. *Clients* → *Create client*: Client ID `fototimeline-utenti`; *Client authentication*
+   **On**, *Authorization* Off; fra gli *Authentication flow* solo **Service accounts
+   roles** (togli *Standard flow* e *Direct access grants*). Niente redirect.
+4. Client `fototimeline-utenti` → *Service accounts roles* → *Assign role* → *Filter by
+   clients* → `realm-management`: **manage-users**, **view-users**, **view-realm**
+   (quest'ultimo per leggere i tre ruoli da assegnare).
+5. *Credentials* → *Client secret* → nel `.env` di server2:
+   `FOTOTIMELINE_UTENTI_CLIENT_SECRET=...` (`FOTOTIMELINE_UTENTI_CLIENT_ID` se il client ha
+   un altro nome). Poi `tunnel-kc-down` e il rilascio.
+6. Facoltativo, per gli **inviti per email** ("Keycloak gli manda il link per la
+   password"): *Realm settings* → *Email*, il server SMTP del realm. Senza, si crea con una
+   password iniziale (temporanea: Keycloak la fa cambiare al primo accesso).
+
+Gli stessi passi con `kcadm.sh`, dal server di produzione (come al passo 3 sopra):
+
+```bash
+$KC create roles -r fototimeline -s name=fototimeline-gestore
+$KC create roles -r fototimeline -s name=fototimeline-utilizzatore
+$KC add-roles -r fototimeline --uusername anna --rolename fototimeline-gestore
+$KC create clients -r fototimeline -s clientId=fototimeline-utenti -s enabled=true \
+  -s publicClient=false -s standardFlowEnabled=false -s directAccessGrantsEnabled=false \
+  -s serviceAccountsEnabled=true
+$KC add-roles -r fototimeline --uusername service-account-fototimeline-utenti \
+  --cclientid realm-management --rolename manage-users --rolename view-users --rolename view-realm
+ID=$($KC get clients -r fototimeline -q clientId=fototimeline-utenti --fields id --format csv --noquotes)
+$KC get clients/$ID/client-secret -r fototimeline
+```
+
+L'app chiama Keycloak all'indirizzo del login (`KEYCLOAK_ISSUER`, che dà anche il realm):
+`.../realms/fototimeline/protocol/openid-connect/token` e `.../admin/realms/fototimeline/...`.
+Da server2 la seconda deve rispondere **401** senza token:
+
+```bash
+ssh server2 "curl -s -o /dev/null -w '%{http_code}\n' https://presenze.footballer.it/auth/admin/realms/fototimeline/users"
+```
+
+Se risponde 403 o 404 il Caddy di presenze chiude `/auth/admin` verso internet: va aperto
+almeno per l'IP di server2, oppure `FOTOTIMELINE_UTENTI_KEYCLOAK` punta a un issuer
+raggiungibile. Finché manca qualcosa la pagina Utenti lo dice (segreto mancante, client
+senza permessi, Keycloak che non risponde) e gli utenti si gestiscono dalla console.
+
 ## Cestino
 
 "Elimina" (visore, selezione, *Togli le altre* delle quasi uguali) non
@@ -1370,9 +1452,10 @@ FOTOTIMELINE_CESTINO_GIORNI=30
 - **Eliminare per sempre** cancella prima i file e poi la scheda: se il cloud
   non risponde la foto resta nel cestino e la pulizia ci riprova, invece di
   lasciare un file senza scheda che *Indicizza archivio* riprenderebbe.
-- **Permessi**: quelli dell'eliminazione, cioè chiunque usi l'app (non serve
-  `fototimeline-admin`). Le preferite non si tolgono dalle quasi uguali, come
-  prima.
+- **Permessi**: eliminare (mettere nel cestino) lo può il **gestore**; la
+  pagina *Cestino* (ripristinare, eliminare per sempre, svuotare) e le *Quasi
+  uguali* stanno in Strumenti e sono dell'**amministratore**. Le preferite non
+  si tolgono dalle quasi uguali, come prima.
 
 ## Eventi
 

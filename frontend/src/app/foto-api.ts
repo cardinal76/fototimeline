@@ -51,6 +51,10 @@ import {
   VoltoInFoto,
   Utente,
   VoceMese,
+  ElencoUtenti,
+  NuovoUtente,
+  Ruolo,
+  VoceUtente,
 } from './modelli';
 
 @Injectable({ providedIn: 'root' })
@@ -545,6 +549,33 @@ export class FotoApi {
 
   revocaCondivisione(id: string): Observable<void> {
     return this.http.delete<void>(`/api/condivisioni/${id}`);
+  }
+
+  // ------------------------------------------------------------ utenti (solo amministratore)
+
+  gestioneUtenti(): Observable<ElencoUtenti> {
+    return this.http.get<ElencoUtenti>('/api/gestione-utenti');
+  }
+
+  creaUtente(nuovo: NuovoUtente): Observable<VoceUtente> {
+    return this.http.post<VoceUtente>('/api/gestione-utenti', nuovo);
+  }
+
+  ruoloUtente(id: string, ruolo: Ruolo): Observable<VoceUtente> {
+    return this.http.put<VoceUtente>(`/api/gestione-utenti/${encodeURIComponent(id)}/ruolo`, { ruolo });
+  }
+
+  attivaUtente(id: string, attivo: boolean): Observable<VoceUtente> {
+    return this.http.put<VoceUtente>(`/api/gestione-utenti/${encodeURIComponent(id)}/attivo`, { attivo });
+  }
+
+  /** Una password nuova (temporanea) o, con invito, l'email di Keycloak per sceglierla. */
+  passwordUtente(id: string, password: string | null, invito: boolean): Observable<void> {
+    return this.http.post<void>(`/api/gestione-utenti/${encodeURIComponent(id)}/password`, { password, invito });
+  }
+
+  eliminaUtente(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/gestione-utenti/${encodeURIComponent(id)}`);
   }
 
   /** L'indirizzo da mandare: la pagina pubblica, che non chiede il login. */

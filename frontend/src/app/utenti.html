@@ -1,0 +1,158 @@
+<div class="velo" (click)="chiudi.emit()">
+  <section
+    #dialogo
+    class="dialogo"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="titolo-utenti"
+    tabindex="-1"
+    (click)="$event.stopPropagation()"
+  >
+    <header>
+      <h2 id="titolo-utenti">Utenti</h2>
+      @if (elenco()?.utenti?.length; as n) {
+        <span class="tenue">{{ n === 1 ? '1 utente' : n + ' utenti' }}</span>
+      }
+      <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
+    </header>
+
+    <p class="tenue">
+      Gli utenti stanno su Keycloak. <b>Utilizzatore</b>: guarda le foto (niente download). <b>Gestore</b>: carica,
+      modifica, elimina e condivide; niente Strumenti. <b>Amministratore</b>: tutto. Chi cambia ruolo, viene disattivato o
+      riceve una password nuova deve rientrare.
+    </p>
+
+    @if (errore(); as e) {
+      <p class="avviso errore" role="alert">{{ e }}</p>
+    }
+
+    @if (elenco(); as l) {
+      @if (!l.disponibile) {
+        <p class="avviso" role="status">{{ l.motivo }}</p>
+      } @else {
+        <div class="comandi">
+          <button type="button" class="primario" [disabled]="occupato()" (click)="apriCreazione()">Nuovo utente</button>
+        </div>
+
+        @if (creazione()) {
+          <form class="modulo" (ngSubmit)="crea()">
+            <h3>Nuovo utente</h3>
+            <div class="campi">
+              <label>
+                Username
+                <input name="username" [(ngModel)]="modulo.username" required autocomplete="off" placeholder="anna" />
+              </label>
+              <label>
+                Nome
+                <input name="nome" [(ngModel)]="modulo.nome" autocomplete="off" />
+              </label>
+              <label>
+                Cognome
+                <input name="cognome" [(ngModel)]="modulo.cognome" autocomplete="off" />
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" [(ngModel)]="modulo.email" autocomplete="off" />
+              </label>
+              <label>
+                Ruolo
+                <select name="ruolo" [(ngModel)]="modulo.ruolo">
+                  @for (r of ruoli; track r.valore) {
+                    <option [value]="r.valore">{{ r.nome }}</option>
+                  }
+                </select>
+              </label>
+            </div>
+            <p class="tenue">{{ descrizione(modulo.ruolo) }}</p>
+            <label class="spunta-riga">
+              <input type="checkbox" name="invito" [(ngModel)]="modulo.invito" />
+              Invito per email: Keycloak gli manda il link per scegliere la password (serve l'email, e l'SMTP del realm)
+            </label>
+            @if (!modulo.invito) {
+              <label>
+                Password iniziale <small>(almeno 8 caratteri; al primo accesso la cambia)</small>
+                <input name="password" type="text" [(ngModel)]="modulo.password" autocomplete="new-password" minlength="8" required />
+              </label>
+            }
+            <div class="piede">
+              <button type="button" (click)="creazione.set(false)">Annulla</button>
+              <button type="submit" class="primario" [disabled]="occupato()">Crea</button>
+            </div>
+          </form>
+        }
+
+        <ul class="utenti" aria-live="polite">
+          @for (u of l.utenti; track u.id) {
+            <li [class.spento]="!u.attivo">
+              <div class="chi">
+                <b>{{ nomeCompleto(u) }}</b>
+                <span class="tenue">
+                  {{ u.username }}
+                  @if (u.email) {
+                    · {{ u.email }}
+                  }
+                  @if (seiTu(u)) {
+                    · sei tu
+                  }
+                  @if (!u.attivo) {
+                    · <span class="errore">disattivato</span>
+                  }
+                  ·
+                  @if (u.ultimoAccesso) {
+                    ultimo accesso {{ u.ultimoAccesso | date: 'd MMM y, HH:mm' }}
+                  } @else {
+                    mai entrato
+                  }
+                </span>
+              </div>
+              <label class="ruolo">
+                <span class="nascosto">Ruolo di {{ u.username }}</span>
+                <select
+                  [ngModel]="u.ruolo ?? ''"
+                  [disabled]="occupato()"
+                  (ngModelChange)="cambiaRuolo(u, $event)"
+                  [attr.aria-label]="'Ruolo di ' + u.username"
+                >
+                  @if (!u.ruolo) {
+                    <option value="" disabled>Nessun ruolo</option>
+                  }
+                  @for (r of ruoli; track r.valore) {
+                    <option [value]="r.valore">{{ r.nome }}</option>
+                  }
+                </select>
+              </label>
+              <div class="azioni">
+                <button type="button" [disabled]="occupato()" (click)="commutaAttivo(u)">{{ u.attivo ? 'Disattiva' : 'Riattiva' }}</button>
+                <button type="button" [disabled]="occupato()" (click)="apriPassword(u)">Password</button>
+                <button type="button" class="pericolo" [disabled]="occupato()" (click)="elimina(u)">Elimina</button>
+              </div>
+              @if (perPassword()?.id === u.id) {
+                <form class="modulo password" (ngSubmit)="salvaPassword(false)">
+                  <label>
+                    Password nuova <small>(temporanea: al primo accesso la cambia)</small>
+                    <input name="passwordNuova" type="text" [(ngModel)]="passwordNuova" autocomplete="new-password" minlength="8" required />
+                  </label>
+                  <div class="piede">
+                    <button type="button" (click)="perPassword.set(null)">Annulla</button>
+                    @if (u.email) {
+                      <button type="button" [disabled]="occupato()" (click)="salvaPassword(true)">Manda l'email</button>
+                    }
+                    <button type="submit" class="primario" [disabled]="occupato()">Imposta</button>
+                  </div>
+                </form>
+              }
+            </li>
+          } @empty {
+            <li class="tenue">Nessun utente nel realm.</li>
+          }
+        </ul>
+        <p class="tenue">
+          Chi è su Keycloak senza nessuno dei tre ruoli entra ma vede solo "chiedi l'accesso". L'ultimo amministratore attivo
+          non si può disattivare, eliminare o togliere dagli amministratori.
+        </p>
+      }
+    } @else if (!errore()) {
+      <span class="rotella" aria-label="Caricamento"></span>
+    }
+  </section>
+</div>

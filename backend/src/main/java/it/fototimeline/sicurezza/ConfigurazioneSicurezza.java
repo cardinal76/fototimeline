@@ -18,6 +18,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.access.RequestMatcherDelegatingAccessDeniedHandler;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
@@ -27,6 +28,7 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.StringUtils;
@@ -70,45 +72,9 @@ public class ConfigurazioneSicurezza {
             return http.build();
         }
 
-        String autorizzazioneApi = login.richiedeRuolo() ? "ROLE_" + login.ruolo() : null;
-        http.authorizeHttpRequests(a -> {
-            a.requestMatchers("/salute", "/error").permitAll();
-            // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
-            a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
-                    .permitAll();
-            // I link di condivisione: la pagina, i suoi dati e i file dell'app Angular che la disegna
-            // (codice compilato, uguale per tutti, senza dati). Il token lo controlla CondiviseController
-            // a ogni richiesta; LimiteRichieste frena chi prova token a caso. Solo GET: nient'altro si apre.
-            a.requestMatchers(HttpMethod.GET, "/c/*", "/api/condivise/**").permitAll();
-            a.requestMatchers(HttpMethod.GET, "/main-*.js", "/chunk-*.js", "/polyfills-*.js", "/styles-*.css")
-                    .permitAll();
-            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**",
-                    "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**", "/api/contenuto/**",
-                    "/api/importazioni/scartati/**", "/api/volti/riconosci", "/api/volti/annulla")
-                    .hasAuthority("ROLE_" + login.ruoloAdmin());
-            // Chi è entrato nell'app: email e ruoli, solo per gli admin.
-            a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // La pagina "Salute" e la prova di Telegram (/salute, l'healthcheck, resta pubblico qui sopra).
-            a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // Il dump dei thread (DiagnosticaController): nomi dei file e pile del codice, solo per gli admin.
-            a.requestMatchers("/api/diagnostica", "/api/diagnostica/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // "Ricordi su Telegram": impostazioni e prova.
-            a.requestMatchers("/api/ricordi-telegram", "/api/ricordi-telegram/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // "Importa da Google Takeout": tutta la libreria di Google Foto nell'archivio, solo l'admin.
-            // "Scegli da Google Foto" (/api/google/**, callback compreso) è per chiunque sia entrato.
-            a.requestMatchers("/api/google/takeout", "/api/google/takeout/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
-            // Il cestino (/api/cestino/**) come l'eliminazione (DELETE /api/foto/{id}) e le quasi uguali:
-            // basta poter usare l'app, qui sotto.
-            // Persone e volti (/api/persone/**, /api/volti/**, /api/foto/{id}/volti): vederle e dare i nomi
-            // come i tag, a chi usa l'app; "Riconosci volti" qui sopra, da admin. Mai tra i path pubblici.
-            if (autorizzazioneApi != null) {
-                a.anyRequest().hasAuthority(autorizzazioneApi);
-            } else {
-                a.anyRequest().authenticated();
-            }
-        });
-        http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login.ruoloAdmin()))));
+        permessi(http, login);
+        http.addFilterBefore(new SessioniChiuse(utenti), AuthorizationFilter.class);
+        http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login))));
         // Le chiamate XHR prendono 401 (Angular manda al login), le pagine il redirect a Keycloak.
         http.exceptionHandling(e -> e
                 .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
@@ -122,6 +88,105 @@ public class ConfigurazioneSicurezza {
             l.logoutSuccessHandler(uscita);
         });
         return http.build();
+    }
+
+    /**
+     * Chi può chiamare cosa. Tre ruoli ({@link Ruolo}), dal più alto:
+     * <ul>
+     * <li><b>amministratore</b>: tutto, compresi gli utenti e il menu Strumenti;</li>
+     * <li><b>gestore</b>: le foto (caricare, modificare, ruotare, eliminare nel cestino,
+     *     condividere, scaricare gli originali), niente Strumenti né utenti;</li>
+     * <li><b>utilizzatore</b>: solo guardare. Niente originali: {@code /vista} gli dà la foto
+     *     ridotta e {@code /file} solo i video da guardare (FotoController).</li>
+     * </ul>
+     * Chi è entrato senza nessuno dei tre vede solo {@code /api/io} e la pagina
+     * "chiedi l'accesso". L'ordine conta: vince la prima regola che corrisponde.
+     * Ogni indirizzo dei controller è elencato con il suo permesso in
+     * {@code SicurezzaTest.INVENTARIO}: uno nuovo che manca fa fallire i test.
+     */
+    private static void permessi(HttpSecurity http, LoginProperties login) throws Exception {
+        String admin = login.autorita(Ruolo.AMMINISTRATORE);
+        String[] gestione = login.almeno(Ruolo.GESTORE);
+        String[] lettura = login.almeno(Ruolo.UTILIZZATORE);
+        http.authorizeHttpRequests(a -> {
+            a.requestMatchers("/salute", "/error").permitAll();
+            // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
+            a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
+                    .permitAll();
+            // I link di condivisione: la pagina, i suoi dati e i file dell'app Angular che la disegna
+            // (codice compilato, uguale per tutti, senza dati). Il token lo controlla CondiviseController
+            // a ogni richiesta; LimiteRichieste frena chi prova token a caso. Solo GET: nient'altro si apre.
+            a.requestMatchers(HttpMethod.GET, "/c/*", "/api/condivise/**").permitAll();
+            a.requestMatchers(HttpMethod.GET, "/main-*.js", "/chunk-*.js", "/polyfills-*.js", "/styles-*.css")
+                    .permitAll();
+
+            // Chi sono e con che ruolo: anche senza ruolo, così l'app dice "chiedi l'accesso".
+            a.requestMatchers(HttpMethod.GET, "/api/io").authenticated();
+
+            // ---- Solo l'amministratore: gli utenti e tutto quello che sta nel menu Strumenti.
+            a.requestMatchers("/api/utenti", "/api/utenti/**", "/api/gestione-utenti", "/api/gestione-utenti/**")
+                    .hasAuthority(admin);
+            // Lavori sull'archivio: Indicizza archivio, Calcola luoghi, Calcola eventi, Converti video
+            // (anche lo stato della coda), Importa cartella col suo navigatore e lo stato dei lavori.
+            a.requestMatchers("/api/archivio/**", "/api/importa", "/api/importazioni/**", "/api/cartelle")
+                    .hasAuthority(admin);
+            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/contenuto/**", "/api/volti/riconosci",
+                    "/api/volti/annulla").hasAuthority(admin);
+            a.requestMatchers("/api/backup", "/api/backup/**", "/api/salute", "/api/salute/**",
+                    "/api/diagnostica", "/api/diagnostica/**", "/api/ricordi-telegram", "/api/ricordi-telegram/**")
+                    .hasAuthority(admin);
+            // Telefoni, Google Foto (Picker e Takeout), Quasi uguali, Cestino (ripristino, eliminazione per
+            // sempre, Svuota: l'eliminazione dal visore mette solo nel cestino, sotto).
+            a.requestMatchers("/api/telefoni", "/api/telefoni/**", "/api/google", "/api/google/**",
+                    "/api/quasi-uguali", "/api/quasi-uguali/**", "/api/cestino", "/api/cestino/**")
+                    .hasAuthority(admin);
+            // "Le mie condivisioni" (elenco e revoca) sta in Strumenti; crearne una no, sotto.
+            a.requestMatchers(HttpMethod.GET, "/api/condivisioni").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.DELETE, "/api/condivisioni/*").hasAuthority(admin);
+            // Le pagine Persone ed Eventi di Strumenti: nomi, unioni, nascoste, copertine, proposte.
+            // Leggere (filtro "Persona", scelta dell'evento) e cambiare le persone e l'evento di una foto no.
+            a.requestMatchers(HttpMethod.PUT, "/api/persone/*", "/api/eventi/*").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.POST, "/api/persone/**", "/api/volti/*/togli", "/api/eventi/unisci")
+                    .hasAuthority(admin);
+            a.requestMatchers(HttpMethod.GET, "/api/persone/*/volti", "/api/persone/*/proposte",
+                    "/api/persone/*/simili").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.DELETE, "/api/eventi/*").hasAuthority(admin);
+
+            // ---- Gestore (e amministratore): il lavoro sulle foto.
+            // L'originale da scaricare: l'utilizzatore guarda soltanto.
+            a.requestMatchers(new AndRequestMatcher(new AntPathRequestMatcher("/api/foto/*/file", "GET"),
+                    ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
+                    "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
+                    "/api/eventi/*/foto", "/api/volti/*/assegna", "/api/volti/*/nome", "/api/volti/*/rifiuta",
+                    "/api/condivisioni", RICEVI_CONDIVISI).hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.PUT, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.DELETE, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
+            // Cercare un luogo serve solo a sceglierlo per una foto.
+            a.requestMatchers(HttpMethod.GET, "/api/luoghi/cerca").hasAnyAuthority(gestione);
+
+            // ---- Tutti e tre: guardare (timeline, ricerca, filtri, mappa, visore, "Accadde oggi").
+            a.requestMatchers(HttpMethod.GET, "/api/**").hasAnyAuthority(lettura);
+            // Un'API che qui sopra non c'è (un metodo nuovo dimenticato) non la chiama nessuno.
+            a.requestMatchers("/api/**").denyAll();
+            // Le pagine dell'app: chi è entrato, anche senza ruolo (vede "chiedi l'accesso").
+            a.requestMatchers(HttpMethod.GET, "/**").authenticated();
+            a.anyRequest().denyAll();
+        });
+    }
+
+    /** {@code ?scarica=true} o {@code ?originale=true}: l'originale da scaricare, non il video da guardare. */
+    static boolean chiedeLOriginale(HttpServletRequest richiesta) {
+        return vero(richiesta.getParameter("scarica")) || vero(richiesta.getParameter("originale"));
+    }
+
+    /** Come lo legge Spring per un {@code boolean}: vuoto, false, off, no e 0 sono falsi, il resto no. */
+    private static boolean vero(String valore) {
+        if (valore == null) {
+            return false;
+        }
+        String v = valore.trim().toLowerCase(java.util.Locale.ROOT);
+        return !(v.isEmpty() || v.equals("false") || v.equals("off") || v.equals("no") || v.equals("0"));
     }
 
     /** Senza login l'app deve restare raggiungibile solo da questo PC. */

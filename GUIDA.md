@@ -432,9 +432,16 @@ Run workflow) la mette su server2.
 L'archivio è di famiglia: tutti vedono tutte le foto, ma ognuno ha il suo telefono, e ogni foto
 sa chi l'ha portata. Per aggiungere Anna:
 
-**5.1 L'utente in Keycloak**, dal server di produzione (i comandi completi sono in
-[DEPLOY.md](DEPLOY.md), "Keycloak: realm, client e amministratore"; per la console web c'è
-`tunnel-kc-up`):
+**5.1 L'utente.** Dall'app, da amministratore: Strumenti → **Utenti** → **Nuovo utente**
+(username, nome, email, ruolo, password iniziale o invito per email). Il ruolo:
+
+- **Gestore**: carica, modifica, elimina (nel cestino) e condivide le foto; niente Strumenti.
+- **Utilizzatore**: guarda soltanto, senza scaricare.
+- **Amministratore**: tutto, compresi utenti e Strumenti.
+
+Se la pagina Utenti dice che manca qualcosa (DEPLOY.md, "Utenti e ruoli"), dal server di
+produzione (comandi completi in [DEPLOY.md](DEPLOY.md), "Keycloak: realm, client e
+amministratore"; per la console web c'è `tunnel-kc-up`):
 
 ```bash
 cd ~/presenze && set -a && . ./.env.prod && set +a
@@ -444,13 +451,13 @@ $KC config credentials --server http://localhost:8080/auth --realm master \
 $KC create users -r fototimeline -s username=anna -s enabled=true \
   -s firstName=Anna -s lastName=Rossi -s email=anna@example.com
 $KC set-password -r fototimeline --username anna --new-password 'temporanea' --temporary
-# Solo se deve montare il cloud, fare backup e gestire i telefoni di tutti:
-# $KC add-roles -r fototimeline --uusername anna --rolename fototimeline-admin
+# Un ruolo serve sempre: senza, Anna entra ma vede solo "Chiedi l'accesso".
+$KC add-roles -r fototimeline --uusername anna --rolename fototimeline-gestore
 ```
 
-Anna entra una volta su https://foto.marcocardinali.it (cambia la password): da quel momento
-l'app la conosce e la propone come proprietario. Senza ruolo admin vede e modifica le foto, ma dei
-telefoni vede solo il suo.
+Anna entra su https://foto.marcocardinali.it e cambia la password. L'app la propone già come
+proprietario di un telefono: il telefono lo aggiunge l'amministratore (Strumenti → Telefoni),
+perché il gestore non apre Strumenti.
 
 **5.2 La sua cartella su pCloud.** Due casi:
 

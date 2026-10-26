@@ -3,6 +3,21 @@
   il resto (importazioni, archivio, sistema) sta nel menu Strumenti.
   Sul telefono (sotto gli 800px) resta una riga sola e il menu ☰ prende anche vista, Seleziona e utente.
 -->
+<!-- Entrato su Keycloak ma senza nessuno dei tre ruoli: il server risponde 403 a tutto. -->
+@if (galleria.senzaAccesso()) {
+  <div class="senza-accesso" role="alertdialog" aria-labelledby="titolo-accesso" aria-modal="true">
+    <div class="riquadro">
+      <p class="logo" aria-hidden="true">◐</p>
+      <h1 id="titolo-accesso">Chiedi l'accesso</h1>
+      <p>
+        Ciao {{ galleria.io()?.nome }}: il tuo account (<code>{{ galleria.io()?.username }}</code>) non ha ancora un ruolo in
+        FotoTimeline. Chiedi a un amministratore di dartelo, poi esci e rientra.
+      </p>
+      <button type="button" class="primario" (click)="logout()">Esci</button>
+    </div>
+  </div>
+}
+
 <header class="barra" #barra>
   <button type="button" class="marchio" (click)="azzera(); inizio()">
     <span class="logo" aria-hidden="true">◐</span> <span class="nome-app">FotoTimeline</span>
@@ -73,7 +88,7 @@
             }
           </select>
         </label>
-        @if (galleria.filtro().album) {
+        @if (galleria.filtro().album && galleria.puoGestire()) {
           <button type="button" class="link" title="Un link per chi non ha un account" (click)="chiudiMenu(); apriCondividiAlbum()">Condividi album</button>
         }
         @if (galleria.caricateDa().length) {
@@ -183,17 +198,23 @@
     }
   }
 
-  <button type="button" class="solo-desktop" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
-    {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
-  </button>
-  <label class="bottone primario carica" [class.spento]="!galleria.archivioDisponibile()">
-    <span class="solo-telefono" aria-hidden="true">＋</span>
-    <span class="etichetta">Carica foto</span>
-    <input #scelta type="file" accept="image/*,video/mp4,video/quicktime,.heic,.heif,.mov,.m4v" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
-  </label>
+  <!-- Seleziona e Carica: solo a chi gestisce le foto (gestore, amministratore). -->
+  @if (galleria.puoGestire()) {
+    <button type="button" class="solo-desktop" [attr.aria-pressed]="selezione()" (click)="selezione() ? esciSelezione() : selezione.set(true)">
+      {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
+    </button>
+    <label class="bottone primario carica" [class.spento]="!galleria.archivioDisponibile()">
+      <span class="solo-telefono" aria-hidden="true">＋</span>
+      <span class="etichetta">Carica foto</span>
+      <input #scelta type="file" accept="image/*,video/mp4,video/quicktime,.heic,.heif,.mov,.m4v" multiple hidden [disabled]="!galleria.archivioDisponibile()" (change)="scegliFile(scelta)" />
+    </label>
+  }
 
-  <!-- Strumenti (☰ sul telefono): le voci a sezioni, con le stesse condizioni di prima. -->
-  <div class="ancora" data-menu="strumenti" (focusout)="focusFuori($event)">
+  <!--
+    Strumenti (☰ sul telefono): le voci a sezioni, solo per l'amministratore. Gli altri lo vedono solo sul
+    telefono, dove il ☰ porta anche la vista, Seleziona (gestore) e l'uscita.
+  -->
+  <div class="ancora" [class.solo-telefono]="!galleria.admin()" data-menu="strumenti" (focusout)="focusFuori($event)">
     <button
       type="button"
       id="apri-strumenti"
@@ -221,11 +242,14 @@
           <div class="intestazione" aria-hidden="true">Vista</div>
           <button type="button" class="voce" role="menuitemradio" [attr.aria-checked]="vista() === 'timeline'" (click)="chiudiMenu(); vista.set('timeline')">Timeline</button>
           <button type="button" class="voce" role="menuitemradio" [attr.aria-checked]="vista() === 'mappa'" (click)="chiudiMenu(); vista.set('mappa')">Mappa</button>
-          <button type="button" class="voce" role="menuitemcheckbox" [attr.aria-checked]="selezione()" (click)="chiudiMenu(); selezione() ? esciSelezione() : selezione.set(true)">
-            {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
-          </button>
+          @if (galleria.puoGestire()) {
+            <button type="button" class="voce" role="menuitemcheckbox" [attr.aria-checked]="selezione()" (click)="chiudiMenu(); selezione() ? esciSelezione() : selezione.set(true)">
+              {{ selezione() ? 'Fine selezione' : 'Seleziona' }}
+            </button>
+          }
         </div>
 
+        @if (galleria.admin()) {
         <div class="sezione" role="group" aria-label="Importa">
           <div class="intestazione" aria-hidden="true">Importa</div>
           <button type="button" class="voce" role="menuitem" [disabled]="!galleria.archivioDisponibile()" (click)="chiudiMenu(); apriImporta()">Importa cartella</button>
@@ -348,6 +372,15 @@
           <button type="button" class="voce" role="menuitem" title="Le mie condivisioni: i link mandati" (click)="chiudiMenu(); apriCondivisioni()">Condivisioni</button>
         </div>
 
+        @if (galleria.io()?.login) {
+          <div class="sezione" role="group" aria-label="Amministrazione">
+            <div class="intestazione" aria-hidden="true">Amministrazione</div>
+            <button type="button" class="voce" role="menuitem" title="Chi entra e con che ruolo: utilizzatore, gestore, amministratore" (click)="chiudiMenu(); dialogoUtenti.set(true)">
+              Utenti
+            </button>
+          </div>
+        }
+
         @if (galleria.io()?.admin || galleria.cloud()?.gestito) {
           <div class="sezione" role="group" aria-label="Sistema">
             <div class="intestazione" aria-hidden="true">Sistema</div>
@@ -391,6 +424,7 @@
               }
             }
           </div>
+        }
         }
 
         @if (galleria.io()?.login) {
@@ -452,7 +486,7 @@
     }
   }
   <main #scorrimento (scroll)="scorri()" [hidden]="vista() === 'mappa'">
-    @if (!filtriAttivi()) {
+    @if (!filtriAttivi() && galleria.io()?.ruolo) {
       <app-ricordi (apri)="aperta.set($event)" />
     }
     @if (galleria.filtro().evento) {
@@ -542,8 +576,10 @@
               <button type="button" (click)="azzera()">Azzera filtri</button>
             } @else {
               <p class="grande">L'archivio è vuoto</p>
-              <p>Trascina qui foto e video, usa <b>Carica foto</b> o importa una cartella.</p>
-              <p class="tenue">La data di scatto viene dai dati EXIF: le foto si mettono in ordine da sole.</p>
+              @if (galleria.puoGestire()) {
+                <p>Trascina qui foto e video, usa <b>Carica foto</b> o importa una cartella.</p>
+                <p class="tenue">La data di scatto viene dai dati EXIF: le foto si mettono in ordine da sole.</p>
+              }
             }
           </div>
         }
@@ -564,7 +600,7 @@
   }
 </div>
 
-@if (selezione() && galleria.selezionate().size) {
+@if (selezione() && galleria.selezionate().size && galleria.puoGestire()) {
   <div class="barra-selezione" role="toolbar" aria-label="Azioni sulle foto selezionate">
     <b>{{ galleria.selezionate().size }} selezionate</b>
     <button type="button" (click)="operazione('AGGIUNGI_TAG')">+ Tag</button>
@@ -593,7 +629,7 @@
     <p>
       {{ c.caricate }} nuove · {{ c.duplicate }} già presenti
       @if (c.nelCestino) {
-        (<span [title]="'Si ripristinano da Strumenti → Cestino'">{{ c.nelCestino }} nel cestino</span>)
+        (<span [title]="galleria.admin() ? 'Si ripristinano da Strumenti → Cestino' : 'Le può ripristinare un amministratore'">{{ c.nelCestino }} nel cestino</span>)
       }
       @if (c.errori.length) {
         · <span class="errore">{{ c.errori.length }} errori</span>
@@ -1167,6 +1203,10 @@
       </div>
     </div>
   </div>
+}
+
+@if (dialogoUtenti()) {
+  <app-utenti (chiudi)="dialogoUtenti.set(false)" />
 }
 
 @if (dialogoGoogle()) {

@@ -29,3 +29,6 @@ spring:
 fototimeline:
   login:
     attivo: true
+  # Lo stesso realm del login, per la pagina Utenti (Admin REST API di Keycloak).
+  utenti:
+    keycloak: ${FOTOTIMELINE_UTENTI_KEYCLOAK:${KEYCLOAK_ISSUER:https://presenze.footballer.it/auth/realms/fototimeline}}

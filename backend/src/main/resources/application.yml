@@ -233,10 +233,20 @@ fototimeline:
     attesa: PT20S
   login:
     attivo: ${FOTOTIMELINE_LOGIN:false}
-    # Ruolo di realm richiesto; vuoto = basta un utente del realm.
-    ruolo: ${FOTOTIMELINE_RUOLO:}
-    # Ruolo di realm per montare e smontare il cloud.
+    # I tre ruoli di realm (Ruolo, ConfigurazioneSicurezza): l'amministratore fa tutto, il gestore
+    # lavora sulle foto (niente Strumenti né utenti), l'utilizzatore guarda soltanto. Chi non ne ha
+    # nessuno vede solo "chiedi l'accesso".
     ruolo-admin: ${FOTOTIMELINE_RUOLO_ADMIN:fototimeline-admin}
+    ruolo-gestore: ${FOTOTIMELINE_RUOLO_GESTORE:fototimeline-gestore}
+    ruolo-utilizzatore: ${FOTOTIMELINE_RUOLO_UTILIZZATORE:fototimeline-utilizzatore}
+  # La pagina Utenti (solo l'amministratore): gli utenti stanno su Keycloak e si cambiano con la sua
+  # Admin REST API, col service account di un client confidenziale (DEPLOY.md, "Utenti e ruoli").
+  # Senza segreto la pagina dice cosa manca; sul PC (login spento) non c'è.
+  utenti:
+    # L'issuer del realm; vuoto = quello del login (application-server.yml).
+    keycloak: ${FOTOTIMELINE_UTENTI_KEYCLOAK:${KEYCLOAK_ISSUER:}}
+    client-id: ${FOTOTIMELINE_UTENTI_CLIENT_ID:fototimeline-utenti}
+    client-secret: ${FOTOTIMELINE_UTENTI_CLIENT_SECRET:}
   # Il cloud montato dal container rclone (deploy/docker-compose.yml). Vuoto
   # sul PC: l'archivio è un disco sempre disponibile.
   cloud:

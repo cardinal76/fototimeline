@@ -15,6 +15,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,7 +28,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
+import it.fototimeline.condivisione.CondivisioniService;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.service.ConversioneVideo;
 import it.fototimeline.service.ConversioneVideo.StatoConversioni;
@@ -63,9 +66,11 @@ public class FotoController {
     private final RegistroUtenti utenti;
     private final ConversioneVideo conversione;
     private final Rotazioni rotazioni;
+    private final CondivisioniService condivisioni;
 
     public FotoController(FotoService service, ImportazioneCartelle importazione, LavoriImportazione lavori,
-            UtenteCorrente corrente, RegistroUtenti utenti, ConversioneVideo conversione, Rotazioni rotazioni) {
+            UtenteCorrente corrente, RegistroUtenti utenti, ConversioneVideo conversione, Rotazioni rotazioni,
+            CondivisioniService condivisioni) {
         this.service = service;
         this.importazione = importazione;
         this.lavori = lavori;
@@ -73,6 +78,7 @@ public class FotoController {
         this.utenti = utenti;
         this.conversione = conversione;
         this.rotazioni = rotazioni;
+        this.condivisioni = condivisioni;
     }
 
     @GetMapping("/foto")
@@ -272,6 +278,9 @@ public class FotoController {
      */
     @GetMapping("/foto/{id}/vista")
     public ResponseEntity<Resource> vista(@PathVariable String id) {
+        if (!corrente.chi().puoGestire()) {
+            return service.trova(id).map(this::vistaRidotta).orElse(ResponseEntity.notFound().build());
+        }
         return service.trova(id)
                 .map(rotazioni::vista)
                 .map(vista -> ResponseEntity.ok()
@@ -282,18 +291,40 @@ public class FotoController {
     }
 
     /**
+     * Per l'utilizzatore, che guarda soltanto: la foto ridotta e senza EXIF
+     * dei link condivisi (al più {@code fototimeline.condivisioni.lato-vista}
+     * pixel, girata come la scheda), mai l'originale; per un video la miniatura.
+     */
+    private ResponseEntity<Resource> vistaRidotta(Foto foto) {
+        Path file = foto.isVideo() ? service.fileMiniatura(foto) : condivisioni.vista(foto);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
+                .contentType(MediaType.IMAGE_JPEG)
+                .<Resource>body(new FileSystemResource(file));
+    }
+
+    /**
      * Il file; con Range (i video nel browser) risponde a pezzi. Per i video
      * la versione compatibile (H.264 in MP4) se c'è; {@code originale=true} o
      * {@code scarica=true} danno sempre l'originale. Un JPEG girato a mano
      * arriva girato senza perdita (Rotazioni.originale), salvo
      * {@code originale=true}: allora sono i byte dell'archivio.
+     *
+     * <p>L'utilizzatore ha solo i video da guardare: niente foto (gli basta
+     * {@code /vista}) e niente {@code scarica} o {@code originale}, che
+     * ConfigurazioneSicurezza gli chiude già. Il video gli arriva lo stesso a
+     * pezzi, perché senza non si guarda.
      */
     @GetMapping("/foto/{id}/file")
     public ResponseEntity<Resource> file(@PathVariable String id,
             @RequestParam(defaultValue = "false") boolean scarica,
             @RequestParam(defaultValue = "false") boolean originale) {
+        boolean soloGuardare = !corrente.chi().puoGestire();
         return service.trova(id)
                 .map(foto -> {
+                    if (soloGuardare && (!foto.isVideo() || scarica || originale)) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Il tuo account può solo guardare le foto");
+                    }
                     var servito = service.fileDaServire(foto, originale || scarica);
                     var disposizione = (scarica ? ContentDisposition.attachment() : ContentDisposition.inline())
                             .filename(servito.nome(), StandardCharsets.UTF_8)

@@ -13,12 +13,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class UtenteCorrente {
 
-    /** @param username null con il login spento: le foto caricate restano senza "caricata da" */
-    public record Chi(String username, String nome, String email, boolean admin) {
+    /**
+     * @param username null con il login spento: le foto caricate restano senza "caricata da"
+     * @param ruolo    null se l'utente del realm non ha nessuno dei tre ruoli: non vede niente
+     */
+    public record Chi(String username, String nome, String email, Ruolo ruolo) {
+
+        public boolean admin() {
+            return ruolo != null && ruolo.admin();
+        }
+
+        /** Può cambiare le foto e scaricare gli originali (gestore o amministratore). */
+        public boolean puoGestire() {
+            return ruolo != null && ruolo.puoGestire();
+        }
 
         /** True se può vedere e comandare un telefono di {@code proprietario}. */
         public boolean puo(String proprietario) {
-            return admin || username != null && username.equals(proprietario);
+            return admin() || username != null && username.equals(proprietario);
         }
     }
 
@@ -30,19 +42,18 @@ public class UtenteCorrente {
 
     public Chi chi() {
         if (!login.attivo()) {
-            return new Chi(null, null, null, true);
+            return new Chi(null, null, null, Ruolo.AMMINISTRATORE);
         }
         Authentication a = SecurityContextHolder.getContext().getAuthentication();
         if (a == null || !a.isAuthenticated() || a instanceof AnonymousAuthenticationToken) {
-            return new Chi(null, null, null, false);
+            return new Chi(null, null, null, null);
         }
-        boolean admin = a.getAuthorities().stream()
-                .anyMatch(r -> r.getAuthority().equals("ROLE_" + login.ruoloAdmin()));
+        Ruolo ruolo = login.ruoloDi(a.getAuthorities());
         if (a.getPrincipal() instanceof OidcUser u) {
             String username = u.getPreferredUsername() != null ? u.getPreferredUsername() : a.getName();
             String nome = u.getFullName() != null ? u.getFullName() : username;
-            return new Chi(username, nome, u.getEmail(), admin);
+            return new Chi(username, nome, u.getEmail(), ruolo);
         }
-        return new Chi(a.getName(), a.getName(), null, admin);
+        return new Chi(a.getName(), a.getName(), null, ruolo);
     }
 }

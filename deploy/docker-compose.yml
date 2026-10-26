@@ -72,6 +72,10 @@ services:
       MONGODB_URI: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/fototimeline?authSource=admin
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://presenze.footballer.it/auth/realms/fototimeline}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?}
+      # La pagina Utenti: il client col service account per l'Admin API di Keycloak (DEPLOY.md,
+      # "Utenti e ruoli"). Segreto vuoto = la pagina c'è ma dice cosa manca.
+      FOTOTIMELINE_UTENTI_CLIENT_ID: ${FOTOTIMELINE_UTENTI_CLIENT_ID:-fototimeline-utenti}
+      FOTOTIMELINE_UTENTI_CLIENT_SECRET: ${FOTOTIMELINE_UTENTI_CLIENT_SECRET:-}
       FOTOTIMELINE_ARCHIVIO: /cloud/FotoTimeline
       FOTOTIMELINE_MINIATURE: /miniature
       FOTOTIMELINE_IMPORTAZIONE: /cloud

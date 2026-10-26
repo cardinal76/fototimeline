@@ -150,26 +150,43 @@ export class Galleria {
   private contenutoTimer?: ReturnType<typeof setTimeout>;
   private voltiTimer?: ReturnType<typeof setTimeout>;
 
+  /** L'amministratore: utenti e menu Strumenti. */
+  readonly admin = computed(() => !!this.io()?.admin);
+  /** Gestore o amministratore: carica, cambia, elimina, condivide, scarica gli originali. */
+  readonly puoGestire = computed(() => !!this.io()?.gestore);
+  /** Entrato ma senza nessun ruolo: vede solo "chiedi l'accesso". */
+  readonly senzaAccesso = computed(() => {
+    const io = this.io();
+    return !!io && io.login && !io.ruolo;
+  });
+
   constructor() {
-    this.api.io().subscribe((io) => {
-      this.io.set(io);
-      if (io.admin) {
-        this.aggiornaBackup();
-        this.seguiConversioni();
-        this.seguiSalute();
-      }
-      this.seguiContenuto();
-      this.seguiVolti();
-    });
-    this.aggiornaCloud();
-    this.ricarica();
-    this.aggiornaLuoghi();
-    // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
-    this.api.importazioneCorrente().subscribe((l) => {
-      if (l && l.stato !== 'IN_CORSO') {
-        this.importazioneVista = l.id;
-      }
-      this.seguiImportazione();
+    // Prima chi è: senza ruolo il server risponde 403 a tutto, e ognuno chiede solo quello che può vedere.
+    this.api.io().subscribe({
+      next: (io) => {
+        this.io.set(io);
+        if (!io.ruolo) {
+          return;
+        }
+        this.aggiornaCloud();
+        this.ricarica();
+        this.aggiornaLuoghi();
+        if (io.admin) {
+          this.aggiornaBackup();
+          this.seguiConversioni();
+          this.seguiSalute();
+          // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
+          this.api.importazioneCorrente().subscribe((l) => {
+            if (l && l.stato !== 'IN_CORSO') {
+              this.importazioneVista = l.id;
+            }
+            this.seguiImportazione();
+          });
+        }
+        this.seguiContenuto();
+        this.seguiVolti();
+      },
+      error: () => this.avvisa('Il server non risponde: è acceso?'),
     });
   }
 

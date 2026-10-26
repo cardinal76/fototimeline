@@ -144,12 +144,23 @@ export interface Importazione {
 }
 
 /** Chi è collegato. Con il login spento (il PC) si è admin. */
+/**
+ * Cosa può fare chi è entrato (ConfigurazioneSicurezza): l'amministratore
+ * tutto, il gestore le foto (niente Strumenti né utenti), l'utilizzatore
+ * solo guardarle. Il server lo controlla comunque: qui serve a nascondere.
+ */
+export type Ruolo = 'AMMINISTRATORE' | 'GESTORE' | 'UTILIZZATORE';
+
 export interface Io {
   login: boolean;
   /** Quello che finisce in "caricata da"; vuoto con il login spento. */
   username?: string;
   nome?: string;
+  /** Null: è del realm ma senza ruolo, vede solo "chiedi l'accesso". */
+  ruolo?: Ruolo | null;
   admin: boolean;
+  /** Può cambiare le foto e scaricare gli originali (gestore o amministratore). */
+  gestore: boolean;
   /** Sotto quale cartella si può importare; null = ovunque (il PC). */
   radiceImportazione?: string;
   /** Cartella svuotata da sola nell'archivio, se impostata. */
@@ -867,4 +878,39 @@ export interface ElencoEventi {
   /** Giorni con foto nuove o tolte che aspettano il ricalcolo leggero. */
   giorniDaRifare: number;
   minimoFoto: number;
+}
+
+// ------------------------------------------------------------ pagina Utenti (solo amministratore)
+
+/** Un utente del realm di Keycloak, come lo dà /api/gestione-utenti. */
+export interface VoceUtente {
+  /** L'id di Keycloak. */
+  id: string;
+  username: string;
+  nome?: string;
+  cognome?: string;
+  email?: string;
+  attivo: boolean;
+  /** Null = nessuno dei tre ruoli: entra ma non vede niente. */
+  ruolo?: Ruolo | null;
+  ultimoAccesso?: string;
+}
+
+export interface ElencoUtenti {
+  /** False se la pagina non è configurata (manca il segreto del client): motivo dice cosa fare. */
+  disponibile: boolean;
+  motivo?: string;
+  utenti: VoceUtente[];
+}
+
+export interface NuovoUtente {
+  username: string;
+  nome?: string;
+  cognome?: string;
+  email?: string;
+  ruolo: Ruolo;
+  /** La password iniziale (Keycloak la fa cambiare al primo accesso); vuota con l'invito. */
+  password?: string;
+  /** Niente password: Keycloak manda l'email per sceglierla. */
+  invito: boolean;
 }

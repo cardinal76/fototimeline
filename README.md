@@ -213,6 +213,20 @@ Su server2 FotoTimeline gira dietro HTTPS con il login del Keycloak di presenze
 rclone solo quando un amministratore lo chiede dall'app. Tutto in
 [DEPLOY.md](DEPLOY.md).
 
+Tre ruoli (DEPLOY.md, "Utenti e ruoli"): l'**amministratore** fa tutto, compresi
+gli utenti (Strumenti → **Utenti**) e il menu Strumenti; il **gestore** lavora
+sulle foto (carica, modifica, elimina nel cestino, condivide, scarica) ma non
+apre Strumenti; l'**utilizzatore** guarda soltanto, senza scaricare. Chi non ha
+nessun ruolo vede "Chiedi l'accesso". Sul PC, senza login, si è amministratori.
+
+**Permessi delle API**: quello di ogni indirizzo è in `SicurezzaTest.INVENTARIO`
+(PUBBLICO, ENTRATO, LETTURA = i tre ruoli, GESTIONE = gestore e amministratore,
+ADMIN). In breve: leggere è di tutti i ruoli; caricare, cambiare, ruotare,
+eliminare, creare un link e scaricare l'originale (`/file?scarica=true`) del
+gestore; Strumenti (importazioni, archivio, cloud, backup, salute, telefoni,
+Google, cestino, quasi uguali, pagine Persone ed Eventi, elenco dei link) e
+`/api/gestione-utenti` dell'amministratore.
+
 ## Avvio sul PC
 
 Serve MongoDB su `localhost:27017`:
@@ -319,7 +333,12 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/importazioni/corrente` | Importazione in corso o ultima finita (204 se nessuna)     |
 | POST   | `/api/importazioni/annulla`  | Ferma quella in corso                                      |
 | GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
-| GET    | `/api/io`                    | Utente collegato (`username`, `nome`), se è admin, radice di importazione; registra l'utente in `utenti` |
+| GET    | `/api/io`                    | Utente collegato (`username`, `nome`), `ruolo` (null = senza accesso), `admin`, `gestore`, radice di importazione (solo admin); registra l'utente in `utenti` |
+| GET    | `/api/gestione-utenti`       | Pagina Utenti: `{ disponibile, motivo, utenti }` dal realm di Keycloak, con ruolo, attivo, ultimo accesso (admin) |
+| POST   | `/api/gestione-utenti`       | Nuovo utente: `{ username, nome, cognome, email, ruolo, password, invito }` (201; 400 dati non validi, 409 username già usato; admin) |
+| PUT    | `/api/gestione-utenti/{id}/ruolo`, `/attivo` | Cambia ruolo (`{ ruolo }`) o attiva/disattiva (`{ attivo }`); 409 per l'ultimo amministratore (admin) |
+| POST   | `/api/gestione-utenti/{id}/password` | Password nuova temporanea (`{ password }`) o email d'invito (`{ invito: true }`); 204 (admin) |
+| DELETE | `/api/gestione-utenti/{id}`  | Lo toglie da Keycloak; le foto restano con "Caricata da"; 409 per l'ultimo amministratore (admin) |
 | GET    | `/api/utenti`                | Utenti entrati almeno una volta: username, nome, email, primo e ultimo accesso, admin (ruolo `fototimeline-admin`) |
 | GET    | `/api/caricate-da`           | Chi ha portato foto e quante (`username`, `nome`, `conteggio`), per il filtro |
 | GET    | `/api/cloud`                 | Cloud montato o no                                         |

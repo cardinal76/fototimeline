@@ -91,6 +91,8 @@ export class Visore {
   /** Il browser non è riuscito a riprodurre il video. */
   protected readonly videoIllegibile = signal(false);
   protected bozza: Bozza = vuota();
+  /** Gestore o amministratore; l'utilizzatore guarda soltanto (niente download, modifiche, eliminazioni). */
+  protected readonly gestione = this.galleria.puoGestire;
 
   /** Le foto dalla "vista" (gli HEIC diventano JPEG), i video dalla versione compatibile se c'è. */
   protected readonly src = computed(() => (this.foto().video ? FotoApi.video(this.foto()) : FotoApi.vista(this.foto())));
@@ -260,6 +262,9 @@ export class Visore {
   }
 
   protected async preferita(): Promise<void> {
+    if (!this.gestione()) {
+      return;
+    }
     this.bozza.preferita = !this.foto().preferita;
     const f = this.foto();
     const aggiornata = await this.galleria.salva(f, {
@@ -277,6 +282,9 @@ export class Visore {
 
   /** Ruota a destra (90) o a sinistra (-90): si salva subito, miniatura e vista arrivano girate. */
   protected ruota(gradi: number): void {
+    if (!this.gestione()) {
+      return;
+    }
     this.rotazioni = this.rotazioni.then(async () => {
       try {
         this.cambia.emit(await this.galleria.ruota(this.foto(), gradi));
@@ -286,8 +294,22 @@ export class Visore {
     });
   }
 
+  /**
+   * Chi guarda soltanto non ha il menu "Salva immagine": è solo un freno, uno
+   * screenshot resta possibile. Il blocco vero è sul server (niente originali).
+   */
+  protected soloGuardare(e: Event): void {
+    if (!this.gestione()) {
+      e.preventDefault();
+    }
+  }
+
   protected async elimina(): Promise<void> {
-    if (!confirm(`Eliminare "${this.foto().nomeOriginale}"? Va nel cestino: si ripristina da Strumenti → Cestino.`)) {
+    if (!this.gestione()) {
+      return;
+    }
+    const dove = this.galleria.admin() ? 'si ripristina da Strumenti → Cestino' : 'un amministratore può ripristinarla';
+    if (!confirm(`Eliminare "${this.foto().nomeOriginale}"? Va nel cestino: ${dove}.`)) {
       return;
     }
     const lista = this.galleria.foto();
@@ -311,6 +333,10 @@ export class Visore {
       if (e.key === 'Escape') {
         bersaglio.blur();
       }
+      return;
+    }
+    // Le scorciatoie che cambiano la foto, solo a chi la può cambiare.
+    if (!this.gestione() && ['p', 'Delete', 'r', 'R', 'l'].includes(e.key)) {
       return;
     }
     switch (e.key) {
