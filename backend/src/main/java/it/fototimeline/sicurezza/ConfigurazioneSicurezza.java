@@ -255,8 +255,11 @@ public class ConfigurazioneSicurezza {
     }
 
     /**
-     * Dall'header (Angular) il token arriva in chiaro, da un form ({@code _csrf},
-     * per esempio l'uscita) con la protezione XOR di Spring.
+     * Dall'header (Angular) il token arriva in chiaro. Da un form ({@code _csrf}) può arrivare con la
+     * protezione XOR di Spring (una pagina generata dal server) oppure in chiaro: l'uscita
+     * (sessione.ts, {@code esci()}) lo copia dal cookie {@code XSRF-TOKEN}, che è in chiaro.
+     * Senza questo il form di "Esci" prendeva 403. Il valore resta da confrontare con quello
+     * del cookie: un altro sito il cookie non lo legge.
      */
     static final class CsrfPerSpa implements CsrfTokenRequestHandler {
         private final CsrfTokenRequestHandler chiaro = new CsrfTokenRequestAttributeHandler();
@@ -272,7 +275,11 @@ public class ConfigurazioneSicurezza {
         @Override
         public String resolveCsrfTokenValue(HttpServletRequest request, CsrfToken token) {
             String header = request.getHeader(token.getHeaderName());
-            return (StringUtils.hasText(header) ? chiaro : xor).resolveCsrfTokenValue(request, token);
+            if (StringUtils.hasText(header)) {
+                return chiaro.resolveCsrfTokenValue(request, token);
+            }
+            String decifrato = xor.resolveCsrfTokenValue(request, token);
+            return decifrato != null ? decifrato : chiaro.resolveCsrfTokenValue(request, token);
         }
     }
 

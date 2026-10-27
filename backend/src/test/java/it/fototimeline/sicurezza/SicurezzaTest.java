@@ -94,6 +94,9 @@ class SicurezzaTest {
     @Autowired
     RegistroUtenti registro;
 
+    @Autowired
+    org.springframework.web.context.WebApplicationContext contesto;
+
     /** I tre ruoli, e chi è del realm ma senza nessuno dei tre. */
     private static final OidcLoginRequestPostProcessor ADMIN = oidcLogin()
             .idToken(t -> t.claim("preferred_username", "capo"))
@@ -471,6 +474,36 @@ class SicurezzaTest {
         assertThat(risposta.getRedirectedUrl()).startsWith("https://kc.invalid/logout?")
                 .contains("id_token_hint=id-token-di-prova")
                 .contains("post_logout_redirect_uri=http://localhost/");
+    }
+
+    @Test
+    void esciDalBottoneDellApp() throws Exception {
+        // Come fa il browser (sessione.ts, esci()): il token è quello del cookie XSRF-TOKEN, in chiaro,
+        // mandato nel campo _csrf di un form, senza header. Prima rispondeva 403 (Whitelabel su /logout).
+        // csrf() degli altri test mette nel contesto condiviso un repository dei token in sessione: qui
+        // serve quello vero, col cookie, e alla fine si rimette com'era.
+        var cookie = new jakarta.servlet.http.Cookie("XSRF-TOKEN", java.util.UUID.randomUUID().toString());
+        var finto = new org.springframework.mock.web.MockHttpServletRequest(contesto.getServletContext());
+        var prima = org.springframework.security.test.web.support.WebTestUtils.getCsrfTokenRepository(finto);
+        org.springframework.test.web.servlet.request.RequestPostProcessor col = r -> {
+            org.springframework.security.test.web.support.WebTestUtils.setCsrfTokenRepository(r,
+                    org.springframework.security.web.csrf.CookieCsrfTokenRepository.withHttpOnlyFalse());
+            return r;
+        };
+        try {
+            var sessione = new org.springframework.mock.web.MockHttpSession();
+            mvc.perform(post("/logout").with(col).with(ADMIN).session(sessione).cookie(cookie)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED).param("_csrf", cookie.getValue()))
+                    .andExpect(status().isFound());
+            assertThat(sessione.isInvalid()).isTrue();
+            // Un token sbagliato o mancante resta fuori.
+            mvc.perform(post("/logout").with(col).with(ADMIN).cookie(cookie)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED).param("_csrf", "sbagliato"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/logout").with(col).with(ADMIN).cookie(cookie)).andExpect(status().isForbidden());
+        } finally {
+            org.springframework.security.test.web.support.WebTestUtils.setCsrfTokenRepository(finto, prima);
+        }
     }
 
     @Test
