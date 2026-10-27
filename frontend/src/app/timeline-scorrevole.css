@@ -1,0 +1,96 @@
+/* Solo sul telefono: sopra gli 800px c'è la colonna con anni e mesi (app.css). */
+:host {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  width: calc(28px + env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+@media not all and (max-width: 800px) {
+  :host {
+    display: none;
+  }
+}
+
+.striscia {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  /* Il dito trascina la striscia, non la pagina; niente menu né selezione col tocco lungo. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+/* 16px sopra e 24px sotto: lo stesso margine che misura() toglie all'altezza. */
+.binario {
+  position: absolute;
+  top: 16px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  width: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--testo-tenue) 35%, transparent);
+  transition: background 0.15s;
+}
+.attiva .binario,
+.striscia:focus-visible .binario {
+  background: color-mix(in srgb, var(--testo-tenue) 60%, transparent);
+}
+
+.cursore {
+  position: absolute;
+  left: 50%;
+  width: 6px;
+  height: 32px;
+  translate: -50% -50%;
+  border-radius: 3px;
+  background: var(--accento);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sfondo) 60%, transparent);
+  transition: top 0.2s ease-out;
+}
+.attiva .cursore {
+  transition: none;
+}
+.striscia:focus-visible .cursore {
+  outline: 2px solid var(--accento-forte);
+  outline-offset: 2px;
+}
+
+/* Gli anni compaiono mentre si trascina, per non coprire le foto il resto del tempo. */
+.anno {
+  position: absolute;
+  right: 10px;
+  translate: 0 -50%;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--superficie) 88%, transparent);
+  color: var(--testo-tenue);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.attiva .anno {
+  opacity: 1;
+}
+
+.fumetto {
+  position: absolute;
+  right: 56px;
+  translate: 0 -50%;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  background: var(--accento);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+}

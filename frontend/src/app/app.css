@@ -74,6 +74,8 @@ button:focus-visible,
   flex: 1;
   display: flex;
   min-height: 0;
+  /* Sul telefono la striscia degli anni (timeline-scorrevole) sta sul bordo destro. */
+  position: relative;
   /* La mappa (Leaflet) tiene i suoi z-index qui dentro: i menu della barra le restano sopra. */
   isolation: isolate;
 }
@@ -445,6 +447,7 @@ progress {
 }
 
 @media (max-width: 800px) {
+  /* Al suo posto c'è la striscia degli anni sul bordo destro (timeline-scorrevole). */
   .laterale {
     display: none;
   }

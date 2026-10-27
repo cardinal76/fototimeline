@@ -607,6 +607,7 @@
 
   @if (vista() === 'timeline' && !galleria.perContenuto()) {
     <app-timeline-nav class="laterale" [attivo]="meseAttivo()" />
+    <app-timeline-scorrevole [attivo]="meseAttivo()" />
   }
 </div>
 
