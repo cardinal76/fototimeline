@@ -118,6 +118,12 @@ export interface Filtro {
   evento?: string;
   /** Fine del salto nella timeline: si vedono le foto fino a questo giorno. */
   al?: string;
+  /**
+   * Il filtro per data (Filtri → Data): un anno "2019", un mese "2019-08" o due
+   * giorni compresi "2019-08-01..2019-09-15" (un lato vuoto: senza limite).
+   * Vale anche per la colonna dei mesi e per la mappa, il salto no.
+   */
+  periodo?: string;
   /** Cerca q in quello che c'è nella foto ("spiaggia", "cane"), non nei testi. */
   contenuto?: boolean;
   /** Id di una persona o di un gruppo di volti senza nome: solo le sue foto. */
@@ -894,6 +900,9 @@ export interface Evento {
   /** Toccato a mano: il ricalcolo non lo cambia. */
   manuale: boolean;
   nascosto: boolean;
+  /** Creato a mano per date: primo e ultimo giorno ("2019-08-10"); ha tutte le foto di quei giorni. */
+  dal?: string;
+  al?: string;
 }
 
 /** Dove è arrivato "Calcola eventi". */

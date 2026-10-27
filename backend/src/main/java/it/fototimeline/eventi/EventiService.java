@@ -40,6 +40,7 @@ import it.fototimeline.eventi.RilevamentoEventi.FotoPerEvento;
 import it.fototimeline.eventi.RilevamentoEventi.Gruppo;
 import it.fototimeline.eventi.RilevamentoEventi.Regole;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
+import it.fototimeline.service.EventiFoto.FotoDataCambiata;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
 import it.fototimeline.service.FotoService;
@@ -64,6 +65,14 @@ import it.fototimeline.service.FotoService;
  * evento. Il calcolo salta le foto fisse e non toglie mai un evento
  * manuale: le modifiche a mano non si perdono. Una foto nuova che cade dentro
  * un evento manuale (caricata dopo l'ultima modifica) entra in lui.
+ *
+ * <p><b>Per date</b>: un evento creato a mano con nome, primo e ultimo giorno
+ * ({@link #creaPerDate}) prende tutte le foto di quei giorni, anche da altri
+ * eventi (automatici o manuali): vince lui. È manuale, quindi il calcolo non
+ * lo tocca; le foto nuove dei suoi giorni (e quelle a cui si cambia la data
+ * a mano) entrano in lui, anche se caricate prima dell'ultima modifica.
+ * Due eventi per date non si sovrappongono; unire e dividere non valgono per
+ * loro (si cambiano le date).
  */
 @Service
 public class EventiService {
@@ -113,12 +122,12 @@ public class EventiService {
 
     public record VoceEvento(String id, String nome, LocalDateTime inizio, LocalDateTime fine, LocalDate primoGiorno,
             LocalDate ultimoGiorno, int conteggio, String copertina, String luogo, boolean manuale,
-            boolean nascosto) {
+            boolean nascosto, LocalDate dal, LocalDate al) {
 
         static VoceEvento di(Evento e) {
             return new VoceEvento(e.getId(), e.getNome(), e.getInizio(), e.getFine(), e.getPrimoGiorno(),
                     e.getUltimoGiorno(), e.getConteggio(), e.getCopertina(), e.getLuogo(), e.isManuale(),
-                    e.isNascosto());
+                    e.isNascosto(), e.getDal(), e.getAl());
         }
     }
 
@@ -146,9 +155,9 @@ public class EventiService {
 
     // ---------------------------------------------------------------- lettura
 
-    /** Gli eventi dal più recente, senza quelli vuoti; i nascosti solo se chiesti. */
+    /** Gli eventi dal più recente, senza quelli vuoti (salvo i per date); i nascosti solo se chiesti. */
     public ElencoEventi elenco(boolean nascosti) {
-        Criteria c = where("conteggio").gt(0);
+        Criteria c = new Criteria().orOperator(where("conteggio").gt(0), where("dal").ne(null));
         if (!nascosti) {
             c = c.and("nascosto").ne(true);
         }
@@ -319,7 +328,7 @@ public class EventiService {
 
         Query manuali = Query.query(where("manuale").is(true));
         manuali.with(Sort.by("inizio"));
-        manuali.fields().include("inizio", "fine", "modificatoIl");
+        manuali.fields().include("inizio", "fine", "modificatoIl", "dal", "al");
         List<Evento> fissi = mongo.find(manuali, Evento.class).stream()
                 .filter(e -> e.getInizio() != null && e.getFine() != null)
                 .filter(e -> (da == null || !e.getFine().isBefore(da)) && (finoA == null || !e.getInizio().isAfter(finoA)))
@@ -360,22 +369,25 @@ public class EventiService {
     }
 
     /**
-     * L'evento manuale in cui cade una foto nuova: dentro le sue date e
-     * caricata dopo la sua ultima modifica (le foto che c'erano già, fuori,
-     * le ha lasciate fuori qualcuno).
+     * L'evento manuale in cui cade una foto non fissa: prima un evento per
+     * date che ha il suo giorno (sempre); altrimenti un manuale che la
+     * comprende nelle sue date, se la foto è stata caricata dopo la sua ultima
+     * modifica (le foto che c'erano già, fuori, le ha lasciate fuori qualcuno).
      */
     private static Evento manualeChePrende(List<Evento> fissi, int da, Foto f) {
-        if (f.getCaricataIl() == null) {
-            return null;
-        }
+        LocalDate giorno = f.getScattataIl().toLocalDate();
+        Evento altro = null;
         for (int i = da; i < fissi.size() && !fissi.get(i).getInizio().isAfter(f.getScattataIl()); i++) {
             Evento e = fissi.get(i);
-            if (!e.getFine().isBefore(f.getScattataIl()) && e.getModificatoIl() != null
-                    && f.getCaricataIl().isAfter(e.getModificatoIl())) {
+            if (e.comprende(giorno)) {
                 return e;
             }
+            if (altro == null && !e.perDate() && f.getCaricataIl() != null && !e.getFine().isBefore(f.getScattataIl())
+                    && e.getModificatoIl() != null && f.getCaricataIl().isAfter(e.getModificatoIl())) {
+                altro = e;
+            }
         }
-        return null;
+        return altro;
     }
 
     /** Scrive i gruppi chiusi, uno alla volta, appena il rilevamento li consegna. */
@@ -461,11 +473,35 @@ public class EventiService {
         e.setFine(g.fine());
         e.setPrimoGiorno(g.primoGiorno());
         e.setUltimoGiorno(g.ultimoGiorno());
+        if (e.perDate()) {
+            giorniDelPeriodo(e);
+        }
         e.setConteggio(g.conteggio());
         e.setCopertina(g.copertina());
         e.setLuogo(NomiEventi.nomeLuogo(g.luoghi(), casa));
         if (!e.isNomeAMano()) {
             e.setNome(NomiEventi.nome(g, casa));
+        }
+    }
+
+    /**
+     * Un evento per date copre sempre i suoi giorni (anche con foto fuori,
+     * aggiunte a mano): così il calcolo lo trova per le foto nuove di quei giorni.
+     */
+    private static void giorniDelPeriodo(Evento e) {
+        LocalDateTime inizio = e.getDal().atStartOfDay();
+        LocalDateTime fine = e.getAl().plusDays(1).atStartOfDay().minus(UN_MILLISECONDO);
+        if (e.getInizio() == null || inizio.isBefore(e.getInizio())) {
+            e.setInizio(inizio);
+        }
+        if (e.getFine() == null || fine.isAfter(e.getFine())) {
+            e.setFine(fine);
+        }
+        if (e.getPrimoGiorno() == null || e.getDal().isBefore(e.getPrimoGiorno())) {
+            e.setPrimoGiorno(e.getDal());
+        }
+        if (e.getUltimoGiorno() == null || e.getAl().isAfter(e.getUltimoGiorno())) {
+            e.setUltimoGiorno(e.getAl());
         }
     }
 
@@ -628,6 +664,19 @@ public class EventiService {
                 }
             }
         }
+        if (g == null && e.perDate()) {
+            // Per date: resta anche senza foto, coi suoi giorni.
+            e.setInizio(null);
+            e.setFine(null);
+            e.setPrimoGiorno(null);
+            e.setUltimoGiorno(null);
+            e.setConteggio(0);
+            e.setCopertina(null);
+            e.setLuogo(null);
+            giorniDelPeriodo(e);
+            mongo.save(e);
+            return;
+        }
         if (g == null) {
             if (!mongo.exists(Query.query(where("evento").is(id)), Foto.class)) {
                 mongo.remove(e);
@@ -680,6 +729,9 @@ public class EventiService {
             if (pulito != null && pulito.length() > 200) {
                 throw new IllegalArgumentException("Nome troppo lungo (al massimo 200 caratteri)");
             }
+            if (pulito == null && e.perDate()) {
+                throw new IllegalArgumentException("Un evento per date ha bisogno di un nome");
+            }
             e.setNomeAMano(pulito != null);
             if (pulito != null) {
                 e.setNome(pulito);
@@ -710,6 +762,9 @@ public class EventiService {
             if (eventi.size() < 2) {
                 throw new IllegalArgumentException("Per unire servono almeno due eventi");
             }
+            if (eventi.stream().anyMatch(Evento::perDate)) {
+                throw new IllegalArgumentException("Un evento per date non si unisce: cambia le sue date");
+            }
             eventi.sort(Comparator.comparing(Evento::getInizio, Comparator.nullsLast(Comparator.naturalOrder())));
             Evento primo = eventi.getFirst();
             for (Evento altro : eventi.subList(1, eventi.size())) {
@@ -734,6 +789,9 @@ public class EventiService {
     public List<VoceEvento> dividi(String id, String foto) {
         synchronized (lock) {
             Evento e = trovaEvento(id);
+            if (e.perDate()) {
+                throw new IllegalArgumentException("Un evento per date non si divide: cambia le sue date");
+            }
             Foto punto = foto == null ? null : mongo.findById(foto, Foto.class);
             if (punto == null || !id.equals(punto.getEvento()) || punto.getScattataIl() == null) {
                 throw new IllegalArgumentException("La foto non è di questo evento");
@@ -806,6 +864,185 @@ public class EventiService {
             aggiornaRiepilogo(nuovo.getId());
             prima.forEach(this::aggiornaRiepilogo);
             return evento(nuovo.getId()).orElseThrow();
+        }
+    }
+
+    // ---------------------------------------------------------------- per date
+
+    /**
+     * Un evento per date: nome, primo e ultimo giorno (compresi). Prende
+     * subito tutte le foto di quei giorni, anche da altri eventi.
+     */
+    public VoceEvento creaPerDate(String nome, LocalDate dal, LocalDate al) {
+        synchronized (lock) {
+            String pulito = nomeObbligatorio(nome);
+            controllaDate(dal, al, null);
+            Evento e = nuovoManuale(pulito);
+            e.setDal(dal);
+            e.setAl(al);
+            giorniDelPeriodo(e);
+            mongo.save(e);
+            prendiGiorni(e);
+            log.info("Evento per date \"{}\" dal {} al {}", pulito, dal, al);
+            return evento(e.getId()).orElseThrow();
+        }
+    }
+
+    /**
+     * Date nuove per un evento per date: le foto fuori dai giorni nuovi
+     * escono (e tornano al calcolo automatico), quelle dei giorni nuovi
+     * entrano. Dopo, l'evento ha esattamente le foto dei suoi giorni.
+     */
+    public VoceEvento cambiaDate(String id, LocalDate dal, LocalDate al) {
+        synchronized (lock) {
+            Evento e = trovaEvento(id);
+            if (!e.perDate()) {
+                throw new IllegalArgumentException("Le date si cambiano solo a un evento creato per date");
+            }
+            controllaDate(dal, al, id);
+            Criteria fuori = new Criteria().andOperator(where("evento").is(id),
+                    new Criteria().norOperator(neiGiorni(dal, al)));
+            Query giorniFuori = Query.query(fuori);
+            giorniFuori.fields().include("giorno");
+            Set<String> daRifare = new HashSet<>();
+            mongo.find(giorniFuori, Foto.class).forEach(f -> {
+                if (f.getGiorno() != null) {
+                    daRifare.add(f.getGiorno());
+                }
+            });
+            mongo.updateMulti(Query.query(fuori), new Update().unset("evento").set("eventoFisso", false), Foto.class);
+            daRifare.forEach(this::segnaGiorno);
+            e.setDal(dal);
+            e.setAl(al);
+            e.setModificatoIl(clock.instant());
+            mongo.save(e);
+            prendiGiorni(e);
+            return evento(id).orElseThrow();
+        }
+    }
+
+    /** Nome e date di un evento per date insieme (la pagina Eventi li cambia con un modulo solo). */
+    public VoceEvento modificaPerDate(String id, String nome, LocalDate dal, LocalDate al) {
+        synchronized (lock) {
+            Evento e = trovaEvento(id);
+            if (!e.perDate()) {
+                throw new IllegalArgumentException("Solo un evento creato per date si cambia così");
+            }
+            String pulito = nomeObbligatorio(nome);
+            controllaDate(dal, al, id);
+            if (!dal.equals(e.getDal()) || !al.equals(e.getAl())) {
+                cambiaDate(id, dal, al);
+                e = trovaEvento(id);
+            }
+            e.setNome(pulito);
+            e.setNomeAMano(true);
+            e.setModificatoIl(clock.instant());
+            mongo.save(e);
+            return evento(id).orElseThrow();
+        }
+    }
+
+    /** Elimina un evento per date: come "Torna automatico", le sue foto si raggruppano di nuovo da sole. */
+    public boolean eliminaPerDate(String id) {
+        synchronized (lock) {
+            Evento e = mongo.findById(id, Evento.class);
+            if (e == null) {
+                return false;
+            }
+            if (!e.perDate()) {
+                throw new IllegalArgumentException("Solo un evento creato per date si elimina così");
+            }
+            return sciogli(id);
+        }
+    }
+
+    /** Le foto scattate tra {@code dal} e {@code al} (compresi), anche nel cestino: tornando, restano sue. */
+    private static Criteria neiGiorni(LocalDate dal, LocalDate al) {
+        return where("scattataIl").gte(dal.atStartOfDay()).lt(al.plusDays(1).atStartOfDay());
+    }
+
+    /** Tutte le foto dei giorni dell'evento passano a lui; gli eventi da cui vengono si aggiornano. */
+    private void prendiGiorni(Evento e) {
+        Criteria giorni = neiGiorni(e.getDal(), e.getAl());
+        // distinct su un campo stringa (non un array come i tag): niente trappola dei vuoti.
+        Set<String> prima = new LinkedHashSet<>(mongo.findDistinct(
+                Query.query(new Criteria().andOperator(giorni, where("evento").ne(null))), "evento", Foto.class,
+                String.class));
+        prima.remove(e.getId());
+        mongo.updateMulti(Query.query(giorni), new Update().set("evento", e.getId()).set("eventoFisso", true),
+                Foto.class);
+        aggiornaRiepilogo(e.getId());
+        prima.forEach(this::aggiornaRiepilogo);
+    }
+
+    private static String nomeObbligatorio(String nome) {
+        String pulito = nome == null ? "" : nome.trim();
+        if (pulito.isEmpty()) {
+            throw new IllegalArgumentException("Un evento per date ha bisogno di un nome");
+        }
+        if (pulito.length() > 200) {
+            throw new IllegalArgumentException("Nome troppo lungo (al massimo 200 caratteri)");
+        }
+        return pulito;
+    }
+
+    /** Date presenti, in ordine, e nessun altro evento per date negli stessi giorni. */
+    private void controllaDate(LocalDate dal, LocalDate al, String tranne) {
+        if (dal == null || al == null) {
+            throw new IllegalArgumentException("Servono la data di inizio e quella di fine");
+        }
+        if (dal.isAfter(al)) {
+            throw new IllegalArgumentException("La data di inizio viene dopo quella di fine");
+        }
+        Criteria sovrapposto = where("dal").lte(al).and("al").gte(dal);
+        if (tranne != null) {
+            sovrapposto = sovrapposto.and("_id").ne(tranne);
+        }
+        Evento altro = mongo.findOne(Query.query(sovrapposto), Evento.class);
+        if (altro != null) {
+            throw new IllegalArgumentException("Quei giorni sono già dell'evento \"" + altro.getNome() + "\" (dal "
+                    + altro.getDal() + " al " + altro.getAl() + ")");
+        }
+    }
+
+    /**
+     * La data di una foto cambiata a mano: se cade in un evento per date entra
+     * in lui; se usciva da un evento per date ne esce (e torna al calcolo).
+     * Il suo giorno nuovo si rifà al prossimo ricalcolo leggero. Non lancia.
+     */
+    @EventListener
+    public void dataCambiata(FotoDataCambiata evento) {
+        try {
+            synchronized (lock) {
+                Query q = Query.query(where("_id").is(evento.id()));
+                q.fields().include("scattataIl", "giorno", "evento");
+                Foto f = mongo.findOne(q, Foto.class);
+                if (f == null || f.getScattataIl() == null) {
+                    return;
+                }
+                LocalDate giorno = f.getScattataIl().toLocalDate();
+                String vecchio = f.getEvento();
+                Evento perDate = mongo.findOne(Query.query(where("dal").lte(giorno).and("al").gte(giorno)), Evento.class);
+                if (perDate != null) {
+                    if (!perDate.getId().equals(vecchio)) {
+                        mongo.updateFirst(Query.query(where("_id").is(f.getId())),
+                                new Update().set("evento", perDate.getId()).set("eventoFisso", true), Foto.class);
+                    }
+                    aggiornaRiepilogo(perDate.getId());
+                } else if (vecchio != null) {
+                    Evento v = mongo.findById(vecchio, Evento.class);
+                    if (v != null && v.perDate()) {
+                        mongo.updateFirst(Query.query(where("_id").is(f.getId())),
+                                new Update().unset("evento").set("eventoFisso", false), Foto.class);
+                    }
+                }
+                if (vecchio != null && !(perDate != null && perDate.getId().equals(vecchio))) {
+                    aggiornaRiepilogo(vecchio);
+                }
+                segnaGiorno(giorno.toString());
+            }
+        } catch (RuntimeException e) {
+            log.warn("Eventi: non riesco a seguire la data nuova della foto {}: {}", evento.id(), e.toString());
         }
     }
 

@@ -35,6 +35,7 @@ import it.fototimeline.dominio.Foto;
 import it.fototimeline.service.ConversioneVideo;
 import it.fototimeline.service.ConversioneVideo.StatoConversioni;
 import it.fototimeline.service.FiltroFoto;
+import it.fototimeline.service.Periodo;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.FotoService.Modifica;
 import it.fototimeline.service.FotoService.Operazione;
@@ -96,10 +97,11 @@ public class FotoController {
             @RequestParam(required = false) String caricataDa,
             @RequestParam(required = false) String evento,
             @RequestParam(required = false) String persona,
+            @RequestParam(required = false) String periodo,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
         return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa,
-                provincia, evento, persona),
+                provincia, evento, persona, Periodo.leggi(periodo)),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -115,9 +117,10 @@ public class FotoController {
             @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa,
             @RequestParam(required = false) String evento,
-            @RequestParam(required = false) String persona) {
+            @RequestParam(required = false) String persona,
+            @RequestParam(required = false) String periodo) {
         return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo,
-                caricataDa, provincia, evento, persona));
+                caricataDa, provincia, evento, persona, Periodo.leggi(periodo)));
     }
 
     @GetMapping("/mappa")
@@ -132,9 +135,10 @@ public class FotoController {
             @RequestParam(required = false) String luogo,
             @RequestParam(required = false) String caricataDa,
             @RequestParam(required = false) String evento,
-            @RequestParam(required = false) String persona) {
+            @RequestParam(required = false) String persona,
+            @RequestParam(required = false) String periodo) {
         return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo,
-                caricataDa, provincia, evento, persona));
+                caricataDa, provincia, evento, persona, Periodo.leggi(periodo)));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */

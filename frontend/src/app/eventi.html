@@ -19,7 +19,8 @@
     <p class="tenue">
       Le foto scattate vicine nel tempo (e nello stesso posto, nei viaggi) si raggruppano da sole, con almeno
       {{ elenco()?.minimoFoto ?? '…' }} foto. Un evento rinominato, unito, diviso o nascosto resta com'è anche
-      quando gli eventi si rifanno.
+      quando gli eventi si rifanno. Un evento <b>per date</b> (nome, primo e ultimo giorno) ha tutte le foto e i
+      video di quei giorni, anche quelli che arrivano dopo, e vince sugli eventi automatici.
     </p>
     @if (elenco(); as l) {
       @if (l.calcolo?.interrotto) {
@@ -56,6 +57,11 @@
         <button type="button" [disabled]="occupato() || scelti().size < 2" (click)="unisci()">Unisci</button>
         <button type="button" class="link" (click)="deseleziona()">Deseleziona</button>
       }
+      @if (galleria.puoGestire() && !modulo()) {
+        <button type="button" title="Un evento con un nome e due date: tutte le foto di quei giorni" (click)="nuovoPerDate()">
+          + Nuovo evento per date
+        </button>
+      }
       @if (galleria.io()?.admin) {
         <button
           type="button"
@@ -68,6 +74,39 @@
         </button>
       }
     </div>
+
+    @if (modulo(); as m) {
+      <form class="per-date" (submit)="$event.preventDefault(); salvaPerDate()" aria-labelledby="titolo-per-date">
+        <h3 id="titolo-per-date">{{ m.id ? 'Cambia l\'evento' : 'Nuovo evento per date' }}</h3>
+        <label>
+          <span>Nome</span>
+          <input #nome type="text" maxlength="200" placeholder="Vacanze in Puglia" [value]="m.nome" (input)="scrivi('nome', nome.value)" />
+        </label>
+        <label>
+          <span>Dal</span>
+          <input #dal type="date" [value]="m.dal" (input)="scrivi('dal', dal.value)" />
+        </label>
+        <label>
+          <span>Al (compreso)</span>
+          <input #al type="date" [value]="m.al" [min]="m.dal" (input)="scrivi('al', al.value)" />
+        </label>
+        <div class="azioni">
+          <button type="submit" class="primario" [disabled]="occupato() || !!problemaModulo()" [title]="problemaModulo() ?? ''">
+            {{ m.id ? 'Salva' : 'Crea' }}
+          </button>
+          <button type="button" class="link" (click)="modulo.set(null)">Annulla</button>
+          @if (problemaModulo(); as p) {
+            <span class="tenue">{{ p }}</span>
+          }
+        </div>
+        <p class="tenue">
+          Tutte le foto e i video scattati in quei giorni entrano nell'evento, anche se erano in un altro.
+          @if (m.id) {
+            Cambiando le date escono quelle fuori dai giorni nuovi (tornano agli eventi automatici).
+          }
+        </p>
+      </form>
+    }
 
     @if (caricando() && !elenco()) {
       <span class="rotella" aria-label="Caricamento"></span>
@@ -93,20 +132,35 @@
                   }
                   <button type="button" class="nome-evento" [title]="e.nome" (click)="apri(e)">{{ e.nome }}</button>
                   <span class="tenue date">
-                    @if (stessoGiorno(e)) {
+                    @if (e.dal && e.al) {
+                      @if (stessoGiorno(e)) {
+                        {{ locale(e.dal) | date: 'EEEE d MMMM y' }}
+                      } @else {
+                        {{ locale(e.dal) | date: 'd MMM' }} – {{ locale(e.al) | date: 'd MMM y' }}
+                      }
+                      · <span title="Creato a mano con le date: ha tutte le foto di quei giorni">per date</span>
+                    } @else if (stessoGiorno(e)) {
                       {{ e.inizio | date: 'EEEE d MMMM y' }}
                     } @else {
                       {{ e.inizio | date: 'd MMM' }} – {{ e.fine | date: 'd MMM y' }}
                     }
-                    @if (e.manuale) {
+                    @if (e.manuale && !e.dal) {
                       · <span title="Toccato a mano: il ricalcolo non lo cambia">a mano</span>
                     }
                     @if (e.nascosto) {
                       · nascosto
                     }
                   </span>
-                  <!-- Rinominare, nascondere, unire: la pagina Eventi di Strumenti, solo l'amministratore. -->
-                  @if (galleria.admin()) {
+                  <!-- Rinominare, nascondere, unire: solo l'amministratore. Gli eventi per date: anche il gestore. -->
+                  @if (e.dal && galleria.puoGestire()) {
+                  <div class="azioni">
+                    <button type="button" [disabled]="occupato()" (click)="cambiaPerDate(e)">Modifica</button>
+                    @if (galleria.admin()) {
+                      <button type="button" [disabled]="occupato()" (click)="nascondi(e)">{{ e.nascosto ? 'Mostra' : 'Nascondi' }}</button>
+                    }
+                    <button type="button" [disabled]="occupato()" title="Le foto restano: tornano agli eventi automatici" (click)="eliminaPerDate(e)">Elimina</button>
+                  </div>
+                  } @else if (galleria.admin()) {
                   <div class="azioni">
                     <button type="button" [disabled]="occupato()" (click)="rinomina(e)">Rinomina</button>
                     <button type="button" [disabled]="occupato()" (click)="nascondi(e)">{{ e.nascosto ? 'Mostra' : 'Nascondi' }}</button>
