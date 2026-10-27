@@ -356,10 +356,15 @@
     padding-top: 0.25rem;
     border-top: 1px solid var(--bordo);
   }
+  /* Ferma in cima mentre scorre la timeline, anche sotto la tacca
+     (app installata): scorre solo <main>, la barra ne resta fuori. */
   .barra {
+    position: sticky;
+    top: 0;
     flex-wrap: wrap;
     gap: 0.4rem;
-    padding: 0.5rem 0.6rem;
+    padding: calc(0.5rem + env(safe-area-inset-top)) max(0.6rem, env(safe-area-inset-right)) 0.5rem
+      max(0.6rem, env(safe-area-inset-left));
   }
   .barra .marchio .logo {
     font-size: 1.6rem;
@@ -414,11 +419,11 @@
   .tendina,
   .pannello-filtri {
     position: fixed;
-    top: 3.6rem;
+    top: calc(3.6rem + env(safe-area-inset-top));
     left: 0.6rem;
     right: 0.6rem;
     width: auto;
-    max-height: calc(100vh - 4.5rem);
+    max-height: calc(100dvh - 4.5rem - env(safe-area-inset-top));
     overflow-y: auto;
   }
   .barra .voce {
