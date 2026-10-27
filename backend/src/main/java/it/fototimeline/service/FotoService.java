@@ -57,6 +57,7 @@ import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.quasiuguali.Impronta;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
+import it.fototimeline.service.EventiFoto.FotoDataCambiata;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
@@ -1030,7 +1031,8 @@ public class FotoService {
 
     /** Una foto nel cestino non si modifica (vuoto, cioè 404): prima si ripristina. */
     public Optional<Foto> modifica(String id, Modifica m) {
-        return repository.findById(id).filter(foto -> !foto.nelCestino()).map(foto -> {
+        boolean[] dataCambiata = {false};
+        Optional<Foto> modificata = repository.findById(id).filter(foto -> !foto.nelCestino()).map(foto -> {
             foto.setTitolo(vuotoANull(m.titolo()));
             foto.setDescrizione(vuotoANull(m.descrizione()));
             foto.setTag(pulisciTag(m.tag()));
@@ -1042,9 +1044,14 @@ public class FotoService {
                 foto.setScattataIl(m.scattataIl());
                 foto.setOrigineData(OrigineData.MANUALE);
                 mettiAlSuoPosto(foto);
+                dataCambiata[0] = true;
             }
             return repository.save(foto);
         });
+        if (dataCambiata[0]) {
+            eventi.publishEvent(new FotoDataCambiata(id));
+        }
+        return modificata;
     }
 
     /** Sposta l'originale nella cartella del giorno di scatto, se non c'è già. */
@@ -1285,6 +1292,21 @@ public class FotoService {
             }
             if (f.al() != null) {
                 data = data.lt(f.al().plusDays(1).atStartOfDay());
+            }
+            e.add(data);
+        }
+        // Il filtro per data dei Filtri (anno, mese, due giorni): sulla data di scatto, come il salto, così
+        // usa l'indice "timeline" (scattataIl, _id) anche per l'ordine. Le foto senza data restano fuori.
+        if (f.periodo() != null) {
+            Criteria data = Criteria.where("scattataIl");
+            if (f.periodo().dal() != null) {
+                data = data.gte(f.periodo().dal().atStartOfDay());
+            }
+            if (f.periodo().al() != null) {
+                data = data.lt(f.periodo().al().plusDays(1).atStartOfDay());
+            }
+            if (f.periodo().dal() == null && f.periodo().al() == null) {
+                data = data.ne(null);
             }
             e.add(data);
         }

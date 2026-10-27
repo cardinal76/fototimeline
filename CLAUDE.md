@@ -659,7 +659,21 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   cambio dei luoghi (versione di `GeocodificaInversa`) i nomi automatici si
   rifanno con "Calcola eventi" (rifà tutto se il calcolo di prima era finito),
   dopo "Calcola luoghi".
+- **Eventi per date** (`creaPerDate`, `modificaPerDate`, `eliminaPerDate`;
+  `Evento.dal`/`al`, `perDate()`): manuali, prendono tutte le foto di quei
+  giorni (`prendiGiorni`, anche da altri eventi), restano senza foto
+  (`aggiornaRiepilogo` non li toglie, `giorniDelPeriodo` tiene `inizio`/`fine`
+  sui loro giorni) e in `manualeChePrende` vincono su tutto, senza guardare
+  `caricataIl`. Non si sovrappongono (`controllaDate`), non si uniscono né si
+  dividono. La data cambiata a mano pubblica `FotoDataCambiata`
+  (`dataCambiata`). Permessi: gestore (`/api/eventi/per-date`, `/*/per-date`);
+  `PUT`/`DELETE /api/eventi/*` restano dell'admin.
 - Filtro `evento` in `FiltroFoto` (`conEvento`) e in `FotoService.criteri`.
+- Filtro per data `periodo` (`Periodo.leggi`: "2019", "2019-08",
+  "2019-08-01..2019-09-15", lati vuoti aperti) in `/api/foto`, `/api/timeline`,
+  `/api/mappa` e `cerca-contenuto`: su `scattataIl`, come il salto `dal`/`al`
+  (che timeline e mappa ignorano, il periodo no), così l'indice `timeline`
+  serve anche l'ordine. `filtro-data.ts` nel frontend.
   Mai negli oggetti dei link condivisi (`FotoCondivisa`): test in `CondivisioniTest`.
 
 ## Git e CI

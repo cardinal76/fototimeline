@@ -21,12 +21,21 @@ function semplice(testo: string): string {
   return testo.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
+/** Il modulo di un evento per date: nuovo (senza id) o da cambiare. */
+interface ModuloPerDate {
+  id?: string;
+  nome: string;
+  dal: string;
+  al: string;
+}
+
 /**
  * La pagina "Eventi": le foto raggruppate da sole per tempo e posto (o a
  * mano), per anno, con copertina, nome, date e quante foto. Un clic apre le
- * foto dell'evento nella timeline (filtro "evento"). Da qui si rinominano, si
- * uniscono, si nascondono o tornano automatici; l'admin lancia "Calcola
- * eventi". Esc la chiude (App).
+ * foto dell'evento nella timeline (filtro "evento"). L'admin li rinomina,
+ * unisce, nasconde o li fa tornare automatici e lancia "Calcola eventi"; il
+ * gestore (e l'admin) crea, cambia ed elimina gli eventi per date (nome, dal,
+ * al: tutte le foto di quei giorni). Esc la chiude (App).
  */
 @Component({
   selector: 'app-eventi',
@@ -48,6 +57,8 @@ export class Eventi {
   protected readonly testo = signal('');
   /** Gli eventi scelti per unirli. */
   protected readonly scelti = signal<ReadonlySet<string>>(new Set());
+  /** Il modulo aperto di un evento per date, null se chiuso. */
+  protected readonly modulo = signal<ModuloPerDate | null>(null);
 
   /** Per anno, dal più recente; con la ricerca solo quelli col nome che la contiene. */
   protected readonly anni = computed(() => {
@@ -115,27 +126,69 @@ export class Eventi {
   protected rinomina(e: Evento): Promise<void> {
     const nome = prompt('Nome dell\'evento (vuoto: quello automatico)', e.nome);
     if (nome === null) return Promise.resolve();
-    return this.esegui(() => this.api.modificaEvento(e.id, { nome }), 'Evento rinominato');
+    return this.esegui(() => this.api.modificaEvento(e.id, { nome }), 'Evento rinominato').then(() => {});
   }
 
   protected nascondi(e: Evento): Promise<void> {
     return this.esegui(
       () => this.api.modificaEvento(e.id, { nascosto: !e.nascosto }),
       e.nascosto ? 'Evento di nuovo in vista' : 'Evento nascosto: le foto restano nella timeline',
-    );
+    ).then(() => {});
   }
 
   protected sciogli(e: Evento): Promise<void> {
     if (!confirm(`"${e.nome}" torna automatico: le modifiche a mano si perdono e le foto si raggruppano di nuovo da sole (entro pochi minuti).`)) {
       return Promise.resolve();
     }
-    return this.esegui(() => this.api.sciogliEvento(e.id), 'Evento tornato automatico');
+    return this.esegui(() => this.api.sciogliEvento(e.id), 'Evento tornato automatico').then(() => {});
   }
 
   protected unisci(): Promise<void> {
     const ids = [...this.scelti()];
     if (ids.length < 2 || !confirm(`Unire ${ids.length} eventi in uno solo?`)) return Promise.resolve();
     return this.esegui(() => this.api.unisciEventi(ids), 'Eventi uniti').then(() => this.deseleziona());
+  }
+
+  // ------------------------------------------------------------ eventi per date
+
+  protected nuovoPerDate(): void {
+    this.modulo.set({ nome: '', dal: '', al: '' });
+  }
+
+  protected cambiaPerDate(e: Evento): void {
+    this.modulo.set({ id: e.id, nome: e.nome, dal: e.dal ?? '', al: e.al ?? '' });
+  }
+
+  protected scrivi(campo: keyof Omit<ModuloPerDate, 'id'>, valore: string): void {
+    this.modulo.update((m) => (m ? { ...m, [campo]: valore } : m));
+  }
+
+  /** Cosa manca o non va nel modulo, null se si può salvare. */
+  protected readonly problemaModulo = computed(() => {
+    const m = this.modulo();
+    if (!m) return null;
+    if (!m.nome.trim()) return 'Scrivi un nome';
+    if (!m.dal || !m.al) return 'Scegli il primo e l\'ultimo giorno';
+    if (m.dal > m.al) return 'Il primo giorno viene dopo l\'ultimo';
+    return null;
+  });
+
+  protected async salvaPerDate(): Promise<void> {
+    const m = this.modulo();
+    if (!m || this.problemaModulo()) return;
+    const nome = m.nome.trim();
+    const riuscita = await this.esegui(
+      () => (m.id ? this.api.modificaEventoPerDate(m.id, nome, m.dal, m.al) : this.api.creaEventoPerDate(nome, m.dal, m.al)),
+      m.id ? 'Evento cambiato' : `Evento "${nome}" creato`,
+    );
+    if (riuscita) this.modulo.set(null);
+  }
+
+  protected eliminaPerDate(e: Evento): Promise<void> {
+    if (!confirm(`Eliminare "${e.nome}"? Le foto restano: tornano agli eventi automatici (entro pochi minuti).`)) {
+      return Promise.resolve();
+    }
+    return this.esegui(() => this.api.eliminaEventoPerDate(e.id), 'Evento eliminato').then(() => {});
   }
 
   protected async calcola(): Promise<void> {
@@ -152,14 +205,17 @@ export class Eventi {
     }
   }
 
-  private async esegui(chiamata: () => Observable<unknown>, testo: string): Promise<void> {
+  /** True se è riuscita. */
+  private async esegui(chiamata: () => Observable<unknown>, testo: string): Promise<boolean> {
     this.occupato.set(true);
     try {
       await firstValueFrom(chiamata());
       this.galleria.avvisa(testo);
       await this.carica();
+      return true;
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito');
+      return false;
     } finally {
       this.occupato.set(false);
     }
@@ -168,7 +224,12 @@ export class Eventi {
   // ------------------------------------------------------------ formati
 
   protected stessoGiorno(e: Evento): boolean {
-    return e.primoGiorno === e.ultimoGiorno;
+    return e.dal ? e.dal === e.al : e.primoGiorno === e.ultimoGiorno;
+  }
+
+  /** Un giorno "2019-08-10" come ora locale, per DatePipe (senza ora sarebbe UTC). */
+  protected locale(giorno: string): string {
+    return giorno + 'T00:00:00';
   }
 }
 

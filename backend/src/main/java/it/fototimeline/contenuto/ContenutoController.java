@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import it.fototimeline.contenuto.IndiceContenuto.StatoContenuto;
 import it.fototimeline.contenuto.IndiceContenuto.StatoLavoro;
 import it.fototimeline.service.FiltroFoto;
+import it.fototimeline.service.Periodo;
 import it.fototimeline.service.Risultati.PaginaFoto;
 
 /**
@@ -54,9 +55,11 @@ public class ContenutoController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dal,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate al,
             @RequestParam(required = false) String persona,
+            @RequestParam(required = false) String periodo,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
-        return indice.cerca(q, new FiltroFoto(null, tag, album, preferite, dal, al).conPersona(persona),
+        return indice.cerca(q, new FiltroFoto(null, tag, album, preferite, dal, al).conPersona(persona)
+                .conPeriodo(Periodo.leggi(periodo)),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 }

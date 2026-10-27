@@ -1,5 +1,6 @@
 package it.fototimeline.eventi;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -21,10 +22,11 @@ import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 
 /**
- * Gli eventi, dietro login come il resto (mai nei link condivisi). Le
- * modifiche a mano può farle chiunque usi l'app, come gli album; "Calcola
- * eventi" ({@code POST /api/archivio/eventi}) solo l'admin
- * (ConfigurazioneSicurezza).
+ * Gli eventi, dietro login come il resto (mai nei link condivisi). Guardarli:
+ * tutti; l'evento delle foto (crea dalla selezione, aggiungi, togli, dividi) e
+ * gli eventi per date ({@code /api/eventi/per-date}, {@code /api/eventi/{id}/per-date}):
+ * il gestore; rinominare, nascondere, unire, sciogliere gli altri e "Calcola
+ * eventi" ({@code POST /api/archivio/eventi}): l'admin (ConfigurazioneSicurezza).
  */
 @RestController
 @RequestMapping("/api")
@@ -49,6 +51,10 @@ public class EventiController {
     }
 
     public record Divisione(String foto) {
+    }
+
+    /** Un evento per date: nome, primo e ultimo giorno (compresi), tutti e tre obbligatori. */
+    public record PerDate(String nome, LocalDate dal, LocalDate al) {
     }
 
     @GetMapping("/eventi")
@@ -88,6 +94,25 @@ public class EventiController {
     @DeleteMapping("/eventi/{id}")
     public ResponseEntity<Void> sciogli(@PathVariable String id) {
         return eventi.sciogli(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    /** Un evento creato a mano per date: prende tutte le foto di quei giorni. */
+    @PostMapping("/eventi/per-date")
+    public ResponseEntity<VoceEvento> creaPerDate(@RequestBody PerDate nuovo) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(eventi.creaPerDate(nuovo.nome(), nuovo.dal(), nuovo.al()));
+    }
+
+    /** Nome e date nuovi di un evento per date (400 per gli altri eventi). */
+    @PutMapping("/eventi/{id}/per-date")
+    public VoceEvento modificaPerDate(@PathVariable String id, @RequestBody PerDate modifica) {
+        return eventi.modificaPerDate(id, modifica.nome(), modifica.dal(), modifica.al());
+    }
+
+    /** Elimina un evento per date: le sue foto tornano agli eventi automatici (400 per gli altri). */
+    @DeleteMapping("/eventi/{id}/per-date")
+    public ResponseEntity<Void> eliminaPerDate(@PathVariable String id) {
+        return eventi.eliminaPerDate(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 
     @PostMapping("/eventi/unisci")

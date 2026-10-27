@@ -168,8 +168,12 @@ public class ConfigurazioneSicurezza {
                     ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
             a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
                     "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
-                    "/api/eventi/*/foto", "/api/volti/*/assegna", "/api/volti/*/nome", "/api/volti/*/rifiuta",
-                    "/api/condivisioni", RICEVI_CONDIVISI).hasAnyAuthority(gestione);
+                    "/api/eventi/*/foto", "/api/eventi/per-date", "/api/volti/*/assegna", "/api/volti/*/nome",
+                    "/api/volti/*/rifiuta", "/api/condivisioni", RICEVI_CONDIVISI).hasAnyAuthority(gestione);
+            // Gli eventi creati a mano per date (nome, dal, al): li cambia ed elimina chi cambia l'evento delle
+            // foto. Gli altri eventi (rinomina, nascondi, torna automatico) restano dell'admin, sopra.
+            a.requestMatchers(HttpMethod.PUT, "/api/eventi/*/per-date").hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.DELETE, "/api/eventi/*/per-date").hasAnyAuthority(gestione);
             a.requestMatchers(HttpMethod.PUT, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
             a.requestMatchers(HttpMethod.DELETE, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
             // Cercare un luogo serve solo a sceglierlo per una foto.
