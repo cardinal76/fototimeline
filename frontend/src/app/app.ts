@@ -51,6 +51,7 @@ import { ScegliLuogo } from './scegli-luogo';
 import { SceltaEvento } from './scelta-evento';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
+import { TimelineScorrevole } from './timeline-scorrevole';
 import { Utenti } from './utenti';
 import { Visore } from './visore';
 
@@ -65,7 +66,7 @@ const ALTEZZA_RIGA = 210;
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     Accesso,
-    Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore,
+    Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, TimelineScorrevole, Visore,
     Eventi, FiltroEvento, SceltaEvento,
     Persone, Utenti,
   ],
