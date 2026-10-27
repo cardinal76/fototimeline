@@ -32,27 +32,36 @@ public class UtenteController {
      * amministratori: il server è raggiungibile solo da qui.
      *
      * @param username quello che finisce in "caricata da" (null con il login spento)
+     * @param ruolo    cosa può fare; null = è entrato ma non ha nessun ruolo: l'app dice di chiedere l'accesso
+     * @param admin    il ruolo è {@link Ruolo#AMMINISTRATORE}
+     * @param gestore  può cambiare le foto e scaricare gli originali (gestore o amministratore)
      */
-    public record Io(boolean login, String username, String nome, boolean admin, String radiceImportazione,
-            String cartellaAutomatica) {
+    public record Io(boolean login, String username, String nome, Ruolo ruolo, boolean admin, boolean gestore,
+            String radiceImportazione, String cartellaAutomatica) {
     }
 
     /** L'app lo chiede a ogni apertura: è anche il momento in cui l'utente si registra (ultimo accesso). */
     @GetMapping("/api/io")
     public Io io() {
-        String radice = importazione.radice() == null ? null : importazione.radice().toString();
-        String automatica = this.automatica.cartella() == null ? null : this.automatica.cartella().toString();
         Chi chi = corrente.chi();
         if (chi.username() != null) {
-            registro.registra(chi.username(), chi.nome(), chi.email(), chi.admin());
+            registro.registra(chi.username(), chi.nome(), chi.email(), chi.ruolo());
         }
-        return new Io(login.attivo(), chi.username(), chi.nome(), chi.admin(), radice, automatica);
+        // Le cartelle del server solo a chi importa (Strumenti).
+        String radice = !chi.admin() || importazione.radice() == null ? null : importazione.radice().toString();
+        String automatica = !chi.admin() || this.automatica.cartella() == null ? null
+                : this.automatica.cartella().toString();
+        return new Io(login.attivo(), chi.username(), chi.nome(), chi.ruolo(), chi.admin(), chi.puoGestire(), radice,
+                automatica);
     }
 
-    /** Gli utenti visti finora (solo admin, ConfigurazioneSicurezza): per scegliere il proprietario di un telefono. */
+    /**
+     * Gli utenti visti finora (solo admin, ConfigurazioneSicurezza): per scegliere il proprietario di un
+     * telefono. Quelli eliminati dalla pagina Utenti no (la scheda resta solo per il nome in "Caricata da").
+     */
     @GetMapping("/api/utenti")
     public List<Utente> utenti() {
-        return registro.elenco();
+        return registro.elenco().stream().filter(u -> u.eliminatoIl() == null).toList();
     }
 
     /** Per l'healthcheck di Docker: risponde anche senza login. */

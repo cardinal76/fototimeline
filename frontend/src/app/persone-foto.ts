@@ -23,6 +23,10 @@ import { Foto, VoltoInFoto } from './modelli';
               <img [src]="ritaglio(v.id)" alt="" loading="lazy" />
               @if (v.nome) {
                 <button type="button" class="nome" title="Mostra le sue foto" (click)="filtra(v)">{{ v.nome }}</button>
+              } @else if (!galleria.puoGestire()) {
+                @if (v.personaId) {
+                  <button type="button" class="tenue" title="Le foto di questo gruppo" (click)="filtra(v)">Senza nome</button>
+                }
               } @else if (inModifica() === v.id) {
                 <form (submit)="$event.preventDefault(); nomina(v, campo.value)">
                   <input #campo list="nomi-persone" placeholder="Chi è?" aria-label="Chi è?" maxlength="80" autocomplete="off" />

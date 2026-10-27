@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -46,6 +47,7 @@ import it.fototimeline.cloud.Rclone;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.google.ImportazioneTakeout;
 import it.fototimeline.google.ZipTakeout;
+import it.fototimeline.notte.GiroNotturno;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
@@ -88,15 +90,18 @@ public class Salute {
     private final MongoTemplate mongo;
     private final Clock clock;
     private final ExecutorService esecutore;
+    /** Il giro notturno, per la sua voce; null nei test che costruiscono Salute a mano. */
+    private GiroNotturno notte;
 
     @Autowired
     public Salute(CloudProperties cloud, RestClient.Builder builder, ArchivioFile archivio, BackupMetadati backup,
             BackupProperties backupProperties, SincronizzazioneTelefono telefono, LavoriImportazione lavori,
             ImportazioneAutomaticaProperties automatica, ImportazioneTakeout takeout, MongoTemplate mongo,
-            Optional<Clock> clock) {
+            Optional<Clock> clock, ObjectProvider<GiroNotturno> notte) {
         this(cloud, new Rclone(cloud, builder.requestFactory(richiesteBrevi())), archivio, backup, backupProperties,
                 telefono, lavori, automatica, takeout, mongo, clock.orElse(Clock.systemUTC()),
                 Executors.newVirtualThreadPerTaskExecutor());
+        this.notte = notte.getIfAvailable();
     }
 
     /** Per i test: un rclone finto e un esecutore qualunque (anche sullo stesso thread). */
@@ -143,6 +148,10 @@ public class Salute {
         controlli.add(new Controllo("backup", "Backup dei metadati", () -> List.of(backup())));
         controlli.add(new Controllo("telefono", TITOLO_TELEFONI, this::telefono));
         controlli.add(new Controllo("importazione", "Importazioni", () -> List.of(importazione())));
+        if (notte != null) {
+            GiroNotturno giro = notte;
+            controlli.add(new Controllo("notte", "Giro notturno", () -> List.of(giro.voceSalute())));
+        }
         controlli.add(new Controllo("google-takeout", TITOLO_TAKEOUT, this::takeout));
         controlli.add(new Controllo("disco", "Disco delle miniature", () -> List.of(disco())));
         if (cloud.gestito()) {

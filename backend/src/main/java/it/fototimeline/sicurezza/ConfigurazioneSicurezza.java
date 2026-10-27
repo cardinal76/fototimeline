@@ -14,12 +14,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.access.RequestMatcherDelegatingAccessDeniedHandler;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
-import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfException;
@@ -27,6 +28,8 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.savedrequest.NullRequestCache;
+import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.StringUtils;
@@ -52,7 +55,6 @@ import jakarta.servlet.http.HttpServletResponse;
 @Configuration
 public class ConfigurazioneSicurezza {
 
-    static final String REGISTRAZIONE = "keycloak";
     /** {@code share_target} del manifest: "Condividi → FotoTimeline" dal telefono. */
     public static final String RICEVI_CONDIVISI = "/ricevi-condivisi";
     /** Dove torna una condivisione che il service worker non ha preso: l'app dice di riprovare. */
@@ -70,9 +72,52 @@ public class ConfigurazioneSicurezza {
             return http.build();
         }
 
-        String autorizzazioneApi = login.richiedeRuolo() ? "ROLE_" + login.ruolo() : null;
+        permessi(http, login);
+        http.addFilterBefore(new SessioniChiuse(utenti), AuthorizationFilter.class);
+        // La pagina di accesso dell'app (PaginaDiAccesso) al posto di quella generata da Spring; dopo
+        // Keycloak si torna alla pagina da cui si veniva, e un login rifiutato torna lì con ?error.
+        http.oauth2Login(o -> o
+                .loginPage(PaginaDiAccesso.PAGINA)
+                .successHandler(PaginaDiAccesso.dopoIlLogin())
+                .userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login))));
+        http.addFilterBefore(PaginaDiAccesso.ricordaDoveTornare(), OAuth2AuthorizationRequestRedirectFilter.class);
+        // La pagina da riaprire la porta "torna", non la RequestCache (vedi PaginaDiAccesso).
+        http.requestCache(r -> r.requestCache(new NullRequestCache()));
+        // Le API prendono 401 (Angular mostra la pagina di accesso), le pagine vanno a /accesso.
+        http.exceptionHandling(e -> e
+                .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+                        new AntPathRequestMatcher("/api/**"))
+                .defaultAuthenticationEntryPointFor(PaginaDiAccesso.ingresso(), new AntPathRequestMatcher("/**")));
+        // Esci: chiude la sessione dell'app e quella di Keycloak (end_session con l'ID token), poi
+        // Keycloak torna a "/", che senza sessione porta alla pagina di accesso. "/" resta l'unico
+        // post.logout.redirect.uris registrato sul client (DEPLOY.md, passo 3).
+        http.logout(l -> l.logoutSuccessHandler(uscita(registrazioni.getObject())));
+        return http.build();
+    }
+
+    /**
+     * Chi può chiamare cosa. Tre ruoli ({@link Ruolo}), dal più alto:
+     * <ul>
+     * <li><b>amministratore</b>: tutto, compresi gli utenti e il menu Strumenti;</li>
+     * <li><b>gestore</b>: le foto (caricare, modificare, ruotare, eliminare nel cestino,
+     *     condividere, scaricare gli originali), niente Strumenti né utenti;</li>
+     * <li><b>utilizzatore</b>: solo guardare. Niente originali: {@code /vista} gli dà la foto
+     *     ridotta e {@code /file} solo i video da guardare (FotoController).</li>
+     * </ul>
+     * Chi è entrato senza nessuno dei tre vede solo {@code /api/io} e la pagina
+     * "chiedi l'accesso". L'ordine conta: vince la prima regola che corrisponde.
+     * Ogni indirizzo dei controller è elencato con il suo permesso in
+     * {@code SicurezzaTest.INVENTARIO}: uno nuovo che manca fa fallire i test.
+     */
+    private static void permessi(HttpSecurity http, LoginProperties login) throws Exception {
+        String admin = login.autorita(Ruolo.AMMINISTRATORE);
+        String[] gestione = login.almeno(Ruolo.GESTORE);
+        String[] lettura = login.almeno(Ruolo.UTILIZZATORE);
         http.authorizeHttpRequests(a -> {
             a.requestMatchers("/salute", "/error").permitAll();
+            // La pagina di accesso: nome, logo e "Accedi". È l'app Angular (index.html e i bundle sotto),
+            // senza dati: main.ts vede /accesso e non chiama nessuna API privata.
+            a.requestMatchers(HttpMethod.GET, PaginaDiAccesso.PAGINA).permitAll();
             // L'app installabile (PWA): il browser li chiede senza cookie. Non c'è niente di privato.
             a.requestMatchers("/manifest.webmanifest", "/sw.js", "/offline.html", "/icone/**", "/favicon.ico")
                     .permitAll();
@@ -82,46 +127,83 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers(HttpMethod.GET, "/c/*", "/api/condivise/**").permitAll();
             a.requestMatchers(HttpMethod.GET, "/main-*.js", "/chunk-*.js", "/polyfills-*.js", "/styles-*.css")
                     .permitAll();
-            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/backup", "/api/archivio/**",
-                    "/api/quasi-uguali/calcola", "/api/quasi-uguali/calcola/**", "/api/contenuto/**",
-                    "/api/importazioni/scartati/**", "/api/volti/riconosci", "/api/volti/annulla")
-                    .hasAuthority("ROLE_" + login.ruoloAdmin());
-            // Chi è entrato nell'app: email e ruoli, solo per gli admin.
-            a.requestMatchers("/api/utenti", "/api/utenti/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // La pagina "Salute" e la prova di Telegram (/salute, l'healthcheck, resta pubblico qui sopra).
-            a.requestMatchers("/api/salute", "/api/salute/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // Il dump dei thread (DiagnosticaController): nomi dei file e pile del codice, solo per gli admin.
-            a.requestMatchers("/api/diagnostica", "/api/diagnostica/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // "Ricordi su Telegram": impostazioni e prova.
-            a.requestMatchers("/api/ricordi-telegram", "/api/ricordi-telegram/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // "Importa da Google Takeout": tutta la libreria di Google Foto nell'archivio, solo l'admin.
-            // "Scegli da Google Foto" (/api/google/**, callback compreso) è per chiunque sia entrato.
-            a.requestMatchers("/api/google/takeout", "/api/google/takeout/**").hasAuthority("ROLE_" + login.ruoloAdmin());
-            // I telefoni (/api/telefoni) passano: ognuno vede il suo, il resto lo controlla TelefoniController.
-            // Il cestino (/api/cestino/**) come l'eliminazione (DELETE /api/foto/{id}) e le quasi uguali:
-            // basta poter usare l'app, qui sotto.
-            // Persone e volti (/api/persone/**, /api/volti/**, /api/foto/{id}/volti): vederle e dare i nomi
-            // come i tag, a chi usa l'app; "Riconosci volti" qui sopra, da admin. Mai tra i path pubblici.
-            if (autorizzazioneApi != null) {
-                a.anyRequest().hasAuthority(autorizzazioneApi);
-            } else {
-                a.anyRequest().authenticated();
-            }
+
+            // Chi sono e con che ruolo: anche senza ruolo, così l'app dice "chiedi l'accesso".
+            a.requestMatchers(HttpMethod.GET, "/api/io").authenticated();
+
+            // ---- Solo l'amministratore: gli utenti e tutto quello che sta nel menu Strumenti.
+            a.requestMatchers("/api/utenti", "/api/utenti/**", "/api/gestione-utenti", "/api/gestione-utenti/**")
+                    .hasAuthority(admin);
+            // Lavori sull'archivio: Indicizza archivio, Calcola luoghi, Calcola eventi, Converti video
+            // (anche lo stato della coda), Importa cartella col suo navigatore e lo stato dei lavori.
+            a.requestMatchers("/api/archivio/**", "/api/importa", "/api/importazioni/**", "/api/cartelle")
+                    .hasAuthority(admin);
+            // Il giro notturno, che li mette in fila: stato e orario, "Lancia ora", Annulla.
+            a.requestMatchers("/api/notte", "/api/notte/**").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.POST, "/api/cloud/**", "/api/contenuto/**", "/api/volti/riconosci",
+                    "/api/volti/annulla").hasAuthority(admin);
+            a.requestMatchers("/api/backup", "/api/backup/**", "/api/salute", "/api/salute/**",
+                    "/api/diagnostica", "/api/diagnostica/**", "/api/ricordi-telegram", "/api/ricordi-telegram/**")
+                    .hasAuthority(admin);
+            // Telefoni, Google Foto (Picker e Takeout), Quasi uguali, Cestino (ripristino, eliminazione per
+            // sempre, Svuota: l'eliminazione dal visore mette solo nel cestino, sotto).
+            a.requestMatchers("/api/telefoni", "/api/telefoni/**", "/api/google", "/api/google/**",
+                    "/api/quasi-uguali", "/api/quasi-uguali/**", "/api/cestino", "/api/cestino/**")
+                    .hasAuthority(admin);
+            // "Le mie condivisioni" (elenco e revoca) sta in Strumenti; crearne una no, sotto.
+            a.requestMatchers(HttpMethod.GET, "/api/condivisioni").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.DELETE, "/api/condivisioni/*").hasAuthority(admin);
+            // Le pagine Persone ed Eventi di Strumenti: nomi, unioni, nascoste, copertine, proposte.
+            // Leggere (filtro "Persona", scelta dell'evento) e cambiare le persone e l'evento di una foto no.
+            a.requestMatchers(HttpMethod.PUT, "/api/persone/*", "/api/eventi/*").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.POST, "/api/persone/**", "/api/volti/*/togli", "/api/eventi/unisci")
+                    .hasAuthority(admin);
+            a.requestMatchers(HttpMethod.GET, "/api/persone/*/volti", "/api/persone/*/proposte",
+                    "/api/persone/*/simili").hasAuthority(admin);
+            a.requestMatchers(HttpMethod.DELETE, "/api/eventi/*").hasAuthority(admin);
+
+            // ---- Gestore (e amministratore): il lavoro sulle foto.
+            // L'originale da scaricare: l'utilizzatore guarda soltanto.
+            a.requestMatchers(new AndRequestMatcher(new AntPathRequestMatcher("/api/foto/*/file", "GET"),
+                    ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
+                    "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
+                    "/api/eventi/*/foto", "/api/volti/*/assegna", "/api/volti/*/nome", "/api/volti/*/rifiuta",
+                    "/api/condivisioni", RICEVI_CONDIVISI).hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.PUT, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.DELETE, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
+            // Cercare un luogo serve solo a sceglierlo per una foto.
+            a.requestMatchers(HttpMethod.GET, "/api/luoghi/cerca").hasAnyAuthority(gestione);
+
+            // ---- Tutti e tre: guardare (timeline, ricerca, filtri, mappa, visore, "Accadde oggi").
+            a.requestMatchers(HttpMethod.GET, "/api/**").hasAnyAuthority(lettura);
+            // Un'API che qui sopra non c'è (un metodo nuovo dimenticato) non la chiama nessuno.
+            a.requestMatchers("/api/**").denyAll();
+            // Le pagine dell'app: chi è entrato, anche senza ruolo (vede "chiedi l'accesso").
+            a.requestMatchers(HttpMethod.GET, "/**").authenticated();
+            a.anyRequest().denyAll();
         });
-        http.oauth2Login(o -> o.userInfoEndpoint(u -> u.oidcUserService(new RuoliKeycloak(utenti, login.ruoloAdmin()))));
-        // Le chiamate XHR prendono 401 (Angular manda al login), le pagine il redirect a Keycloak.
-        http.exceptionHandling(e -> e
-                .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
-                        new AntPathRequestMatcher("/api/**"))
-                .defaultAuthenticationEntryPointFor(
-                        new LoginUrlAuthenticationEntryPoint("/oauth2/authorization/" + REGISTRAZIONE),
-                        new AntPathRequestMatcher("/**")));
-        http.logout(l -> {
-            var uscita = new OidcClientInitiatedLogoutSuccessHandler(registrazioni.getObject());
-            uscita.setPostLogoutRedirectUri("{baseUrl}/");
-            l.logoutSuccessHandler(uscita);
-        });
-        return http.build();
+    }
+
+    /** Dopo l'uscita dall'app: end_session di Keycloak con l'ID token, che poi torna a "/". */
+    static OidcClientInitiatedLogoutSuccessHandler uscita(ClientRegistrationRepository registrazioni) {
+        var uscita = new OidcClientInitiatedLogoutSuccessHandler(registrazioni);
+        uscita.setPostLogoutRedirectUri("{baseUrl}/");
+        return uscita;
+    }
+
+    /** {@code ?scarica=true} o {@code ?originale=true}: l'originale da scaricare, non il video da guardare. */
+    static boolean chiedeLOriginale(HttpServletRequest richiesta) {
+        return vero(richiesta.getParameter("scarica")) || vero(richiesta.getParameter("originale"));
+    }
+
+    /** Come lo legge Spring per un {@code boolean}: vuoto, false, off, no e 0 sono falsi, il resto no. */
+    private static boolean vero(String valore) {
+        if (valore == null) {
+            return false;
+        }
+        String v = valore.trim().toLowerCase(java.util.Locale.ROOT);
+        return !(v.isEmpty() || v.equals("false") || v.equals("off") || v.equals("no") || v.equals("0"));
     }
 
     /** Senza login l'app deve restare raggiungibile solo da questo PC. */
@@ -145,7 +227,7 @@ public class ConfigurazioneSicurezza {
      * service worker non c'è (prima apertura, browser senza), la POST del
      * telefono arriva qui senza token CSRF: il CSRF la respinge come sempre (i
      * file non entrano) e invece di un 403 si torna all'app, che dice di
-     * riprovare. Senza login quell'indirizzo porta poi a Keycloak.
+     * riprovare. Senza login quell'indirizzo porta poi alla pagina di accesso.
      */
     private static void condivisiSenzaApp(HttpSecurity http) throws Exception {
         AccessDeniedHandler respinta = new AccessDeniedHandlerImpl();

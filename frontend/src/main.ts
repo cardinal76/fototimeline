@@ -20,10 +20,24 @@ if (location.pathname.startsWith('/c/')) {
       }),
     )
     .catch((err) => console.error(err));
+} else if (location.pathname === '/accesso') {
+  // La pagina di accesso: pubblica, solo nome, logo e "Accedi" (nessuna API privata).
+  document.querySelector('app-root')?.replaceWith(document.createElement('app-accesso'));
+  import('./app/accesso')
+    .then(({ Accesso }) =>
+      bootstrapApplication(Accesso, {
+        providers: [provideBrowserGlobalErrorListeners(), provideZonelessChangeDetection()],
+      }),
+    )
+    .catch((err) => console.error(err));
+  registraServiceWorker();
 } else {
   bootstrapApplication(App, appConfig).catch((err) => console.error(err));
+  registraServiceWorker();
+}
 
-  // App installabile sul telefono (PWA): vedi public/sw.js.
+/** App installabile sul telefono (PWA): vedi public/sw.js. Anche dalla pagina di accesso. */
+function registraServiceWorker(): void {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {
       // Senza service worker l'app funziona lo stesso: solo non si installa.

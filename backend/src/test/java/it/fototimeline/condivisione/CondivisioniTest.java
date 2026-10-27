@@ -164,8 +164,8 @@ class CondivisioniTest {
             assertThat(risposta).as(vietato).doesNotContain(vietato);
         }
 
-        // La visita si conta, e l'elenco di Anna la mostra.
-        mvc.perform(get("/api/condivisioni").with(utente("anna")))
+        // La visita si conta, e l'elenco (Strumenti, solo l'amministratore) la mostra.
+        mvc.perform(get("/api/condivisioni").with(amministratore()))
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].foto").value(2))
                 .andExpect(jsonPath("$[0].visite").value(1))
@@ -479,38 +479,43 @@ class CondivisioniTest {
     }
 
     @Test
-    void ognunoVedeERevocaISuoiLAmministratoreTutti() throws Exception {
+    void ilGestoreCreaILinkLElencoELaRevocaSonoDellAmministratore() throws Exception {
         String token = crea(utente("anna"), Map.of("ids", List.of(rossa.getId())));
         String id = repository.findByToken(token).orElseThrow().getId();
         crea(utente("bruno"), Map.of("ids", List.of(verde.getId())));
-        var admin = oidcLogin().idToken(t -> t.subject("capo"))
-                .authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
+        var admin = amministratore();
 
-        mvc.perform(get("/api/condivisioni").with(utente("bruno")))
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].creataDa").value("bruno"));
+        // "Le mie condivisioni" sta in Strumenti: il gestore crea il link ma non lo elenca né lo revoca.
+        mvc.perform(get("/api/condivisioni").with(utente("bruno"))).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/condivisioni/" + id).with(utente("anna")).with(csrf())).andExpect(status().isForbidden());
+        // L'utilizzatore nemmeno lo crea.
+        richiesta(utilizzatore(), Map.of("ids", List.of(rossa.getId()))).andExpect(status().isForbidden());
+
         mvc.perform(get("/api/condivisioni").with(admin)).andExpect(jsonPath("$.length()").value(2));
-
-        // Bruno non revoca quella di Anna (e non sa nemmeno che c'è), né senza CSRF si revoca.
-        mvc.perform(delete("/api/condivisioni/" + id).with(utente("bruno")).with(csrf())).andExpect(status().isNotFound());
-        mvc.perform(delete("/api/condivisioni/" + id).with(utente("anna"))).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/condivisioni/" + id).with(admin)).andExpect(status().isForbidden());
         mvc.perform(get("/api/condivise/" + token).with(da(ip))).andExpect(status().isOk());
-
         mvc.perform(delete("/api/condivisioni/" + id).with(admin).with(csrf())).andExpect(status().isNoContent());
         mvc.perform(get("/api/condivise/" + token).with(da(ip))).andExpect(status().isGone());
-        mvc.perform(get("/api/condivisioni").with(utente("anna")))
-                .andExpect(jsonPath("$[0].revocata").value(true));
-
-        String suo = crea(utente("anna"), Map.of("ids", List.of(rossa.getId())));
-        String suoId = repository.findByToken(suo).orElseThrow().getId();
-        mvc.perform(delete("/api/condivisioni/" + suoId).with(utente("anna")).with(csrf())).andExpect(status().isNoContent());
-        mvc.perform(get("/api/condivise/" + suo).with(da(ip))).andExpect(status().isGone());
+        mvc.perform(get("/api/condivisioni").with(admin))
+                .andExpect(jsonPath("$[?(@.creataDa == 'anna')].revocata").value(true));
     }
 
     // ------------------------------------------------------------ utilità
 
+    /** Un gestore: crea i link. */
     private static RequestPostProcessor utente(String nome) {
-        return oidcLogin().idToken(t -> t.subject(nome));
+        return oidcLogin().idToken(t -> t.subject(nome))
+                .authorities(new SimpleGrantedAuthority("ROLE_fototimeline-gestore"));
+    }
+
+    private static RequestPostProcessor utilizzatore() {
+        return oidcLogin().idToken(t -> t.subject("nonna"))
+                .authorities(new SimpleGrantedAuthority("ROLE_fototimeline-utilizzatore"));
+    }
+
+    private static RequestPostProcessor amministratore() {
+        return oidcLogin().idToken(t -> t.subject("capo"))
+                .authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
     }
 
     private static RequestPostProcessor da(String ip) {

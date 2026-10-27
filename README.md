@@ -54,6 +54,10 @@ Il server: [DEPLOY.md](DEPLOY.md).
   stessa barra delle importazioni.
 - **Importazione automatica**: una cartella (per esempio quella dove il
   telefono carica nel cloud) che ogni 15 minuti si svuota nell'archivio.
+- **Giro notturno** (admin): ogni notte alle 2:30 Indicizza archivio, Calcola
+  luoghi, Calcola eventi, Indicizza contenuto, Riconosci volti e Calcola
+  impronte, uno dopo l'altro e solo sul nuovo; l'esito in Salute, e in
+  Strumenti "Lancia ora il giro notturno" (DEPLOY.md, "Giro notturno").
 - **Foto dai telefoni via pCloud** (sul server): un elenco di telefoni, uno per
   familiare, ognuno con la sua cartella su pCloud (anche su account diversi),
   il suo proprietario e i suoi orari. Ogni tot ore copia le foto nuove nella
@@ -213,6 +217,26 @@ Su server2 FotoTimeline gira dietro HTTPS con il login del Keycloak di presenze
 rclone solo quando un amministratore lo chiede dall'app. Tutto in
 [DEPLOY.md](DEPLOY.md).
 
+Tre ruoli (DEPLOY.md, "Utenti e ruoli"): l'**amministratore** fa tutto, compresi
+gli utenti (Strumenti → **Utenti**) e il menu Strumenti; il **gestore** lavora
+sulle foto (carica, modifica, elimina nel cestino, condivide, scarica) ma non
+apre Strumenti; l'**utilizzatore** guarda soltanto, senza scaricare. Chi non ha
+nessun ruolo vede "Chiedi l'accesso". Sul PC, senza login, si è amministratori.
+
+Chi apre l'app senza sessione vede la **pagina di accesso** (`/accesso`: logo, nome,
+**Accedi**), che porta al login di Keycloak e poi torna alla pagina di prima; **Esci**
+chiude anche la sessione di Keycloak e riporta lì. I link condivisi non ci passano. Per il
+login di Keycloak c'è un tema con i colori dell'app in `deploy/keycloak-tema/` (DEPLOY.md,
+"Pagina di accesso ed Esci").
+
+**Permessi delle API**: quello di ogni indirizzo è in `SicurezzaTest.INVENTARIO`
+(PUBBLICO, ENTRATO, LETTURA = i tre ruoli, GESTIONE = gestore e amministratore,
+ADMIN). In breve: leggere è di tutti i ruoli; caricare, cambiare, ruotare,
+eliminare, creare un link e scaricare l'originale (`/file?scarica=true`) del
+gestore; Strumenti (importazioni, archivio, cloud, backup, salute, telefoni,
+Google, cestino, quasi uguali, pagine Persone ed Eventi, elenco dei link) e
+`/api/gestione-utenti` dell'amministratore.
+
 ## Avvio sul PC
 
 Serve MongoDB su `localhost:27017`:
@@ -260,6 +284,8 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_CARTELLA_AUTOMATICA` | (vuoto)                        | Cartella svuotata da sola nell'archivio; vuoto = spenta |
 | `FOTOTIMELINE_INTERVALLO_AUTOMATICO` | `PT15M`                      | Ogni quanto controllarla                 |
 | `VISIONE_URL`           | (vuoto)                                   | Servizio visione (ricerca per contenuto); vuoto = spenta |
+| `FOTOTIMELINE_NOTTE_CRON` | `0 30 2 * * *`                          | Giro notturno (cron di Spring, ora italiana); vuoto o `-` = spento |
+| `FOTOTIMELINE_NOTTE_ATTESA` | `PT2H`                                | Quanto il giro aspetta un lavoro già in corso prima di saltare |
 | `VISIONE_SEGRETO`       | (vuoto)                                   | Segreto condiviso con visione (header `X-Visione-Segreto`) |
 | `FOTOTIMELINE_VISIONE_SOGLIA` | `0.24`                              | Somiglianza minima di un risultato per contenuto |
 | `FOTOTIMELINE_VISIONE_MARGINE` | `0.06`                             | Distacco massimo dalla foto più somigliante |
@@ -319,7 +345,12 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/importazioni/corrente` | Importazione in corso o ultima finita (204 se nessuna)     |
 | POST   | `/api/importazioni/annulla`  | Ferma quella in corso                                      |
 | GET    | `/api/cartelle`              | Sottocartelle per il navigatore (`percorso` opzionale)     |
-| GET    | `/api/io`                    | Utente collegato (`username`, `nome`), se è admin, radice di importazione; registra l'utente in `utenti` |
+| GET    | `/api/io`                    | Utente collegato (`username`, `nome`), `ruolo` (null = senza accesso), `admin`, `gestore`, radice di importazione (solo admin); registra l'utente in `utenti` |
+| GET    | `/api/gestione-utenti`       | Pagina Utenti: `{ disponibile, motivo, utenti }` dal realm di Keycloak, con ruolo, attivo, ultimo accesso (admin) |
+| POST   | `/api/gestione-utenti`       | Nuovo utente: `{ username, nome, cognome, email, ruolo, password, invito }` (201; 400 dati non validi, 409 username già usato; admin) |
+| PUT    | `/api/gestione-utenti/{id}/ruolo`, `/attivo` | Cambia ruolo (`{ ruolo }`) o attiva/disattiva (`{ attivo }`); 409 per l'ultimo amministratore (admin) |
+| POST   | `/api/gestione-utenti/{id}/password` | Password nuova temporanea (`{ password }`) o email d'invito (`{ invito: true }`); 204 (admin) |
+| DELETE | `/api/gestione-utenti/{id}`  | Lo toglie da Keycloak; le foto restano con "Caricata da"; 409 per l'ultimo amministratore (admin) |
 | GET    | `/api/utenti`                | Utenti entrati almeno una volta: username, nome, email, primo e ultimo accesso, admin (ruolo `fototimeline-admin`) |
 | GET    | `/api/caricate-da`           | Chi ha portato foto e quante (`username`, `nome`, `conteggio`), per il filtro |
 | GET    | `/api/cloud`                 | Cloud montato o no                                         |
@@ -332,6 +363,9 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | DELETE | `/api/telefoni/{id}`         | Toglie un telefono; il registro delle copie resta (204; 409 durante un giro; admin) |
 | POST   | `/api/telefoni/{id}/sincronizza` | Un giro subito, in coda dietro agli altri: 202, 409 se già in coda (admin o proprietario) |
 | POST   | `/api/archivio/indicizza`    | "Indicizza archivio" in sottofondo, stato come `/api/importa` (ruolo `fototimeline-admin`) |
+| GET    | `/api/notte`                 | Giro notturno: `attivo`, `cron`, `orario`, `prossimo`, `inCorso`, `ultimo` (esito e risultato di ogni lavoro; admin) |
+| POST   | `/api/notte/avvia`           | "Lancia ora il giro notturno": 202; 409 se è già in corso o il cloud è smontato (admin) |
+| POST   | `/api/notte/annulla`         | Ferma il giro: annulla il lavoro in corso, i dopo non partono (204, admin) |
 | GET    | `/api/foto/cerca-contenuto`  | Ricerca per contenuto: `q` (cosa c'è nella foto), `tag`, `album`, `preferite`, `dal`, `al`, `pagina`, `dimensione`; foto dalla più somigliante (409 se la funzione è spenta, 502 se visione non risponde) |
 | GET    | `/api/contenuto`             | Ricerca per contenuto: `attiva`, foto, `indicizzate`, `mancanti`, `nellIndice`, ultimo lavoro |
 | POST   | `/api/contenuto/indicizza`   | "Indicizza contenuto" in sottofondo (`daCapo=true` per rifare tutto); 202, 409 se già in corso (admin) |
@@ -493,7 +527,7 @@ Link di condivisione (dietro login come il resto):
 - **Senza service worker** (prima apertura, browser senza) la POST arriva al
   server senza token CSRF: il CSRF la respinge come ogni altra, e solo per quel
   percorso invece del 403 c'è un 303 verso `/?condivisi=senza-app` (l'app dice
-  di riaprirla e riprovare; senza login quell'indirizzo porta a Keycloak). Il
+  di riaprirla e riprovare; senza login quell'indirizzo porta alla pagina di accesso). Il
   CSRF non ha eccezioni e i file non si leggono: si carica solo da
   `/api/foto`. `RiceviCondivisiController` risponde allo stesso modo se una
   POST col token arrivasse fin lì. Test in `SicurezzaTest`.

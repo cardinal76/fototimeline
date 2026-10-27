@@ -318,3 +318,20 @@ dd a {
   color: inherit;
   font-weight: 600;
 }
+/* La preferita di chi guarda soltanto: la stella, senza pulsante. */
+.comandi > .stella-sola {
+  color: #ffc94d;
+  cursor: default;
+}
+.sola-lettura {
+  margin: 0.8rem 0;
+}
+.sola-lettura p {
+  margin: 0.3rem 0;
+}
+.sola-lettura .titolo {
+  font-weight: 600;
+}
+.sola-lettura .tag {
+  margin-right: 0.4rem;
+}

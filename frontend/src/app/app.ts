@@ -6,6 +6,7 @@ import {
   Injector,
   afterNextRender,
   computed,
+  effect,
   inject,
   signal,
   viewChild,
@@ -13,6 +14,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
+import { Accesso } from './accesso';
 import { Eventi } from './eventi';
 import { FiltroEvento } from './filtro-evento';
 import { FiltroLuogo } from './filtro-luogo';
@@ -29,6 +31,7 @@ import {
   ModificaTelefono,
   RicordiTelegram,
   StatoContenuto,
+  StatoNotte,
   StatoSalute,
   StatoTelefono,
   VideoGrande,
@@ -48,6 +51,7 @@ import { ScegliLuogo } from './scegli-luogo';
 import { SceltaEvento } from './scelta-evento';
 import { Ricordi } from './ricordi';
 import { TimelineNav } from './timeline-nav';
+import { Utenti } from './utenti';
 import { Visore } from './visore';
 
 /** I menu a tendina della barra: uno aperto alla volta. */
@@ -60,9 +64,10 @@ const ALTEZZA_RIGA = 210;
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    Accesso,
     Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore,
     Eventi, FiltroEvento, SceltaEvento,
-    Persone,
+    Persone, Utenti,
   ],
   host: {
     '(document:dragover)': 'trascina($event)',
@@ -129,6 +134,10 @@ export class App {
   /** "Google Foto": il bottone c'è se il server ha le credenziali di Google (o per l'admin, il Takeout). */
   protected readonly google = signal<CollegamentoGoogle | null>(null);
   protected readonly dialogoGoogle = signal(false);
+  /** "Utenti" (Strumenti, solo l'amministratore col login acceso). */
+  protected readonly dialogoUtenti = signal(false);
+  /** I file arrivati dal telefono si guardano una volta, appena si sa chi è entrato. */
+  private condivisiGuardati = false;
 
   /** Il menu della barra aperto (Filtri, Strumenti, utente), o null. */
   protected readonly menu = signal<Menu | null>(null);
@@ -174,9 +183,22 @@ export class App {
         { root: this.scorrimento().nativeElement, rootMargin: '1200px' },
       ).observe(this.fondo().nativeElement);
     });
-    void this.condivisiDalTelefono();
     this.ritornoDaGoogle();
-    this.api.google().subscribe({ next: (g) => this.google.set(g), error: () => this.google.set(null) });
+    // Quello che dipende dal ruolo aspetta di sapere chi è entrato.
+    effect(() => {
+      const io = this.galleria.io();
+      if (!io || this.condivisiGuardati) {
+        return;
+      }
+      this.condivisiGuardati = true;
+      if (io.ruolo) {
+        void this.condivisiDalTelefono(io.gestore);
+      }
+      // Google Foto sta in Strumenti: solo l'amministratore.
+      if (io.admin) {
+        this.api.google().subscribe({ next: (g) => this.google.set(g), error: () => this.google.set(null) });
+      }
+    });
   }
 
   /** Dopo il consenso Google torna a /?google=collegato (o negato, errore): si riapre il dialogo. */
@@ -214,7 +236,7 @@ export class App {
    * dialogo si apre anche senza parametro se ci sono file in attesa (per
    * esempio dopo un login o un "Più tardi").
    */
-  private async condivisiDalTelefono(): Promise<void> {
+  private async condivisiDalTelefono(puoCaricare: boolean): Promise<void> {
     const parametri = new URLSearchParams(location.search);
     const condivisi = parametri.get('condivisi');
     if (condivisi !== null) {
@@ -231,7 +253,11 @@ export class App {
     }
     try {
       if ((await inAttesa()).length) {
-        this.dialogoDalTelefono.set(true);
+        if (puoCaricare) {
+          this.dialogoDalTelefono.set(true);
+        } else {
+          this.galleria.avvisa('Il tuo account può solo guardare le foto: i file dal telefono non si caricano');
+        }
       }
     } catch {
       // Senza IndexedDB (navigazione privata di alcuni browser): niente da caricare.
@@ -262,7 +288,8 @@ export class App {
   }
 
   protected clic(f: Foto, e: MouseEvent): void {
-    if (this.selezione() || e.ctrlKey || e.metaKey) {
+    // La selezione serve alle azioni sulle foto: solo a chi le può cambiare.
+    if (this.galleria.puoGestire() && (this.selezione() || e.ctrlKey || e.metaKey)) {
       this.selezione.set(true);
       this.galleria.commuta(f.id);
     } else {
@@ -362,6 +389,8 @@ export class App {
     }
     if (this.dialogoGoogle()) {
       this.dialogoGoogle.set(false);
+    } else if (this.dialogoUtenti()) {
+      this.dialogoUtenti.set(false);
     } else if (this.dialogoCondividi()) {
       this.dialogoCondividi.set(null);
     } else if (this.dialogoCondivisioni()) {
@@ -401,6 +430,10 @@ export class App {
     }
     this.innesco = evento.currentTarget as HTMLElement;
     this.menu.set(m);
+    if (this.galleria.admin()) {
+      // Il giro notturno può essere passato da quando l'app è aperta: stato e prossimo orario freschi.
+      this.galleria.aggiornaNotte();
+    }
     afterNextRender(
       () => {
         const voci = this.vociMenu();
@@ -534,7 +567,7 @@ export class App {
   }
 
   protected trascina(e: DragEvent): void {
-    if (e.dataTransfer?.types.includes('Files')) {
+    if (this.galleria.puoGestire() && e.dataTransfer?.types.includes('Files')) {
       e.preventDefault();
       this.trascinando.set(true);
     }
@@ -551,7 +584,7 @@ export class App {
     e.preventDefault();
     this.trascinando.set(false);
     const file = Array.from(e.dataTransfer?.files ?? []);
-    if (file.length) {
+    if (file.length && this.galleria.puoGestire()) {
       void this.galleria.carica(file);
     }
   }
@@ -767,6 +800,31 @@ export class App {
       },
       error: (e: unknown) => this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito'),
     });
+  }
+
+  // ------------------------------------------------------------ giro notturno
+
+  protected titoloNotte(n: StatoNotte): string {
+    const quando = n.attivo
+      ? `Da solo ${n.orario}` + (n.prossimo ? ` (il prossimo: ${new Date(n.prossimo).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })})` : '')
+      : 'Il giro automatico è spento (FOTOTIMELINE_NOTTE_CRON)';
+    return `${quando}. Uno dopo l'altro: Indicizza archivio, Calcola luoghi, Calcola eventi, Indicizza contenuto, Riconosci volti, Calcola impronte, solo su quello che c'è da fare. L'esito in Salute.`;
+  }
+
+  protected async lanciaNotte(): Promise<void> {
+    const domanda =
+      "Lancia adesso il giro notturno: Indicizza archivio, Calcola luoghi, Calcola eventi, Indicizza contenuto, Riconosci volti e Calcola impronte, uno dopo l'altro e solo su quello che c'è da fare. Può richiedere tempo; l'esito si vede in Salute.";
+    if (!confirm(domanda + this.fermaAutomatica())) {
+      return;
+    }
+    try {
+      await this.galleria.lanciaGiroNotturno();
+      this.galleria.avvisa('Giro notturno partito: i lavori compaiono nella barra uno alla volta');
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Giro notturno non partito');
+    } finally {
+      this.galleria.aggiornaNotte();
+    }
   }
 
   /** Per le domande prima di un lavoro: se gira l'importazione automatica, che cosa le succede. */

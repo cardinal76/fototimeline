@@ -27,7 +27,7 @@ import { ScegliLuogo } from './scegli-luogo';
       } @empty {
         <span class="tenue">📍 Nessun luogo</span>
       }
-      @if (!modifica()) {
+      @if (!modifica() && galleria.puoGestire()) {
         <button type="button" class="cambia" title="Cambia il luogo (L)" aria-label="Cambia il luogo" (click)="apri()">✎</button>
       }
     </div>
@@ -119,7 +119,7 @@ import { ScegliLuogo } from './scegli-luogo';
   `,
 })
 export class LuogoFoto {
-  private readonly galleria = inject(Galleria);
+  protected readonly galleria = inject(Galleria);
 
   readonly foto = input.required<Foto>();
   /** La foto col luogo nuovo. */
@@ -135,6 +135,9 @@ export class LuogoFoto {
 
   /** Apre la ricerca del luogo (anche dal tasto L del visore). */
   apri(): void {
+    if (!this.galleria.puoGestire()) {
+      return;
+    }
     this.modifica.set(true);
   }
 

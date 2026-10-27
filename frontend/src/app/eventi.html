@@ -51,7 +51,7 @@
       <button type="button" [attr.aria-pressed]="nascosti()" (click)="commutaNascosti()">
         {{ nascosti() ? 'Nascondi i nascosti' : 'Mostra i nascosti' }}
       </button>
-      @if (scelti().size) {
+      @if (scelti().size && galleria.admin()) {
         <b>{{ scelti().size }} scelti</b>
         <button type="button" [disabled]="occupato() || scelti().size < 2" (click)="unisci()">Unisci</button>
         <button type="button" class="link" (click)="deseleziona()">Deseleziona</button>
@@ -86,9 +86,11 @@
                   <span class="quante">{{ e.conteggio }} foto</span>
                 </button>
                 <div class="testo">
-                  <label class="scegli" [title]="'Scegli per unire'">
-                    <input type="checkbox" [checked]="scelto" (change)="commuta(e)" [attr.aria-label]="'Scegli ' + e.nome" />
-                  </label>
+                  @if (galleria.admin()) {
+                    <label class="scegli" [title]="'Scegli per unire'">
+                      <input type="checkbox" [checked]="scelto" (change)="commuta(e)" [attr.aria-label]="'Scegli ' + e.nome" />
+                    </label>
+                  }
                   <button type="button" class="nome-evento" [title]="e.nome" (click)="apri(e)">{{ e.nome }}</button>
                   <span class="tenue date">
                     @if (stessoGiorno(e)) {
@@ -103,6 +105,8 @@
                       · nascosto
                     }
                   </span>
+                  <!-- Rinominare, nascondere, unire: la pagina Eventi di Strumenti, solo l'amministratore. -->
+                  @if (galleria.admin()) {
                   <div class="azioni">
                     <button type="button" [disabled]="occupato()" (click)="rinomina(e)">Rinomina</button>
                     <button type="button" [disabled]="occupato()" (click)="nascondi(e)">{{ e.nascosto ? 'Mostra' : 'Nascondi' }}</button>
@@ -112,6 +116,7 @@
                       </button>
                     }
                   </div>
+                  }
                 </div>
               </li>
             }
@@ -127,8 +132,10 @@
         </p>
       }
     }
-    <p class="tenue">
-      Dalla timeline: <b>Seleziona</b> le foto e poi <b>Evento…</b> per crearne uno, aggiungerle, toglierle o dividere un evento.
-    </p>
+    @if (galleria.puoGestire()) {
+      <p class="tenue">
+        Dalla timeline: <b>Seleziona</b> le foto e poi <b>Evento…</b> per crearne uno, aggiungerle, toglierle o dividere un evento.
+      </p>
+    }
   </section>
 </div>

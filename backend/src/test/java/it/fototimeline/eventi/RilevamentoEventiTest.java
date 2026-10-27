@@ -58,6 +58,12 @@ class RilevamentoEventiTest {
     }
 
     @Test
+    void senzaNessunaFotoNonCeNessunEvento() {
+        // I giorni toccati possono restare vuoti (foto nel cestino): il ricalcolo leggero non deve lanciare.
+        assertThat(gruppi(REGOLE)).isEmpty();
+    }
+
+    @Test
     void unaPausaLungaSeparaLeFoto() {
         LocalDateTime mattina = LocalDateTime.of(2021, 5, 12, 9, 0);
         List<Gruppo> g = gruppi(REGOLE,

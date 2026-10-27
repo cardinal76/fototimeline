@@ -1,0 +1,45 @@
+<!--
+  La pagina di accesso (accesso.ts): /accesso senza sessione, e "Chiedi l'accesso" dentro l'app.
+  Lo sfondo sono tessere colorate che ricordano una griglia di foto: nessuna foto vera, la pagina è pubblica.
+-->
+<main class="accesso" [class.chiedi]="modo() === 'chiedi'" [attr.role]="modo() === 'chiedi' ? 'alertdialog' : null"
+  [attr.aria-modal]="modo() === 'chiedi' ? 'true' : null" aria-labelledby="titolo-accesso">
+  <div class="mosaico" aria-hidden="true">
+    @for (t of tessere; track t) {
+      <span></span>
+    }
+  </div>
+
+  <section class="scheda">
+    <img class="logo" src="/icone/icona-192.png" width="88" height="88" alt="" />
+
+    @if (modo() === 'accedi') {
+      <h1 id="titolo-accesso">FotoTimeline</h1>
+      <p class="frase">Le foto di famiglia, in ordine di data.</p>
+      <p class="tenue">Timeline, mappa, eventi e ricordi: entra con il tuo account per vederli.</p>
+
+      @if (scaduta) {
+        <p class="avviso" role="status">La sessione è scaduta: accedi di nuovo e torni dov'eri.</p>
+      }
+      @if (errore) {
+        <p class="avviso errore" role="alert">L'accesso non è riuscito. Riprova; se continua, chiedi a chi gestisce l'app.</p>
+      }
+
+      <a class="accedi" [href]="accedi">Accedi</a>
+
+      <p class="nota">Un link condiviso si apre direttamente, senza accedere.</p>
+    } @else {
+      <h1 id="titolo-accesso">Chiedi l'accesso</h1>
+      <p class="frase">{{ saluto() }}: il tuo account non ha ancora un ruolo in FotoTimeline.</p>
+      @if (username(); as u) {
+        <p class="account"><span class="tenue">Sei entrato come</span> <code>{{ u }}</code></p>
+      }
+      <p class="tenue">
+        Chiedi a un amministratore di darti l'accesso, poi esci e rientra. Se hai sbagliato account, esci e accedi
+        con quello giusto.
+      </p>
+
+      <button type="button" class="accedi" (click)="esci()" title="Esce dall'app e da Keycloak: poi accedi con l'account giusto">Esci e cambia utente</button>
+    }
+  </section>
+</main>

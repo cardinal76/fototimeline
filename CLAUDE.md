@@ -211,18 +211,55 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - **Login acceso** (profilo `server`): OIDC con `oauth2Login` sul Keycloak di
   presenze, **realm `fototimeline`**, client confidenziale `fototimeline`.
   Sessione con cookie, non token Bearer: le foto si caricano con `<img>`, che
-  non può mandare header. Le API senza sessione rispondono 401 (Angular manda
-  a `/oauth2/authorization/keycloak`), le pagine fanno il redirect.
+  non può mandare header. Le API senza sessione rispondono 401 (Angular mostra
+  la pagina di accesso, `sessione.ts`), le pagine fanno il redirect a `/accesso`.
+- **Pagina di accesso** (`PaginaDiAccesso`, `AccessoController`, `accesso.ts`):
+  `/accesso` è pubblica, è l'app Angular (main.ts avvia solo `Accesso`, che
+  chiede solo `/api/io` per tornare all'app se la sessione c'è già). Una pagina
+  senza sessione va a `/accesso?torna=<pagina>` (solo GET; la radice nuda senza
+  `torna`), "Accedi" a `/oauth2/authorization/keycloak?torna=...`, un filtro
+  mette `torna` in sessione e `dopoIlLogin` ci torna. Niente RequestCache di
+  Spring (ricorderebbe una miniatura chiesta da un `<img>`). `torna` passa da
+  `PaginaDiAccesso.sicuro` (e `percorsoSicuro` nel frontend): solo percorsi
+  dell'app, mai `//altro`, `/\altro`, a capo o le pagine del login. Esci:
+  `uscita()`, end_session di Keycloak e ritorno a `/` (l'unico
+  `post.logout.redirect.uris` del client). "Chiedi l'accesso" è lo stesso
+  componente (`modo="chiedi"`). Il tema del login di Keycloak è in
+  `deploy/keycloak-tema/` (DEPLOY.md: si installa a mano sul Keycloak di presenze).
 - I ruoli di realm stanno nell'access token (`realm_access.roles`), non nell'ID
-  token: li legge `RuoliKeycloak`. `POST /api/cloud/**`, `/api/backup`,
-  `/api/archivio/**`, `/api/utenti` e `/api/salute` vogliono `fototimeline-admin`
-  (`fototimeline.login.ruolo-admin`); `/api/telefoni` lo controlla il
-  controller (ognuno vede il suo telefono).
+  token: li legge `RuoliKeycloak`. Tre ruoli (`Ruolo`, nomi in `LoginProperties`):
+  `fototimeline-admin` (tutto: utenti e menu Strumenti), `fototimeline-gestore`
+  (le foto: caricare, modificare, ruotare, eliminare nel cestino, condividere,
+  scaricare; niente Strumenti), `fototimeline-utilizzatore` (solo guardare). Il
+  più alto vince; senza nessuno si entra ma si vede solo `/api/io` (l'app dice
+  "Chiedi l'accesso").
+- **I permessi sono tutti in `ConfigurazioneSicurezza.permessi`**, per indirizzo:
+  prima i path pubblici, poi admin (Strumenti e utenti), poi gestore, poi
+  `GET /api/**` per i tre ruoli, poi `denyAll` per ogni altra API. **Ogni
+  indirizzo nuovo va anche in `SicurezzaTest.INVENTARIO`** col suo livello: il
+  test confronta l'inventario con le mappature dei controller (ne manca una →
+  rosso) e chiede ogni riga al filtro di autorizzazione per ogni ruolo, senza
+  chiamare i controller. Una pagina nuova in Strumenti è da admin, anche in
+  lettura.
+- L'utilizzatore non ha originali: `GET /api/foto/{id}/file` con `scarica` o
+  `originale` è da gestore (`chiedeLOriginale`), e `FotoController` gli rifiuta
+  le foto (403) e gli dà solo i video da guardare; `/vista` gli dà la vista
+  ridotta senza EXIF dei link (`CondivisioniService.vista`), per un video la
+  miniatura. Nel frontend `Galleria.puoGestire()` / `admin()` nascondono il
+  resto, ma la sicurezza vera è quella del server.
+- Pagina **Utenti** (pacchetto `utenti`, `/api/gestione-utenti`, admin): gli
+  utenti stanno su Keycloak e si cambiano con l'Admin REST API
+  (`AdminKeycloak`, `client_credentials` del client `fototimeline-utenti` con
+  `manage-users`, `view-users`, `view-realm`; DEPLOY.md, "Utenti e ruoli"). Le
+  regole in `GestioneUtenti`: l'ultimo amministratore attivo non perde il ruolo,
+  non si disattiva, non si elimina (`synchronized`); un cambio chiude le sessioni
+  su Keycloak e nell'app (`RegistroUtenti.chiudiSessioni` → `SessioniChiuse`
+  invalida le sessioni con l'ID token di prima). Nei test un `KeycloakFinto`.
 - CSRF sempre acceso: cookie `XSRF-TOKEN`, Angular lo rimanda da solo in
   `X-XSRF-TOKEN`. In Spring Security 6.5 non c'è `csrf().spa()`: lo fanno
   `CsrfPerSpa` e `CookieCsrfSempre`. Il logout è un form POST con `_csrf`
   (`sessione.ts`), perché la risposta porta a Keycloak, su un'altra origine.
-- **Path pubblici** (senza login, solo GET): `/salute`, `/error`, i file della
+- **Path pubblici** (senza login, solo GET): `/salute`, `/error`, `/accesso`, i file della
   PWA, e per i link di condivisione `/c/*`, `/api/condivise/**` e i bundle di
   Angular (`/main-*.js`, `/chunk-*.js`, `/polyfills-*.js`, `/styles-*.css`:
   codice, niente dati; `index.html` lo serve `CondiviseController` solo da
@@ -350,6 +387,34 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 - Cartelle e cartella automatica riconoscono i file con `FotoService.TIPI`:
   entrano anche HEIC e video, e `importa` passa il `Path`, mai i byte.
 
+## Giro notturno
+
+- Pacchetto `notte`. `GiroNotturno` ogni minuto guarda il cron
+  (`fototimeline.notte.cron`, `FOTOTIMELINE_NOTTE_CRON`, predefinito `0 30 2 * * *`
+  in `Europe/Rome`; vuoto o `-` = spento) e lancia, su un thread suo
+  (`giro-notturno`) e **uno dopo l'altro**, i lavori che ci sono già: Indicizza
+  archivio, Calcola luoghi (`tutte` false), Calcola eventi (il ricalcolo leggero
+  dei giorni toccati, o il calcolo completo se uno di prima era `interrotto`),
+  Indicizza contenuto, Riconosci volti (le foto senza segno), Calcola impronte
+  (solo se ne mancano). Non fa lavoro suo: li avvia e aspetta che finiscano.
+  Niente parallelismo nuovo.
+- Prima di ogni lavoro aspetta che non ne giri uno chiesto da qualcuno
+  (`occupato()`: importazioni tranne l'automatica, contenuto, volti, impronte,
+  calcolo eventi) al più `attesa-massima`; l'automatica la annulla il primo
+  lavoro, come a mano, e durante il giro non riparte
+  (`LavoriImportazione.sospendiAutomatica`). Cloud smontato: SALTATO. Un lavoro
+  ANNULLATO ferma il giro; uno FALLITO no (il giro finisce FALLITO).
+- L'ultimo giro sta in `impostazioni/giro-notturno` (`Giro`, `Risultato` per
+  lavoro) e si scrive a ogni passo: al riavvio `riprendi` riparte dal lavoro
+  dove era (un giro di più di 20 ore fa si chiude FALLITO). La voce `notte` di
+  Salute è `voceSalute()`: rossa se FALLITO, gialla se SALTATO, ANNULLATO o
+  fermo da più di 49 ore col cron acceso; da lì gli avvisi Telegram.
+- `/api/notte/**` è da admin (Strumenti, "Lancia ora il giro notturno"; col
+  cloud smontato 409). Un lavoro nuovo in Strumenti che vale la pena fare di
+  notte va aggiunto a `Passo`, a `occupato()` e ad `annulla()`.
+- Nei test il cron è spento (`src/test/resources/application.properties`):
+  `GiroNotturnoTest` lo lancia a mano o con un orologio suo.
+
 ## Telefoni (pCloud) e archivio di famiglia
 
 - `SincronizzazioneTelefono` (pacchetto `telefono`) copia i file nuovi di ogni
@@ -416,17 +481,19 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   ("Telefono") e si cancella; le voci del registro senza `idSorgente` lo
   prendono. Proprietario: `fototimeline.telefono.proprietario`, o il primo admin
   in `utenti`, o il primo admin che entra (`UtenteRegistrato`).
-- Permessi: `/api/telefoni` è aperto a chi ha fatto login; `TelefoniController`
-  fa vedere a chi non è admin solo i propri telefoni e gli lascia solo
-  "Sincronizza ora" (403 sulle modifiche, 404 sui telefoni degli altri).
+- Permessi: `/api/telefoni/**` sta in Strumenti, solo admin
+  (ConfigurazioneSicurezza). `TelefoniController` tiene i suoi controlli per
+  proprietario (vede i propri, solo "Sincronizza ora"), oggi senza effetto.
 - `Foto.caricataDa` è lo username Keycloak (`UtenteCorrente.chi()`): lo
   mettono il caricamento, "Importa cartella" (chi l'ha lanciata) e la cartella
   automatica (il proprietario del telefono). Null per le foto di prima e sul PC.
   Filtro `caricataDa` su foto, timeline e mappa; `GET /api/caricate-da` dà i
   conteggi coi nomi.
 - `utenti` (`RegistroUtenti`): ogni login (`RuoliKeycloak`) e ogni `GET /api/io`
-  aggiornano username, nome, email, admin, ultimo accesso. `GET /api/utenti` è
-  da admin. Niente API admin di Keycloak.
+  aggiornano username, nome, email, ruolo, ultimo accesso; la pagina Utenti
+  scrive nome, email e ruolo dei creati, `eliminatoIl` degli eliminati (la
+  scheda resta per "Caricata da") e `sessioniChiuseIl`. `GET /api/utenti` è da
+  admin e non dà gli eliminati.
 
 ## Google Foto
 
@@ -447,8 +514,8 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   refresh token cifrato AES-GCM in `google_token` (`CifraturaToken`).
   `GoogleProperties` e `TokenGoogle` hanno `toString` senza segreti: un campo
   segreto nuovo non deve finire in un record stampabile né in una risposta.
-- `/api/google/takeout/**` è da admin in `ConfigurazioneSicurezza`; il resto di
-  `/api/google/**` (callback compreso) basta il login.
+- `/api/google/**` (Takeout e Picker, callback compreso) è da admin in
+  `ConfigurazioneSicurezza`: sta in Strumenti.
 
 ## Foto quasi uguali
 
@@ -459,9 +526,8 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   null e la riempie "Calcola impronte".
 - `CalcoloImpronte` (thread `impronte`, uno alla volta, annullabile) prende le
   foto senza impronta per `_id` crescente a blocchi: idempotente, e una foto
-  che non riesce non si ripesca nello stesso giro. `POST /api/quasi-uguali/calcola`
-  è da admin; `risolvi` e `ignora` hanno i permessi dell'eliminazione;
-  `risolvi` manda nel cestino.
+  che non riesce non si ripesca nello stesso giro. Tutto `/api/quasi-uguali/**`
+  è da admin (Strumenti); `risolvi` manda nel cestino.
 - `Raggruppamento`: niente confronto di tutte le coppie. L'impronta si divide
   in `soglia + 1` bande: per il principio dei cassetti due impronte a distanza
   ≤ soglia hanno una banda identica, quindi si confrontano solo le foto nello
@@ -502,8 +568,9 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `_id > ""` per partire, il primo giro va senza.
 - Privacy: nessuna API dei volti è pubblica e `FotoCondivisa` non ha
   `persone` (test in `CondivisioniTest`). `FOTOTIMELINE_VOLTI=false` spegne
-  tutto (409), i dati restano. Vedere e nominare: chi usa l'app; il lavoro:
-  admin.
+  tutto (409), i dati restano. Vedere: tutti i ruoli; dare un nome dal visore
+  (`/api/volti/{id}/nome|assegna|rifiuta`): gestore; la pagina Persone e il
+  lavoro: admin.
 
 ## Rotazione
 
@@ -560,8 +627,9 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   mai un ripristino automatico (cartella automatica, Takeout, Indicizza archivio).
 - `cestino/Cestino`: pagina, ripristino ed eliminazione di più foto, "Svuota" e
   la pulizia dopo `fototimeline.cestino.giorni` (`FOTOTIMELINE_CESTINO_GIORNI`,
-  30; 0 = mai), ogni ora, solo col cloud montato. `/api/cestino/**` ha i
-  permessi dell'eliminazione.
+  30; 0 = mai), ogni ora, solo col cloud montato. `DELETE /api/foto/{id}` (nel
+  cestino) è del gestore; `/api/cestino/**` (ripristino, per sempre, Svuota) sta
+  in Strumenti, solo admin.
 - Eventi: `FotoNelCestino`, `FotoRipristinata`, `FotoEliminata` (solo per
   sempre: toglie il vettore da visione). `QuasiUguali` li ascolta, perché nel
   cestino il numero di schede non cambia e la cache non se ne accorgerebbe;

@@ -12,6 +12,7 @@ import {
   Foto,
   Giorno,
   Io,
+  StatoNotte,
   LavoroImportazione,
   Modifica,
   Operazione,
@@ -63,6 +64,8 @@ export class Galleria {
   readonly caricamento = signal<StatoCaricamento | null>(null);
   readonly avviso = signal<string | null>(null);
   readonly io = signal<Io | null>(null);
+  /** Il giro notturno, per Strumenti (solo amministratore). */
+  readonly notte = signal<StatoNotte | null>(null);
   readonly cloud = signal<StatoCloud | null>(null);
   readonly cambioCloud = signal(false);
   /** Ultimo backup dei metadati (solo per gli admin). */
@@ -150,27 +153,57 @@ export class Galleria {
   private contenutoTimer?: ReturnType<typeof setTimeout>;
   private voltiTimer?: ReturnType<typeof setTimeout>;
 
+  /** L'amministratore: utenti e menu Strumenti. */
+  readonly admin = computed(() => !!this.io()?.admin);
+  /** Gestore o amministratore: carica, cambia, elimina, condivide, scarica gli originali. */
+  readonly puoGestire = computed(() => !!this.io()?.gestore);
+  /** Entrato ma senza nessun ruolo: vede solo "chiedi l'accesso". */
+  readonly senzaAccesso = computed(() => {
+    const io = this.io();
+    return !!io && io.login && !io.ruolo;
+  });
+
   constructor() {
-    this.api.io().subscribe((io) => {
-      this.io.set(io);
-      if (io.admin) {
-        this.aggiornaBackup();
-        this.seguiConversioni();
-        this.seguiSalute();
-      }
-      this.seguiContenuto();
-      this.seguiVolti();
+    // Prima chi è: senza ruolo il server risponde 403 a tutto, e ognuno chiede solo quello che può vedere.
+    this.api.io().subscribe({
+      next: (io) => {
+        this.io.set(io);
+        if (!io.ruolo) {
+          return;
+        }
+        this.aggiornaCloud();
+        this.ricarica();
+        this.aggiornaLuoghi();
+        if (io.admin) {
+          this.aggiornaNotte();
+          this.aggiornaBackup();
+          this.seguiConversioni();
+          this.seguiSalute();
+          // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
+          this.api.importazioneCorrente().subscribe((l) => {
+            if (l && l.stato !== 'IN_CORSO') {
+              this.importazioneVista = l.id;
+            }
+            this.seguiImportazione();
+          });
+        }
+        this.seguiContenuto();
+        this.seguiVolti();
+      },
+      error: () => this.avvisa('Il server non risponde: è acceso?'),
     });
-    this.aggiornaCloud();
-    this.ricarica();
-    this.aggiornaLuoghi();
-    // Quella già finita al caricamento della pagina non si mostra; una in corso sì.
-    this.api.importazioneCorrente().subscribe((l) => {
-      if (l && l.stato !== 'IN_CORSO') {
-        this.importazioneVista = l.id;
-      }
-      this.seguiImportazione();
-    });
+  }
+
+  // ------------------------------------------------------------ giro notturno
+
+  aggiornaNotte(): void {
+    this.api.notte().subscribe({ next: (n) => this.notte.set(n), error: () => this.notte.set(null) });
+  }
+
+  /** "Lancia ora il giro notturno": i suoi lavori compaiono nella barra come quelli lanciati a mano. */
+  async lanciaGiroNotturno(): Promise<void> {
+    this.notte.set(await firstValueFrom(this.api.avviaNotte()));
+    this.seguiImportazione();
   }
 
   // ------------------------------------------------------------ importazioni in sottofondo
