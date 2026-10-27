@@ -20,6 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.function.BooleanSupplier;
 
 import javax.imageio.ImageIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -63,6 +65,7 @@ import it.fototimeline.service.FotoService.Modifica;
 class IndiceContenutoTest {
 
     private static final FiltroFoto NESSUNO = new FiltroFoto(null, null, null, null, null, null);
+    private static final Duration ATTESA = Duration.ofSeconds(10);
 
     @TempDir
     static Path archivio;
@@ -87,17 +90,35 @@ class IndiceContenutoTest {
     @Autowired
     MongoTemplate mongo;
 
+    /**
+     * Visione è un mock, e Mockito non regge lo stubbing mentre un altro
+     * thread chiama lo stesso mock: {@code when(visione.mettiBlocco(..))}
+     * registra la chiamata e {@code thenAnswer} attacca la risposta all'ultima
+     * chiamata vista dal mock. Se in mezzo il thread "contenuto" fa
+     * {@code visione.togli(..)} (le foto eliminate qui sotto), la risposta va a
+     * togli, mettiBlocco resta senza e restituisce null, e il lavoro finisce
+     * FALLITO (NullPointerException su {@code esito.aggiunte()}). Per questo si
+     * stubba solo a coda ferma, e la coda si aspetta anche prima del reset del
+     * mock a fine test.
+     */
     @BeforeEach
-    void svuota() {
-        aspettaFine();
+    void svuota() throws Exception {
+        aspettaSottofondo();
         repository.findAll().forEach(f -> {
             service.elimina(f.getId());
             service.eliminaPerSempre(f.getId());
         });
+        indice.aspettaCoda(ATTESA);
         mongo.remove(Query.query(Criteria.where("_id").is(IndiceContenuto.ID)), "impostazioni");
         // Visione prende tutto quello che riceve.
         when(visione.mettiBlocco(anyMap())).thenAnswer(i -> new EsitoBlocco(
                 new ArrayList<>(i.<Map<String, Path>>getArgument(0).keySet()), Map.of()));
+    }
+
+    @AfterEach
+    void aspettaSottofondo() throws Exception {
+        aspettaFine();
+        indice.aspettaCoda(ATTESA);
     }
 
     @Test
@@ -125,7 +146,7 @@ class IndiceContenutoTest {
     }
 
     @Test
-    void ilLavoroMandaLeMancantiABlocchiEDueVolteNonRifaNiente() throws IOException {
+    void ilLavoroMandaLeMancantiABlocchiEDueVolteNonRifaNiente() throws Exception {
         List<String> ids = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             ids.add(importa("foto" + i + ".png", new Color(i * 50, 100, 100)).getId());
@@ -159,7 +180,7 @@ class IndiceContenutoTest {
     }
 
     @Test
-    void gliErroriDiUnaFotoNonFermanoIlLavoro() throws IOException {
+    void gliErroriDiUnaFotoNonFermanoIlLavoro() throws Exception {
         Foto buona = importa("buona.png", Color.GREEN);
         Foto rotta = importa("rotta.png", Color.RED);
         verify(visione, timeout(5000).times(2)).metti(any(), any());
@@ -178,7 +199,7 @@ class IndiceContenutoTest {
     }
 
     @Test
-    void seVisioneRestaSpentaIlLavoroSiFermaERiprendeAlRiavvio() throws IOException {
+    void seVisioneRestaSpentaIlLavoroSiFermaERiprendeAlRiavvio() throws Exception {
         importa("a.png", Color.ORANGE);
         verify(visione, timeout(5000)).metti(any(), any());
         nessunaSegnata();
@@ -272,8 +293,10 @@ class IndiceContenutoTest {
     }
 
     /** Come un archivio di prima della ricerca per contenuto, dopo che le foto appena importate sono passate. */
-    private void nessunaSegnata() {
+    private void nessunaSegnata() throws Exception {
         aspetta(() -> indice.stato().mancanti() == 0);
+        // Dopo, il test stubba visione: il thread "contenuto" deve aver finito (vedi svuota).
+        indice.aspettaCoda(ATTESA);
         mongo.updateMulti(new Query(), new Update().unset(IndiceContenuto.CAMPO), Foto.class);
     }
 

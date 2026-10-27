@@ -3,6 +3,7 @@ package it.fototimeline.contenuto;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -13,12 +14,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -327,6 +330,8 @@ public class IndiceContenuto {
         if (!attiva()) {
             return new StatoContenuto(false, 0, 0, 0, null, null);
         }
+        // Prima il lavoro, poi i conteggi: se dice FINITO, le foto che ha segnato sono già contate.
+        StatoLavoro lavoro = corrente().orElse(null);
         long foto = mongo.count(new Query(FotoService.nonNelCestino()), Foto.class);
         long mancanti = mongo.count(senzaSegno(), Foto.class);
         Long nellIndice;
@@ -335,7 +340,17 @@ public class IndiceContenuto {
         } catch (RuntimeException e) {
             nellIndice = null;
         }
-        return new StatoContenuto(true, foto, foto - mancanti, mancanti, nellIndice, corrente().orElse(null));
+        return new StatoContenuto(true, foto, foto - mancanti, mancanti, nellIndice, lavoro);
+    }
+
+    /**
+     * Per i test: aspetta che il thread "contenuto" abbia finito quello che ha
+     * in coda (foto nuove, eliminate, ripristinate, girate). Il thread è uno
+     * solo e prende la coda in ordine: quando tocca a questo segnaposto, i
+     * compiti messi prima sono finiti.
+     */
+    void aspettaCoda(Duration massimo) throws InterruptedException, ExecutionException, TimeoutException {
+        singole.submit(() -> { }).get(massimo.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     /**

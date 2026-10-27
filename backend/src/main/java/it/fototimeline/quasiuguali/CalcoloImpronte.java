@@ -77,11 +77,20 @@ public class CalcoloImpronte {
         return Criteria.where("impronta").exists(false).and("video").ne(true).and(FotoService.CESTINO).is(null);
     }
 
+    /**
+     * Prima lo stato, poi il conteggio: se dice FINITO, le impronte del giro
+     * sono già tutte su Mongo e {@code senzaImpronta} le vede. Al contrario
+     * (contare e poi leggere lo stato) il giro poteva finire in mezzo e
+     * arrivava "FINITO" con le ultime foto ancora contate come mancanti.
+     */
     public StatoCalcolo stato() {
-        long mancanti = mongo.count(Query.query(senzaImpronta()), Foto.class);
+        StatoCalcolo s;
         synchronized (this) {
-            return new StatoCalcolo(stato, iniziatoIl, finitoIl, totale, fatte, calcolate, errori, errore, mancanti);
+            s = new StatoCalcolo(stato, iniziatoIl, finitoIl, totale, fatte, calcolate, errori, errore, 0);
         }
+        long mancanti = mongo.count(Query.query(senzaImpronta()), Foto.class);
+        return new StatoCalcolo(s.stato(), s.iniziatoIl(), s.finitoIl(), s.totale(), s.fatte(), s.calcolate(),
+                s.errori(), s.errore(), mancanti);
     }
 
     /** Lo fa partire in sottofondo; con uno già in corso, IllegalStateException (409). */
