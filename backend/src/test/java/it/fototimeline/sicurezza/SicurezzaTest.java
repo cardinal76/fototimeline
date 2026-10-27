@@ -175,6 +175,9 @@ class SicurezzaTest {
             POST   /api/eventi/{id}/dividi                        GESTIONE
             POST   /api/eventi/{id}/foto                          GESTIONE
             POST   /api/eventi/togli                              GESTIONE
+            POST   /api/eventi/per-date                           GESTIONE
+            PUT    /api/eventi/{id}/per-date                      GESTIONE
+            DELETE /api/eventi/{id}/per-date                      GESTIONE
             POST   /api/volti/{id}/assegna                        GESTIONE
             POST   /api/volti/{id}/nome                           GESTIONE
             POST   /api/volti/{id}/rifiuta                        GESTIONE

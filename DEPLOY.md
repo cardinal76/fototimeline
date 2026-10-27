@@ -1401,7 +1401,7 @@ gli risponde 403 su tutto tranne `/api/io`).
 | Ruolo | Può |
 |---|---|
 | `fototimeline-admin` (amministratore) | tutto: anche Strumenti (lavori, cloud, backup, salute, telefoni, Google Foto, cestino, quasi uguali, pagine Persone ed Eventi, le condivisioni di tutti) e la pagina **Utenti** |
-| `fototimeline-gestore` (gestore) | le foto: vedere, scaricare gli originali, caricare foto e video, cambiare data, tag, album, luogo, evento e persone dal visore e dalla selezione, ruotare, preferite, eliminare (nel cestino), condividere con un link. **Niente Strumenti né utenti** |
+| `fototimeline-gestore` (gestore) | le foto: vedere, scaricare gli originali, caricare foto e video, cambiare data, tag, album, luogo, evento e persone dal visore e dalla selezione, creare, cambiare ed eliminare gli eventi per date, ruotare, preferite, eliminare (nel cestino), condividere con un link. **Niente Strumenti né utenti** |
 | `fototimeline-utilizzatore` (utilizzatore) | **solo guardare**: timeline, ricerca, filtri, mappa, visore, "Accadde oggi". Niente ⤓ né originali (il server dà la foto ridotta a 2048 px senza EXIF, e i video solo da guardare), niente modifiche, eliminazioni, link, selezione, Strumenti. Uno screenshot resta possibile: non lo si impedisce |
 
 Il permesso di ogni indirizzo è in `ConfigurazioneSicurezza.permessi` e, riga per riga,
@@ -1642,12 +1642,24 @@ Cambiata una soglia, **Calcola eventi** rifà tutto.
   foto tolta resta fissa senza evento. Il calcolo salta le foto fisse e non
   toglie mai un evento manuale: le modifiche non si perdono. *Torna automatico*
   scioglie l'evento e il ricalcolo lo rifà da sé.
+- **Eventi per date** (pagina Eventi, **+ Nuovo evento per date**; gestore e
+  admin, `/api/eventi/per-date` e `/api/eventi/{id}/per-date`): nome, `dal`,
+  `al` (compresi). L'evento è manuale e prende **tutte** le foto scattate in
+  quei giorni, anche da altri eventi automatici o manuali (vince lui); le foto
+  nuove di quei giorni e quelle a cui si cambia la data a mano entrano in lui,
+  anche dopo la sua ultima modifica. Resta anche senza foto (un viaggio che deve
+  venire). Due eventi per date non si sovrappongono (400); unire e dividere non
+  valgono per loro. Cambiate le date, l'evento ha esattamente le foto dei giorni
+  nuovi: quelle fuori tornano non fisse e i loro giorni si rifanno al ricalcolo
+  leggero. *Elimina* è come *Torna automatico*. Rinominare, nascondere e
+  sciogliere gli altri eventi resta dell'admin.
 - **Foto nuove**: l'importazione (e il cestino, e il ripristino) segnano il
   giorno della foto in `eventi_da_rifare`; ogni `RICALCOLO` quei giorni si
   rifanno, coi giorni vicini e gli eventi automatici che li toccano. Una foto
   nuova dentro le date di un evento manuale (caricata dopo la sua ultima
-  modifica) entra in lui. Cambiare a mano la data di una foto non la sposta
-  di evento: lo fa il prossimo **Calcola eventi**.
+  modifica) entra in lui. Cambiare a mano la data di una foto la sposta in un
+  evento per date se ci cade dentro (o fuori, se ne usciva); per gli altri
+  eventi lo fa il prossimo **Calcola eventi**.
 - **Cestino**: le foto nel cestino non contano (conteggio, copertina, filtro);
   ripristinate tornano nel loro evento al ricalcolo leggero.
 - **Collezioni**: `eventi` (un documento per evento, con il riepilogo),

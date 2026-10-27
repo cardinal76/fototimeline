@@ -16,6 +16,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { Accesso } from './accesso';
 import { Eventi } from './eventi';
+import { FiltroData } from './filtro-data';
 import { FiltroEvento } from './filtro-evento';
 import { FiltroLuogo } from './filtro-luogo';
 import { FotoApi } from './foto-api';
@@ -66,7 +67,7 @@ const ALTEZZA_RIGA = 210;
   imports: [
     Accesso,
     Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, Visore,
-    Eventi, FiltroEvento, SceltaEvento,
+    Eventi, FiltroData, FiltroEvento, SceltaEvento,
     Persone, Utenti,
   ],
   host: {
@@ -144,7 +145,7 @@ export class App {
   /** Quanti filtri sono attivi, per il numerino sul pulsante Filtri (la ricerca ha il suo campo). */
   protected readonly quantiFiltri = computed(() => {
     const f = this.galleria.filtro();
-    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.provincia || f.luogo, f.persona, f.preferite, f.evento].filter(Boolean).length;
+    return [f.tag, f.album, f.caricataDa, f.nazione || f.regione || f.provincia || f.luogo, f.persona, f.preferite, f.evento, f.periodo].filter(Boolean).length;
   });
   /** Un problema da vedere a colpo d'occhio sul pulsante Strumenti: cloud smontato o salute non a posto. */
   protected readonly avvisoSistema = computed<{ stato: StatoSalute; testo: string } | null>(() => {
@@ -366,7 +367,7 @@ export class App {
 
   protected filtriAttivi(): boolean {
     const f = this.galleria.filtro();
-    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.provincia || f.luogo || f.evento || f.persona);
+    return !!(f.q || f.tag || f.album || f.preferite || f.al || f.caricataDa || f.nazione || f.regione || f.provincia || f.luogo || f.evento || f.persona || f.periodo);
   }
 
   // ------------------------------------------------------------ selezione

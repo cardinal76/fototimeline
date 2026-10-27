@@ -358,7 +358,7 @@ public class IndiceContenuto {
         Map<String, Double> punteggi = new HashMap<>();
         simili.forEach(x -> punteggi.putIfAbsent(x.id(), x.punteggio()));
         FiltroFoto altri = new FiltroFoto(null, filtro.tag(), filtro.album(), filtro.preferite(), filtro.dal(), filtro.al())
-                .conPersona(filtro.persona());
+                .conPersona(filtro.persona()).conPeriodo(filtro.periodo());
         Query query = new Query(new Criteria().andOperator(
                 Criteria.where("_id").in(punteggi.keySet()), FotoService.criteri(altri)));
         List<Foto> trovate = new ArrayList<>(mongo.find(query, Foto.class));

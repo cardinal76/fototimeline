@@ -92,3 +92,48 @@
 .date {
   font-size: 0.85rem;
 }
+/* Il modulo di un evento per date: nome, dal, al. */
+.per-date {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.6rem 1rem;
+  align-items: end;
+  margin: 0.4rem 0 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+  background: var(--superficie-2);
+}
+.per-date h3,
+.per-date p,
+.per-date .azioni {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.per-date h3 {
+  font-size: 1rem;
+}
+.per-date label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.per-date input {
+  font: inherit;
+  color: var(--testo);
+  background: var(--superficie);
+  border: 1px solid var(--bordo);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  min-width: 0;
+}
+.per-date input:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: 1px;
+}
+.per-date .azioni {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}

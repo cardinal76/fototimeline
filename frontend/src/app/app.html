@@ -97,6 +97,10 @@
           <app-filtro-luogo />
         </div>
         <div class="campo">
+          <span>Data</span>
+          <app-filtro-data />
+        </div>
+        <div class="campo">
           <span>Evento</span>
           <app-filtro-evento (scegli)="chiudiMenu(); dialogoEventi.set(true)" />
         </div>
@@ -491,6 +495,9 @@
   <main #scorrimento (scroll)="scorri()" [hidden]="vista() === 'mappa'">
     @if (!filtriAttivi() && galleria.io()?.ruolo) {
       <app-ricordi (apri)="aperta.set($event)" />
+    }
+    @if (galleria.filtro().periodo) {
+      <p class="salto"><app-filtro-data [riga]="true" /></p>
     }
     @if (galleria.filtro().evento) {
       <p class="salto"><app-filtro-evento [riga]="true" /></p>

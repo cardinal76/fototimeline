@@ -161,6 +161,21 @@ export class FotoApi {
     return this.http.put<Evento>(`/api/eventi/${encodeURIComponent(id)}`, modifica);
   }
 
+  /** Un evento per date: tutte le foto scattate dal primo all'ultimo giorno (compresi). */
+  creaEventoPerDate(nome: string, dal: string, al: string): Observable<Evento> {
+    return this.http.post<Evento>('/api/eventi/per-date', { nome, dal, al });
+  }
+
+  /** Nome e date nuovi di un evento per date: dopo ha esattamente le foto dei suoi giorni. */
+  modificaEventoPerDate(id: string, nome: string, dal: string, al: string): Observable<Evento> {
+    return this.http.put<Evento>(`/api/eventi/${encodeURIComponent(id)}/per-date`, { nome, dal, al });
+  }
+
+  /** Elimina un evento per date: le sue foto tornano agli eventi automatici. */
+  eliminaEventoPerDate(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/eventi/${encodeURIComponent(id)}/per-date`);
+  }
+
   unisciEventi(ids: string[]): Observable<Evento> {
     return this.http.post<Evento>('/api/eventi/unisci', { ids });
   }

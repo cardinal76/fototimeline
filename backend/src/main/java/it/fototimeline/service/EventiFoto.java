@@ -13,6 +13,10 @@ public final class EventiFoto {
     public record FotoAggiunta(String id) {
     }
 
+    /** La data di scatto di una foto è stata cambiata a mano (gli eventi per date la seguono). */
+    public record FotoDataCambiata(String id) {
+    }
+
     /** Una foto è finita nel cestino: scheda e file restano, sparisce dagli elenchi. */
     public record FotoNelCestino(String id) {
     }

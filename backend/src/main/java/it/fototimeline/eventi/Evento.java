@@ -16,6 +16,12 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * il calcolo. Uno toccato a mano (rinominato, unito, diviso, nascosto, con
  * foto tolte o aggiunte, creato da una selezione) diventa {@code manuale}: le
  * sue foto hanno {@code Foto.eventoFisso} e il ricalcolo non le tocca più.
+ *
+ * <p>Un evento <b>per date</b> (creato a mano con un nome, {@code dal} e
+ * {@code al}) è manuale e prende tutte le foto scattate in quei giorni
+ * (compresi), anche quelle che erano in altri eventi; quelle che arrivano
+ * dopo nei suoi giorni entrano in lui. Resta anche senza foto (un viaggio che
+ * deve ancora venire). Due eventi per date non si sovrappongono.
  */
 @Document("eventi")
 public class Evento {
@@ -41,6 +47,10 @@ public class Evento {
     private boolean nascosto;
     private Instant creatoIl;
     private Instant modificatoIl;
+    /** Il primo giorno di un evento per date; null per gli altri. */
+    private LocalDate dal;
+    /** L'ultimo giorno (compreso) di un evento per date; null per gli altri. */
+    private LocalDate al;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -83,4 +93,16 @@ public class Evento {
 
     public Instant getModificatoIl() { return modificatoIl; }
     public void setModificatoIl(Instant modificatoIl) { this.modificatoIl = modificatoIl; }
+
+    public LocalDate getDal() { return dal; }
+    public void setDal(LocalDate dal) { this.dal = dal; }
+
+    public LocalDate getAl() { return al; }
+    public void setAl(LocalDate al) { this.al = al; }
+
+    /** Creato a mano con le date: le foto le decidono i suoi giorni. */
+    public boolean perDate() { return dal != null && al != null; }
+
+    /** True se il giorno {@code g} è tra i giorni di questo evento per date. */
+    public boolean comprende(LocalDate g) { return perDate() && !g.isBefore(dal) && !g.isAfter(al); }
 }

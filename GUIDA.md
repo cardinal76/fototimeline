@@ -350,6 +350,14 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Google Foto**: scegliere qualche foto dal proprio Google Foto, e (admin) importare tutta la
   libreria con Google Takeout (sezione 6).
 - **Caricate da**: il filtro per vedere le foto portate da una persona; nel visore, "Caricata da".
+- **Data** (Filtri): **Un anno** (2019), **Un mese** (agosto 2019) o **Tra due date** (dal… al…,
+  compresi; un lato vuoto = senza limite). Si combina con gli altri filtri, vale anche per la
+  colonna dei mesi e per la mappa; sopra la timeline "Foto del 2019 · tutte le date" lo toglie.
+- **Eventi per date** (Filtri → Evento → 🗓 Tutti gli eventi, o da admin Strumenti → Eventi):
+  **+ Nuovo evento per date**, con un nome, il primo e l'ultimo giorno: tutte le foto e i video di quei giorni entrano nell'evento,
+  anche quelli che arrivano dopo, e vince sugli eventi automatici. **Modifica** cambia nome e date,
+  **Elimina** lo toglie (le foto restano e tornano agli eventi automatici). Gestore e admin;
+  l'utilizzatore li vede e li usa come filtro.
 - **Backup**: copia dei metadati in `FotoTimeline/.backup/` (anche da sola, una al giorno).
 - **Per contenuto** (accanto al campo di ricerca): si scrive cosa c'è nella foto, "spiaggia",
   "cane", "torta di compleanno", e si trovano le foto anche senza tag.

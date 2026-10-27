@@ -3,6 +3,7 @@ package it.fototimeline.eventi;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -41,8 +42,10 @@ import it.fototimeline.eventi.EventiService.Calcolo;
 import it.fototimeline.eventi.EventiService.VoceEvento;
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
+import it.fototimeline.service.EventiFoto.FotoDataCambiata;
 import it.fototimeline.service.FiltroFoto;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.Periodo;
 import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.Origine;
 import it.fototimeline.service.LavoriImportazione.Stato;
@@ -351,6 +354,153 @@ class EventiTest {
     }
 
     // ------------------------------------------------------------ utilità
+
+    @Test
+    void unEventoPerDatePrendeTutteLeFotoDeiSuoiGiorni() throws Exception {
+        eventi.calcola(true, Avanzamento.NESSUNO);
+        String sperlonga = evento(viaggio.getFirst());
+        List<Foto> primoGiorno = viaggio.subList(0, 4);
+        List<Foto> secondoGiorno = viaggio.subList(4, 8);
+
+        String risposta = mvc.perform(post("/api/eventi/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Vacanze al mare\",\"dal\":\"2019-08-11\",\"al\":\"2019-08-15\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nome").value("Vacanze al mare"))
+                .andExpect(jsonPath("$.conteggio").value(4))
+                .andExpect(jsonPath("$.manuale").value(true))
+                .andExpect(jsonPath("$.dal").value("2019-08-11"))
+                .andExpect(jsonPath("$.al").value("2019-08-15"))
+                .andReturn().getResponse().getContentAsString();
+        String id = risposta.replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+        // Vince sull'automatico: le foto dell'11 sono sue, fisse; l'automatico tiene il 10.
+        assertThat(secondoGiorno).allSatisfy(f -> {
+            assertThat(evento(f)).isEqualTo(id);
+            assertThat(repository.findById(f.getId()).orElseThrow().isEventoFisso()).isTrue();
+        });
+        assertThat(eventi.evento(sperlonga).orElseThrow().conteggio()).isEqualTo(4);
+
+        // Il calcolo (anche da capo) non lo tocca: il 10 da solo è sotto la soglia.
+        eventi.calcola(true, Avanzamento.NESSUNO);
+        assertThat(eventi.evento(id).orElseThrow().conteggio()).isEqualTo(4);
+        assertThat(secondoGiorno).allSatisfy(f -> assertThat(evento(f)).isEqualTo(id));
+        assertThat(primoGiorno).allSatisfy(f -> assertThat(evento(f)).isNull());
+
+        // Una foto nuova nei suoi giorni entra, come una a cui si cambia la data a mano.
+        Foto nuova = scheda(LocalDateTime.of(2019, 8, 13, 12, 0), null);
+        pubblica.publishEvent(new FotoAggiunta(nuova.getId()));
+        eventi.ricalcolaGiorniToccati();
+        assertThat(evento(nuova)).isEqualTo(id);
+        Foto spostata = casa.getFirst();
+        spostata.setScattataIl(LocalDateTime.of(2019, 8, 14, 9, 0));
+        repository.save(spostata);
+        pubblica.publishEvent(new FotoDataCambiata(spostata.getId()));
+        assertThat(evento(spostata)).isEqualTo(id);
+        assertThat(eventi.evento(id).orElseThrow().conteggio()).isEqualTo(6);
+
+        // Il filtro per evento della timeline vale anche per lui.
+        FiltroFoto tutte = new FiltroFoto(null, null, null, null, null, null);
+        assertThat(fotoService.cerca(tutte.conEvento(id), 0, 100).totale()).isEqualTo(6);
+
+        // Due eventi per date non si sovrappongono.
+        mvc.perform(post("/api/eventi/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Altro\",\"dal\":\"2019-08-01\",\"al\":\"2019-08-11\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Date nuove: escono quelle fuori, entrano quelle dentro (anche dal 10, che era fuori da ogni evento).
+        mvc.perform(put("/api/eventi/" + id + "/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Sperlonga in famiglia\",\"dal\":\"2019-08-10\",\"al\":\"2019-08-10\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nome").value("Sperlonga in famiglia"))
+                .andExpect(jsonPath("$.conteggio").value(4));
+        assertThat(primoGiorno).allSatisfy(f -> assertThat(evento(f)).isEqualTo(id));
+        for (Foto f : List.of(secondoGiorno.getFirst(), nuova, spostata)) {
+            Foto letta = repository.findById(f.getId()).orElseThrow();
+            assertThat(letta.getEvento()).isNull();
+            assertThat(letta.isEventoFisso()).isFalse();
+        }
+
+        // Le date le ha solo un evento per date; unire e dividere non valgono per lui.
+        String festaId = evento(festa.getFirst());
+        mvc.perform(put("/api/eventi/" + festaId + "/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Festa\",\"dal\":\"2021-05-12\",\"al\":\"2021-05-12\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(delete("/api/eventi/" + festaId + "/per-date").with(csrf())).andExpect(status().isBadRequest());
+        assertThatThrownBy(() -> eventi.unisci(List.of(id, festaId))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> eventi.dividi(id, primoGiorno.get(2).getId()))
+                .isInstanceOf(IllegalArgumentException.class);
+        mvc.perform(put("/api/eventi/" + id).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Eliminato: le foto tornano al calcolo automatico.
+        mvc.perform(delete("/api/eventi/" + id + "/per-date").with(csrf())).andExpect(status().isNoContent());
+        assertThat(eventi.evento(id)).isEmpty();
+        eventi.ricalcolaGiorniToccati();
+        String rifatto = evento(viaggio.getFirst());
+        assertThat(rifatto).isNotNull().isNotEqualTo(id);
+        assertThat(eventi.evento(rifatto).orElseThrow().manuale()).isFalse();
+        assertThat(primoGiorno).allSatisfy(f -> assertThat(evento(f)).isEqualTo(rifatto));
+        mvc.perform(delete("/api/eventi/" + id + "/per-date").with(csrf())).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void unEventoPerDateRestaAncheSenzaFoto() throws Exception {
+        VoceEvento futuro = eventi.creaPerDate(" Viaggio in Giappone ", java.time.LocalDate.of(2030, 4, 1),
+                java.time.LocalDate.of(2030, 4, 10));
+        assertThat(futuro.nome()).isEqualTo("Viaggio in Giappone");
+        assertThat(futuro.conteggio()).isZero();
+        assertThat(futuro.primoGiorno()).isEqualTo("2030-04-01");
+        assertThat(eventi.elenco(false).eventi()).extracting(VoceEvento::id).contains(futuro.id());
+        eventi.calcola(true, Avanzamento.NESSUNO);
+        assertThat(eventi.evento(futuro.id())).isPresent();
+
+        Foto arrivata = scheda(LocalDateTime.of(2030, 4, 3, 8, 0), null);
+        pubblica.publishEvent(new FotoAggiunta(arrivata.getId()));
+        eventi.ricalcolaGiorniToccati();
+        assertThat(evento(arrivata)).isEqualTo(futuro.id());
+
+        mvc.perform(post("/api/eventi/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\" \",\"dal\":\"2031-01-01\",\"al\":\"2031-01-02\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/eventi/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Al contrario\",\"dal\":\"2031-01-05\",\"al\":\"2031-01-02\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/eventi/per-date").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Senza fine\",\"dal\":\"2031-01-05\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void ilFiltroPerDataSiCombinaConGliAltri() throws Exception {
+        // Anno: tutte le foto del 2019 (casa a marzo, viaggio ad agosto).
+        mvc.perform(get("/api/foto").param("periodo", "2019")).andExpect(jsonPath("$.totale").value(17));
+        // Mese, con un altro filtro.
+        mvc.perform(get("/api/foto").param("periodo", "2019-08")).andExpect(jsonPath("$.totale").value(8));
+        mvc.perform(get("/api/foto").param("periodo", "2019-08").param("luogo", "Sperlonga"))
+                .andExpect(jsonPath("$.totale").value(7));
+        // Due giorni, compresi; un lato vuoto non ha limite.
+        mvc.perform(get("/api/foto").param("periodo", "2019-03-02..2019-08-10")).andExpect(jsonPath("$.totale").value(10));
+        mvc.perform(get("/api/foto").param("periodo", "2021-05-13..")).andExpect(jsonPath("$.totale").value(3));
+        mvc.perform(get("/api/foto").param("periodo", "..2019-03-01")).andExpect(jsonPath("$.totale").value(3));
+        // Col salto della timeline (al) valgono tutti e due.
+        mvc.perform(get("/api/foto").param("periodo", "2019").param("al", "2019-03-31"))
+                .andExpect(jsonPath("$.totale").value(9));
+        // La colonna dei mesi segue il periodo (il salto no).
+        mvc.perform(get("/api/timeline").param("periodo", "2019"))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].mese").value(8))
+                .andExpect(jsonPath("$[1].mese").value(3));
+        mvc.perform(get("/api/foto").param("periodo", "2019-13")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/foto").param("periodo", "2019-09-01..2019-08-01")).andExpect(status().isBadRequest());
+
+        // Con gli eventi: le foto di un evento in un periodo.
+        eventi.calcola(true, Avanzamento.NESSUNO);
+        String sperlonga = evento(viaggio.getFirst());
+        FiltroFoto tutte = new FiltroFoto(null, null, null, null, null, null);
+        assertThat(fotoService.cerca(tutte.conEvento(sperlonga).conPeriodo(Periodo.leggi("2019-08-11")), 0, 10)
+                .totale()).isEqualTo(4);
+        assertThat(fotoService.cerca(tutte.conEvento(sperlonga).conPeriodo(Periodo.leggi("2020")), 0, 10)
+                .totale()).isZero();
+    }
 
     /** Ogni evento con le sue foto, per confrontare due calcoli. */
     private Set<String> istantanea() {
