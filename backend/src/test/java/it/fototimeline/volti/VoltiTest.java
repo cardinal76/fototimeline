@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -38,6 +39,7 @@ import java.util.function.BooleanSupplier;
 
 import javax.imageio.ImageIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -135,9 +137,15 @@ class VoltiTest {
     private final Map<String, float[]> indice = new ConcurrentHashMap<>();
     private final AtomicInteger giorno = new AtomicInteger();
 
+    /**
+     * Visione è un mock: Mockito non regge lo stubbing mentre il thread
+     * "volti" chiama lo stesso mock (la risposta può finire sulla chiamata
+     * dell'altro thread). Si stubba a coda ferma, e la coda si aspetta anche
+     * prima del reset del mock a fine test.
+     */
     @BeforeEach
     void svuota() {
-        aspettaLavoro();
+        aspettaSottofondo();
         when(visione.rileva(anyMap(), anyInt(), anyDouble())).thenAnswer(i -> rileva(i.getArgument(0)));
         doAnswer(i -> {
             indice.putAll(i.getArgument(0));
@@ -154,11 +162,17 @@ class VoltiTest {
             service.elimina(f.getId());
             service.eliminaPerSempre(f.getId());
         });
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         mongo.remove(new Query(), Volto.class);
         mongo.remove(new Query(), Persona.class);
         mongo.remove(Query.query(Criteria.where("_id").is(RiconoscimentoVolti.ID)), "impostazioni");
         indice.clear();
+    }
+
+    @AfterEach
+    void aspettaSottofondo() {
+        aspettaLavoro();
+        aspettaCoda();
     }
 
     // ------------------------------------------------------------ raggruppamento
@@ -369,7 +383,7 @@ class VoltiTest {
         String voltoA = voltiDi(a).getFirst().getId();
 
         service.elimina(a.getId());
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         assertThat(voltiDi(a).getFirst().isNelCestino()).isTrue();
         assertThat(indice).doesNotContainKey(voltoA);
         assertThat(persone.persona(anna).volti()).isEqualTo(2);
@@ -377,7 +391,7 @@ class VoltiTest {
         assertThat(riconoscimento.stato().volti()).isEqualTo(2);
 
         service.ripristina(a.getId());
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         assertThat(voltiDi(a).getFirst().isNelCestino()).isFalse();
         assertThat(indice).containsKey(voltoA);
         assertThat(persone.persona(anna).volti()).isEqualTo(3);
@@ -385,7 +399,7 @@ class VoltiTest {
 
         service.elimina(a.getId());
         service.eliminaPerSempre(a.getId());
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         assertThat(mongo.exists(Query.query(Criteria.where("fotoId").is(a.getId())), Volto.class)).isFalse();
         assertThat(indice).doesNotContainKey(voltoA);
         assertThat(persone.persona(anna).volti()).isEqualTo(2);
@@ -398,7 +412,7 @@ class VoltiTest {
             service.elimina(f.getId());
             service.eliminaPerSempre(f.getId());
         }
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         assertThat(mongo.findById(verdi, Persona.class)).isNull();
         assertThat(persone.persona(anna).volti()).isZero();
         assertThat(persone.elenco(Tipo.NOMINATE, 10).persone()).extracting(VocePersona::nome).containsExactly("Anna");
@@ -488,7 +502,7 @@ class VoltiTest {
         importa(BLU);
         Foto tre = importa(VERDE);
         service.elimina(tre.getId());
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         indice.clear();
         assertThat(riconoscimento.stato().nellIndice()).isZero();
 
@@ -529,13 +543,14 @@ class VoltiTest {
                 .plusSeconds(n * 60L), null);
         assertThat(esito.foto()).as(esito.messaggio()).isNotNull();
         String id = esito.foto().getId();
-        aspetta(() -> riconoscimento.codaVuota() && ricarica(id).getVoltiCercati() != null);
+        aspettaCoda();
+        aspetta(() -> ricarica(id).getVoltiCercati() != null);
         return esito.foto();
     }
 
     /** Come un archivio di prima del riconoscimento: niente volti, niente persone, niente segni. */
     private void comeUnArchivioDiPrima() {
-        aspetta(riconoscimento::codaVuota);
+        aspettaCoda();
         mongo.remove(new Query(), Volto.class);
         mongo.remove(new Query(), Persona.class);
         mongo.updateMulti(new Query(), new Update().unset(RiconoscimentoVolti.CAMPO).unset("persone"), Foto.class);
@@ -576,6 +591,15 @@ class VoltiTest {
 
     private static FiltroFoto filtro(String persona, String album) {
         return new FiltroFoto(null, null, album, null, null, null).conPersona(persona);
+    }
+
+    /** Aspetta che il thread "volti" abbia finito quello che ha in coda. */
+    private void aspettaCoda() {
+        try {
+            riconoscimento.aspettaCoda(Duration.ofSeconds(10));
+        } catch (Exception e) {
+            throw new AssertionError("La coda dei volti non si svuota", e);
+        }
     }
 
     private StatoLavoro aspettaLavoro() {

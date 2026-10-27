@@ -3,6 +3,7 @@ package it.fototimeline.volti;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -10,12 +11,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
@@ -463,9 +466,15 @@ public class RiconoscimentoVolti {
         return new StatoVolti(true, foto, foto - mancanti, mancanti, volti, nellIndice, nominate, corrente().orElse(null));
     }
 
-    /** Per i test: aspetta che le foto nuove e gli eventi in coda siano passati. */
-    boolean codaVuota() {
-        return singole.getQueue().isEmpty() && singole.getActiveCount() == 0;
+    /**
+     * Per i test: aspetta che le foto nuove e gli eventi in coda siano passati.
+     * Il thread è uno solo e prende la coda in ordine: quando tocca a questo
+     * segnaposto, i compiti messi prima sono finiti. (Guardare "coda vuota e
+     * nessuno attivo" non basta: tra il prelievo di un compito e il suo inizio
+     * il worker non risulta attivo, e la coda sembrava già vuota.)
+     */
+    void aspettaCoda(Duration massimo) throws InterruptedException, ExecutionException, TimeoutException {
+        singole.submit(() -> { }).get(massimo.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     @PreDestroy

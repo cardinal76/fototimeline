@@ -1,6 +1,9 @@
 package it.fototimeline.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doReturn;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -27,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import it.fototimeline.repository.FotoRepository;
 import it.fototimeline.service.LavoriImportazione.Stato;
@@ -51,8 +55,6 @@ class FileAbbandonatoTest {
         r.add("fototimeline.importazione-automatica.cartella", () -> disco.resolve("telefono").toString());
         r.add("fototimeline.importazione-automatica.attesa", () -> "PT0S");
         r.add("fototimeline.indicizzazione.paralleli", () -> "2");
-        r.add("fototimeline.indicizzazione.tempo-massimo-file", () -> "PT0.5S");
-        r.add("fototimeline.indicizzazione.tempo-massimo-per-gb", () -> "PT0S");
     }
 
     @Autowired
@@ -66,6 +68,16 @@ class FileAbbandonatoTest {
 
     @Autowired
     MemoriaImportazione memoria;
+
+    /**
+     * Spia: il tempo massimo corto vale solo per il primo giro, quello che deve
+     * abbandonare. Il secondo è un'importazione normale, coi tempi veri: con
+     * mezzo secondo anche lì, su un runner carico il secondo file (che aspetta
+     * il turno dietro al primo, poi miniatura e scheda) lo superava e veniva
+     * abbandonato anche lui ("importate" 1 invece di 2).
+     */
+    @MockitoSpyBean
+    IndicizzazioneProperties tempi;
 
     private final CountDownLatch lascia = new CountDownLatch(1);
     private CompletableFuture<Void> turno;
@@ -92,6 +104,8 @@ class FileAbbandonatoTest {
         }
         tieniIlTurno();
 
+        // Il turno lo tiene il test: le due foto lo aspettano finché scade il loro tempo.
+        doReturn(Duration.ofMillis(500)).when(tempi).tempoMassimo(anyLong());
         lavori.controllaCartellaAutomatica();
         StatoLavoro fine = aspettaFine();
 
@@ -112,7 +126,8 @@ class FileAbbandonatoTest {
             assertThat(rimasti).hasSize(2);
         }
 
-        // Al giro dopo entrano.
+        // Al giro dopo, coi tempi veri, entrano. (Nessun lavoro in corso: si può stubbare.)
+        doCallRealMethod().when(tempi).tempoMassimo(anyLong());
         lavori.controllaCartellaAutomatica();
         StatoLavoro dopo = aspettaFine();
         assertThat(dopo.id()).isNotEqualTo(fine.id());
