@@ -347,9 +347,22 @@ public class GiroNotturno {
         esecutore.shutdownNow();
     }
 
+    /**
+     * Prima su Mongo, poi in {@link #attuale}: {@link #inCorso()} e la Salute
+     * leggono {@code attuale}, quindi quando dicono "finito" il documento è
+     * già scritto. Al contrario (prima {@code attuale}) c'era un momento in
+     * cui il giro risultava finito ma Mongo diceva ancora "in corso": un
+     * "Lancia ora" lì in mezzo salvava il giro nuovo e subito dopo la
+     * scrittura in ritardo del vecchio ("finito") lo copriva, e dopo un
+     * riavvio il giro nuovo non si riprendeva. {@code attuale} si aggiorna
+     * anche se Mongo non risponde, se no il giro resterebbe "in corso" per sempre.
+     */
     private void salva(Giro g) {
-        attuale = g;
-        mongo.save(g);
+        try {
+            mongo.save(g);
+        } finally {
+            attuale = g;
+        }
     }
 
     // ------------------------------------------------------------ il giro
