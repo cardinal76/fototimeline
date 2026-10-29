@@ -78,15 +78,40 @@ carica_impronte_di() {
 }
 preso() { [ -e "$ORDINATE/$1" ] || [ -n "${PRESO[$1]:-}" ]; }
 
+# sha256sum -z, ma con i nomi sempre così come sono. Il sha256sum di coreutils 8 (Ubuntu
+# 22.04), anche con -z, scrive un nome con "\" o con un a capo con le sequenze di escape
+# ("\\", "\n") e mette un "\" davanti alla riga: qui si tolgono. Capita con gli zip fatti
+# su Windows, dove "\" è una lettera qualunque del nome. Legge i percorsi separati da NUL.
+sha256_z() {
+    xargs -0 -r sha256sum -z | perl -0 -ne '
+        chop;
+        if (s/^\\(?=[0-9a-f]{64}  )//) {
+            my $h = substr($_, 0, 66); my $n = substr($_, 66);
+            $n =~ s/\\(\\|n)/$1 eq "n" ? "\n" : "\\"/ge;
+            $_ = $h . $n;
+        }
+        print $_, "\0";'
+}
+
 # Le impronte di molti file con pochi processi (non un sha256sum per file: su WSL
 # ogni processo costa): legge i percorsi separati da NUL e riempie SHA[percorso].
 declare -A SHA=()
 impronte() {
-    local riga
+    local riga f h
+    local -a chiesti=()
     SHA=()
+    while IFS= read -r -d '' f; do chiesti+=("$f"); done
+    [ "${#chiesti[@]}" -gt 0 ] || return 0
     while IFS= read -r -d '' riga; do
         SHA["${riga#*  }"]="${riga%%  *}"
-    done < <(xargs -0 -r sha256sum -z)
+    done < <(printf '%s\0' "${chiesti[@]}" | sha256_z)
+    # Un file che sha256sum non è riuscito a leggere non ha la sua riga: si riprova da
+    # solo, così l'errore dice quale invece di "unbound variable".
+    for f in "${chiesti[@]}"; do
+        [ -n "${SHA[$f]:-}" ] && continue
+        h="$(sha256sum < "$f")" || errore "non riesco a leggere $f"
+        SHA["$f"]="${h%% *}"
+    done
 }
 
 # metti_in_ordinate GIRO [IMPRONTE_DEL_GIRO]: il secondo, se c'è, è l'uscita di
@@ -293,7 +318,7 @@ avvia_preparazione() {
 
 # Le impronte dei file di una cartella in ordine di nome, come le legge metti_in_ordinate.
 impronte_di_cartella() {
-    find "$1" -type f -print0 | sort -z | xargs -0 -r sha256sum -z
+    find "$1" -type f -print0 | sort -z | sha256_z
 }
 
 # Il percorso sotto RADICE di un file letto da BASE (che può essere la copia locale).
@@ -387,6 +412,9 @@ prepara_zip() {
     fi
     echo "$stato" > "$d/stato"
     [ "$stato" -gt 1 ] && return 0
+    # unzip rimette i permessi salvati nello zip: un file senza lettura (000) non si
+    # potrebbe né leggere né spostare.
+    chmod -R u+rwX "$d/in" 2>/dev/null || true
     # Le copie "._nome" dei Mac non sono foto.
     rm -rf "$d/in/__MACOSX"
     find "$d/in" -name '._*' -type f -delete

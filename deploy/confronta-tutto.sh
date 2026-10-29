@@ -461,7 +461,7 @@ uno_zip() {
     local riga p mac=0 n=0
     while IFS= read -r -d '' riga; do
         SHA["${riga#*  }"]="${riga%%  *}"
-    done < <(cd "$d/in" && find . -type f ! -path '*/__MACOSX/*' ! -name '._*' -print0 | xargs -0 -r sha256sum -z)
+    done < <(cd "$d/in" && find . -type f ! -path '*/__MACOSX/*' ! -name '._*' -print0 | sha256_z)
     while IFS= read -r -d '' riga; do
         p="${riga#*$'\t'}"; p="${p#*$'\t'}"
         META["./$p"]="${riga%$'\t'"$p"}"

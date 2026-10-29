@@ -298,6 +298,38 @@ verifica "lavoro di pCloud non toccato"                  [ "$prima" = "$(impront
 verifica "sorgente non toccata"                          c_e "$S/2019/IMG_20190101_120000 (1).jpg"
 verifica "impostazioni ricordate"                        contiene "$A/impostazioni" "ESCLUDI=Documenti"
 
+# --- 2b. nomi con "\" (sha256sum di coreutils 8) e voci di zip senza permesso di lettura --
+echo "2b. nomi strani e permessi"
+S2="$T/strani"
+jpg "$S2/a\\b.jpg" barra '2013:03:03 10:00:00' '2013-03-03 10:00'
+mkdir -p "$T/z2"
+jpg "$T/z2/chiusa.jpg" chiusa '2012:02:02 10:00:00' '2012-02-02 10:00'
+chmod 000 "$T/z2/chiusa.jpg"
+(cd "$T/z2" && zip -q -X "$S2/chiusa.zip" chiusa.jpg)
+chmod 644 "$T/z2/chiusa.jpg"
+# Un sha256sum come quello di coreutils 8: con -z i nomi con "\" restano con l'escape.
+mkdir -p "$T/bin8"
+cat > "$T/bin8/sha256sum" <<'FINE'
+#!/bin/bash
+if [ "${1:-}" = -z ]; then
+    shift
+    for f in "$@"; do
+        h="$( { /usr/bin/sha256sum < "$f"; } 2>/dev/null | cut -c1-64)"
+        [ -n "$h" ] || { echo "sha256sum: $f: Permission denied" >&2; continue; }
+        case "$f" in *\\*) printf '\\%s  %s\0' "$h" "${f//\\/\\\\}" ;; *) printf '%s  %s\0' "$h" "$f" ;; esac
+    done
+else
+    exec /usr/bin/sha256sum "$@"
+fi
+FINE
+chmod +x "$T/bin8/sha256sum"
+L2="$T/lavoro-strani"
+PATH="$T/bin8:$PATH" LAVORO="$L2" SORGENTE="$S2" ALTRI_LAVORI='' DESTINAZIONE="$T/dest-strani" \
+    "$QUI/foto-da-cartella.sh" raccogli > "$T/strani.txt" 2>&1
+verifica "nome con \\ : raccolto"                         c_e "$L2/ordinate/2013/03/03/a\\b.jpg"
+verifica "voce di zip senza lettura: raccolta"          c_e "$L2/ordinate/2012/02/02/chiusa.jpg"
+verifica "niente variabili non impostate"               bash -c '! grep -q "unbound variable" "$1"' _ "$T/strani.txt"
+
 # --- 3. PARALLELI: in fila o in parallelo, stessi file; e ripresa dopo un kill a metà ----
 echo "3. PARALLELI"
 M="$T/molti"
