@@ -377,10 +377,15 @@ public class RiconoscimentoVolti {
                 Esito esito = elabora(blocco, lavoro);
                 lavoro.fatte(esito.fatte(), esito.volti());
             }
-            lavoro.finisci(lavoro.annullato ? Stato.ANNULLATO : Stato.FINITO, null, clock.instant());
+            // Prima il segno su Mongo, poi FINITO. Al contrario, un avvia() subito
+            // dopo (ammesso appena il lavoro non è più in corso) scriveva "attivo"
+            // e questa scrittura in ritardo lo cancellava: il lavoro nuovo non
+            // ripartiva dopo un riavvio. E chi vede FINITO e chiama riprendi()
+            // lo farebbe ripartire.
             if (!lavoro.annullato) {
                 ricordaAttivo(false, false);
             }
+            lavoro.finisci(lavoro.annullato ? Stato.ANNULLATO : Stato.FINITO, null, clock.instant());
         } catch (Exception e) {
             // Resta "attivo": riparte al prossimo avvio dell'app, o dal pulsante.
             log.warn("\"Riconosci volti\" fermo: {}", e.getMessage());

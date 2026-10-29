@@ -159,6 +159,8 @@ public class CalcoloImpronte {
             fine = Stato.FALLITO;
             motivo = e.getMessage();
         }
+        // Prima la cache, poi lo stato: se dice FINITO, i gruppi si rifanno con le impronte nuove.
+        quasiUguali.invalida();
         synchronized (this) {
             stato = fine;
             errore = motivo;
@@ -166,7 +168,6 @@ public class CalcoloImpronte {
             log.info("Calcolo delle impronte {}: {} calcolate, {} errori ({} in {})", fine, calcolate, errori,
                     fatte, Duration.between(iniziatoIl, finitoIl));
         }
-        quasiUguali.invalida();
     }
 
     private boolean calcola(Foto f) {
