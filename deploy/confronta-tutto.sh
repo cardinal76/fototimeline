@@ -132,6 +132,7 @@ CACHE_Z="$CONF/sha-zip.tsv"          # M \t dim zip \t data zip \t zip \t sha256
                                      # F \t dim zip \t data zip \t zip \t esito unzip \t media \t ._ dei Mac
 ASSENTI="$CONF/assenti.tsv"          # sciolto|zip \t dimensione \t data \t percorso \t quando: nell'elenco, non su pCloud
 DB="$CONF/fototimeline-db.tsv"       # id \t hash \t dimensione \t giorno \t video \t conversione \t nome \t percorso
+                                     # (e DB.ok: righe \t quando, scritto solo se l'elenco è intero)
 LT="$CONF/lifetime.tsv"              # dimensione \t percorso in DESTINAZIONE
 CAMPIONATI="$CONF/campione.tsv"      # esito \t hash della scheda \t hash del file \t percorso
 PIANO="$CONF/piano"                  # passo \t inizio \t quanti \t byte da scaricare
@@ -513,10 +514,14 @@ esporta_db() {
     fine="$(grep '^#fine' "$CONF/db.nuovo" | tail -1)" || true
     [ -n "$fine" ] || errore "l'elenco delle schede è a metà (manca #fine): rilancia $0 da 4"
     n="$(printf '%s' "$fine" | cut -f2)"; contati="$(printf '%s' "$fine" | cut -f3)"
+    # fototimeline-db.tsv.ok (righe \t quando) solo con l'elenco intero: raccogli-rimasti.sh
+    # cancella da pCloud quello che c'è qui, e un elenco a metà non deve valere.
+    rm -f "$DB.ok"
     awk -F'\t' '!/^#fine/ && NF == 8' "$CONF/db.nuovo" > "$DB"
     righe="$(wc -l < "$DB")"
     rm -f "$CONF/db.nuovo"
     [ "$righe" = "$n" ] || errore "l'elenco delle schede è a metà ($righe righe su $n): rilancia $0 da 4"
+    printf '%s\t%s\n' "$righe" "$(date +%s)" > "$DB.ok"
     [ "$n" = "$contati" ] || echo "Attenzione: le schede sono cambiate durante l'esportazione ($n lette, ora $contati): c'è un'indicizzazione in corso?"
     echo "  $n schede"
 }

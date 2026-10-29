@@ -713,6 +713,80 @@ grep irrecuperabile ~/foto-da-controllare/registro.tsv   # quello che non si è 
 
 Alla fine nell'app: **Monta**, poi **Indicizza archivio**.
 
+#### Tutto quello che resta su pCloud in una cartella sola
+
+Dopo `pulisci` su pCloud restano foto e video sparsi che FotoTimeline non ha
+(i `.insv`, `.insp`, `.lrv` di Insta360, qualche mp4, raw), zip e documenti.
+`deploy/raccogli-rimasti.sh` li porta tutti in **una** cartella di pCloud,
+`RACCOLTA` (predefinita `Video originali troppo grandi`, la stessa degli
+originali dei video ricompressi), e lì dentro li riordina per data. Quello che
+FotoTimeline ha già, con lo **stesso SHA-256** di una sua scheda, invece si
+**cancella** da pCloud. Gira sul PC, solo con rclone (`pcloud:`), in
+`~/raccogli-rimasti`; LifetimeCloud non si tocca. PCLOUD, ARCHIVIO ed
+`ESCLUDI` vengono da `~/foto-da-pcloud/impostazioni` (le cartelle di documenti
+escluse là restano escluse qui; `ESCLUDI=...` sulla riga di comando le
+sostituisce e si ricorda).
+
+| Fase | Cosa fa |
+|---|---|
+| `anteprima` | per ogni cartella in cima a pCloud: foto e video sciolti (quanti già in FotoTimeline, che si cancellano, e quanti da spostare), zip e altri file, con i GB; e quali cartelle salta e perché. Non cambia niente. |
+| `sposta` | gli sciolti: già in FotoTimeline si cancellano, gli altri vanno in `RACCOLTA/<percorso di prima>` (`rclone move` lato server). |
+| `zip --prova` | scarica ogni zip e dice: foto e video dentro, già in FotoTimeline, da copiare, altri file che restano, se lo zip si cancella. Non cambia niente su pCloud. |
+| `zip` | le foto e i video nuovi di ogni zip in `RACCOLTA/dagli-zip/<zip senza .zip>/<percorso nello zip>`, controllati (dimensione e SHA-256 di pCloud); poi lo zip si rifà **senza foto e video** (restano solo i documenti, byte per byte) o si cancella se non resta altro. Uno zip rovinato resta com'è. |
+| `riordina` | tutto `RACCOLTA` in `RACCOLTA/AAAA/MM/<nome>` (senza data: `senza-data/`), una copia sola per contenuto; quello che FotoTimeline ha già si cancella. |
+| `avvia FASE` | `sposta`, `zip` o `riordina` in sottofondo (chiede `CANCELLA` prima di partire); `stato` lo segue, `ferma` lo ferma. |
+
+```bash
+./deploy/confronta-tutto.sh da 4          # l'export delle schede (passo 4); "dove" dice quando è finito
+./deploy/raccogli-rimasti.sh anteprima
+./deploy/raccogli-rimasti.sh avvia sposta
+./deploy/raccogli-rimasti.sh stato        # e tail -f ~/raccogli-rimasti/sposta.log
+./deploy/raccogli-rimasti.sh zip --prova
+./deploy/raccogli-rimasti.sh avvia zip
+./deploy/raccogli-rimasti.sh avvia riordina
+```
+
+**Cosa non si tocca mai**: `Automatic Upload` (la cartella del telefono),
+`Crypto Folder`, `pCloudSync`, `pCloud_lost_and_found`, le cartelle di sistema
+e del cestino, `ARCHIVIO` e `ESCLUDI`. pCloud non regge un `lsf -R` di tutta la
+radice: si leggono le cartelle in cima e poi una alla volta.
+
+**Le cancellazioni**: solo un file il cui SHA-256 di pCloud (lato server,
+richiesto di nuovo subito prima) è proprio quello di una scheda, o un doppione
+identico di un file che resta in `RACCOLTA`. Un file senza SHA-256 da pCloud non
+si cancella: si sposta. Gli originali dei video ricompressi restano (la scheda
+ha lo SHA-256 del ricompresso). Serve l'export di `confronta-tutto.sh` intero
+(`fototimeline-db.tsv.ok`, scritto solo dopo il controllo `#fine`) e di meno di
+`DB_GIORNI` giorni (2); se no la fase si ferma e dice di rifarlo. Ogni fase che
+cancella chiede `CANCELLA`. Mai sovrascrivere: un nome già preso diventa
+`nome (2).ext`, come fa il server.
+
+**Gli zip, uno alla volta**: si scaricano in `~/raccogli-rimasti/tmp` (serve
+tre volte lo zip più 1 GB). Le copie `._` dei Mac di una foto si tolgono anche
+loro. Lo zip nuovo (`zip -d` sulla copia, poi `unzip -t` e l'elenco delle voci)
+si carica accanto come `<zip>.raccogli-nuovo`, se ne controlla la dimensione e
+solo allora prende il posto dell'originale (`moveto` lato server). Ogni passo
+va in `zip-stato.tsv`: dopo un'interruzione il rilancio finisce i
+`.raccogli-nuovo` caricati e controllati e toglie quelli a metà. Uno zip
+rovinato si recupera una voce alla volta (poi `zip -FF`), le foto che si
+leggono si copiano, lo zip non si tocca.
+
+**riordina** legge la data senza scaricare i file grandi: sotto `INTERO_MB`
+(64) si scaricano, sopra si leggono solo `PEZZO_MB` (16) in testa e in coda in
+un file sparso (lì exiftool e ffprobe trovano l'atomo `moov` anche di un video
+da 7 GB). La data: EXIF, poi `creation_time` di ffprobe, poi il nome
+(`IMG_20190101_...`), poi la data del file. Le date lette restano in
+`date.tsv`. Quello già in `AAAA/MM` o `senza-data` non si sposta. Gli
+originali che il server mette in `RACCOLTA` dopo una ricompressione arrivano in
+cima: un nuovo `riordina` li sistema (nella pagina Telefoni resta il percorso di
+prima).
+
+Tutto si può rilanciare: si rilegge pCloud, e quello già fatto non si rifà
+(`sha-sciolti.tsv`, `zip-stato.tsv`, `date.tsv`). Il registro di tutto è
+`~/raccogli-rimasti/registro.tsv` (quando, fase, esito, origine,
+destinazione, sha256, dimensione); per gli zip, voce per voce,
+`zip-membri.tsv`. Un giro solo alla volta (lucchetto in `in-corso.lock`).
+
 #### Da Amazon Foto o da una cartella del PC
 
 Amazon Foto non ha API pubbliche: la libreria si scarica con l'app per Windows

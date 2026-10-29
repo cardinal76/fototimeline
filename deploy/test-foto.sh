@@ -37,6 +37,15 @@
 #    con due video veri fatti da ffmpeg, ripresa dopo un caricamento non riuscito (né riscaricato né
 #    ricompresso), rilancio che non rifà niente, durata diversa che va in errore, 413 di LifetimeCloud
 #    con CRF più alto, in sottofondo con stato; mai niente cancellato o spostato su pCloud.
+# 10. raccogli-rimasti.sh su un finto pCloud (con un rclone che non dà lo SHA-256 di un file e
+#    può fallire una sostituzione) e un finto export del DB: anteprima con le cartelle saltate e
+#    perché (Automatic Upload, ESCLUDI e ARCHIVIO di foto-da-pcloud.sh); export a metà o vecchio
+#    rifiutato; senza CANCELLA niente; sposta: già in FotoTimeline cancellata, nuova spostata col suo
+#    percorso, senza SHA-256 spostata e non cancellata, nome preso con " (2)"; zip --prova senza
+#    cambiare niente; zip: foto nuove copiate e controllate, lo zip rifatto con i documenti byte per
+#    byte, quello di sole foto cancellato, il rovinato com'era, interrotto prima della sostituzione e
+#    ripreso senza riscaricare; riordina: EXIF, video letto solo in testa e in coda, data dal nome,
+#    data del file, senza-data, doppioni e già in FotoTimeline cancellati; avvia, stato, lucchetto.
 #
 # Serve: exiftool, rclone, zip, unzip, flock (ffmpeg facoltativo, per un video vero; ffmpeg con
 # libx265 e node per la 9, che senza si salta).
@@ -742,6 +751,7 @@ verifica "stima: senza SHA-256 dal server scarica gli sciolti" contiene "$T/conf
 verifica "stima: dice quanto scaricherà"                   grep -Eq '^Scaricherà più o meno [0-9.]+ GB' "$T/conf-1.txt"
 verifica "stima: ESCLUDI contati a parte"                  contiene "$T/conf-1.txt" "in ESCLUDI (contati, non confrontati): 1 file"
 verifica "giro in sottofondo finito"                        [ "$rc_fine" -eq 0 ]
+verifica "export del DB: .ok con le righe"                 [ "$(cut -f1 "$l/confronto/fototimeline-db.tsv.ok" 2>/dev/null)" = "$(wc -l < "$l/confronto/fototimeline-db.tsv")" ]
 verifica "con cose non spiegate: lo dice in confronto.passo" contiene "$l/confronto.passo" "NON SPIEGATE"
 verifica "dove: a che punto"                               contiene "$T/conf-dove.txt" "NON SPIEGATE"
 verifica "sciolta trovata (nome con spazi e [ ])"          [ "$(riga_di "$r/Foto/a b [1].jpg")" = "pcloud|trovato|" ]
@@ -1245,6 +1255,232 @@ verifica "pCloud: solo letture"                          bash -c '! grep -E "^(d
 if [ "$KO" -gt 0 ]; then
     for f in elenco spazio primo ripresa corto 413 stato2; do echo "--- v9-$f"; cat "$T/v9-$f.txt"; done
     echo "--- db"; cat "$DB9"
+fi
+fi
+
+# --- 10. raccogli-rimasti.sh: quello rimasto su pCloud, tutto in una cartella e riordinato ----
+echo "10. raccogli-rimasti.sh"
+if ! command -v ffmpeg >/dev/null; then
+    echo "  (saltata: serve ffmpeg, per un video vero)"
+else
+RR="$QUI/raccogli-rimasti.sh"
+P10="$T/p10" FP10="$HOME/fp10" L10="$HOME/raccogli-rimasti" RA="$T/p10/Video originali troppo grandi" z="$T/z10"
+mkdir -p "$P10/Zip" "$FP10/confronto" "$z/misto/sub" "$z/solo" "$z/rotto" "$z/ripresa"
+# Le impostazioni di foto-da-pcloud.sh: ESCLUDI (con uno spazio nel nome) e ARCHIVIO valgono anche qui.
+printf 'RADICE=%q\nARCHIVIO=%q\nESCLUDI=%q\nPCLOUD=%q\n' /mnt/p '/mnt/p/Archivio foto' 'documenti:schede sim' pcloud: > "$FP10/impostazioni"
+# Già in FotoTimeline (il loro SHA-256 è nell'export del DB) e non.
+jpg "$P10/Automatic Upload/Camera/IMG_1.jpg" telefono '2020:01:01 10:00:00'
+jpg "$P10/Crypto Folder/segreta.jpg" cripto
+jpg "$P10/documenti/scansione.jpg" scansione
+jpg "$P10/schede sim/sim.jpg" sim
+jpg "$P10/Archivio foto/2015/x.jpg" archivio
+jpg "$P10/pCloud_lost_and_found/persa.jpg" persa
+jpg "$P10/Foto/2015/vecchia.jpg" vecchia '2015:05:06 07:08:09'
+jpg "$P10/Foto/2015/nuova.jpg" nuova '2016:07:08 10:00:00'
+jpg "$P10/Foto/nascosto.jpg" nascosto '2014:02:03 10:00:00'
+jpg "$P10/Foto/collide.jpg" collide-nuova '2018:01:01 10:00:00'
+finto "$P10/Foto/lettera.pdf" lettera '2019-01-01 10:00'
+finto "$P10/Insta/VID_20230715_101010_00_001.insv" insv '2024-05-05 10:00'
+finto "$P10/Insta/senza.LRV" lrv '1980-01-01 10:00'
+jpg "$P10/IMG_cima.JPG" cima '2019:01:02 10:00:00'
+# In RACCOLTA c'è già: un file col nome di uno che arriva, l'originale di un video ricompresso
+# (sopra 2 MB: la data si legge solo dal principio e dalla fine), una sua copia, una già in FotoTimeline.
+jpg "$RA/Foto/collide.jpg" collide-vecchia '' '2012-03-04 12:00'
+ffmpeg -v error -f lavfi -i testsrc2=size=1280x720:rate=25 -t 3 -c:v libx264 -qp 0 -preset ultrafast \
+    -metadata creation_time=2026-03-01T18:55:06Z "$RA/20260301_195506_293.mp4" < /dev/null
+touch -d '2026-10-01 10:00' "$RA/20260301_195506_293.mp4"
+mkdir -p "$RA/copia"; cp -p "$RA/20260301_195506_293.mp4" "$RA/copia/"
+jpg "$RA/gia-ft.jpg" gia-ft
+# Gli zip: uno misto (una foto nuova, una in FotoTimeline, una già in RACCOLTA, documenti, ._ dei
+# Mac), uno con solo foto, uno rovinato, uno di soli documenti, uno per la ripresa.
+jpg "$z/misto/a.jpg" a '2017:01:02 10:00:00'
+jpg "$z/misto/b.jpg" b
+cp -p "$P10/Foto/2015/nuova.jpg" "$z/misto/f.jpg"
+finto "$z/misto/doc.pdf" doc '2019-03-04 10:00'
+finto "$z/misto/sub/nota.txt" nota '2019-03-04 10:00'
+finto "$z/misto/__MACOSX/._a.jpg" mac '2017-01-02 10:00'
+(cd "$z/misto" && zip -q -r -X "$P10/Zip/misto.zip" .)
+jpg "$z/solo/c.jpg" c '2011:11:11 10:00:00'
+jpg "$z/solo/d.jpg" d
+(cd "$z/solo" && zip -q -r -X "$P10/Zip/solo foto.zip" .)
+jpg "$z/rotto/salvata.jpg" salvata '2013:03:03 10:00:00'
+head -c 300000 /dev/urandom > "$z/rotto/grande.bin"
+(cd "$z/rotto" && zip -q -X -0 "$z/rotto.zip" salvata.jpg grande.bin)
+head -c 200000 "$z/rotto.zip" > "$P10/Zip/rotto.zip"
+(cd "$z/misto" && zip -q -X "$P10/Zip/documenti.zip" doc.pdf)
+jpg "$z/ripresa/e.jpg" e '2012:12:12 10:00:00'
+finto "$z/ripresa/conto.xls" conto '2012-12-12 10:00'
+(cd "$z/ripresa" && zip -q -r -X "$P10/Zip/ripresa.zip" .)
+# L'export del DB: le schede (id, hash, ...) con lo SHA-256 di quelle già in FotoTimeline, e la
+# scheda del video ricompresso (altro hash: l'originale resta).
+s10() { sha256sum < "$1" | cut -c1-64; }
+DB10="$FP10/confronto/fototimeline-db.tsv"
+{
+    for f in "$P10/Automatic Upload/Camera/IMG_1.jpg" "$P10/Foto/2015/vecchia.jpg" "$P10/Foto/nascosto.jpg" \
+        "$z/misto/b.jpg" "$z/solo/d.jpg" "$RA/gia-ft.jpg" "$P10/documenti/scansione.jpg"; do
+        printf 'id\t%s\t1\t2015-01-01\tfalse\t\t%s\tx\n' "$(s10 "$f")" "${f##*/}"
+    done
+    printf 'id\t%s\t1\t2026-03-01\ttrue\t\tvideo.mp4\tx\n' "$(printf ricompresso | sha256sum | cut -c1-64)"
+} > "$DB10"
+rm -rf "$z"
+# rclone che segna i comandi; NASCONDI: hashsum non dà lo SHA-256 di quel nome (come un file senza
+# hash lato server); FALLISCI_SOSTITUISCI (un file): il primo moveto di un FALLISCI_SU non va.
+cat > "$T/bin/rclone-r10" <<'FINE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$R10_LOG"
+if [ "$1" = hashsum ] && [ -n "${NASCONDI:-}" ]; then rclone "$@" | grep -v -- "$NASCONDI\$"; exit 0; fi
+if [ "$1" = moveto ] && [[ "$2" == *"${FALLISCI_SU:-.raccogli-nuovo}" ]] && [ -n "${FALLISCI_SOSTITUISCI:-}" ] && [ -f "$FALLISCI_SOSTITUISCI" ]; then
+    rm -f "$FALLISCI_SOSTITUISCI"; echo "Failed to move: connection reset by peer" >&2; exit 1
+fi
+exec rclone "$@"
+FINE
+chmod +x "$T/bin/rclone-r10"
+export R10_LOG="$T/r10-rclone.log"; : > "$R10_LOG"
+R10=(env RCLONE="$T/bin/rclone-r10" PCLOUD="$P10" LAVORO_PCLOUD="$FP10" NASCONDI=nascosto.jpg INTERO_MB=0 PEZZO_MB=1 PARALLELI=2 "$RR")
+fuori10() { (cd "$P10" && for d in "Automatic Upload" "Crypto Folder" documenti "schede sim" "Archivio foto" pCloud_lost_and_found; do find "$d" -type f -exec sha256sum {} +; done | LC_ALL=C sort -k2); }
+intatti10="$(fuori10)"
+zip_misto_prima="$(unzip -Z -v "$P10/Zip/misto.zip" doc.pdf sub/nota.txt | grep -E 'CRC|compressed size')"
+sha_rotto="$(s10 "$P10/Zip/rotto.zip")" sha_doc="$(s10 "$P10/Zip/documenti.zip")"
+
+"${R10[@]}" anteprima > "$T/r10-anteprima.txt" 2>&1
+verifica "anteprima: Automatic Upload saltata"           grep -q "Automatic Upload .*la cartella del telefono, non si tocca" "$T/r10-anteprima.txt"
+verifica "anteprima: ESCLUDI di foto-da-pcloud"          grep -q "schede sim .*in ESCLUDI (da $FP10/impostazioni)" "$T/r10-anteprima.txt"
+verifica "anteprima: ARCHIVIO saltato"                   grep -q "Archivio foto .*ARCHIVIO" "$T/r10-anteprima.txt"
+verifica "anteprima: pCloud_lost_and_found saltata"      contiene "$T/r10-anteprima.txt" "pCloud_lost_and_found"
+verifica "anteprima: senza export pronto non lo sa"      contiene "$T/r10-anteprima.txt" "confronta-tutto.sh da 4"
+verifica "anteprima: i file in cima"                     grep -Eq '^ +1 .* \(file in cima\)$' "$T/r10-anteprima.txt"
+verifica "anteprima: Foto, 4 media e 0 zip"              grep -Eq '^ +4 +[0-9.]+ +\? +\? +4 +[0-9.]+ +0 +[0-9.]+ +1  Foto$' "$T/r10-anteprima.txt"
+
+# L'export senza il .ok (a metà) o vecchio: niente si fa.
+"${R10[@]}" sposta > "$T/r10-senza-ok.txt" 2>&1
+verifica "export a metà: sposta rifiuta"                 [ $? -ne 0 ]
+verifica "export a metà: dice come rifarlo"              contiene "$T/r10-senza-ok.txt" "./deploy/confronta-tutto.sh da 4"
+printf '%s\t%s\n' "$(wc -l < "$DB10")" "$(( $(date +%s) - 3 * 86400 ))" > "$DB10.ok"
+"${R10[@]}" sposta > "$T/r10-vecchio.txt" 2>&1
+verifica "export di 3 giorni fa: rifiuta"                contiene "$T/r10-vecchio.txt" "è di 3 giorni fa"
+printf '%s\t%s\n' "$(( $(wc -l < "$DB10") + 1 ))" "$(date +%s)" > "$DB10.ok"
+"${R10[@]}" sposta > "$T/r10-righe.txt" 2>&1
+verifica "export con righe che mancano: rifiuta"         contiene "$T/r10-righe.txt" "è a metà"
+printf '%s\t%s\n' "$(wc -l < "$DB10")" "$(date +%s)" > "$DB10.ok"
+"${R10[@]}" anteprima > "$T/r10-anteprima2.txt" 2>&1
+verifica "anteprima: quanti si cancellano"               contiene "$T/r10-anteprima2.txt" "In sposta si cancellano 1 foto e video già in FotoTimeline"
+verifica "anteprima: senza SHA-256 si spostano"          contiene "$T/r10-anteprima2.txt" "1 senza SHA-256 da pCloud: non si cancellano, si spostano."
+prima10="$(sha_di "$P10")"
+echo no | "${R10[@]}" sposta > "$T/r10-no.txt" 2>&1
+verifica "sposta senza CANCELLA: non fa niente"          contiene "$T/r10-no.txt" "Non ho fatto niente."
+verifica "sposta senza CANCELLA: pCloud com'era"         [ "$prima10" = "$(sha_di "$P10")" ]
+
+echo CANCELLA | "${R10[@]}" sposta > "$T/r10-sposta.txt" 2>&1
+verifica "sposta: finisce bene"                          [ $? -eq 0 ]
+verifica "sposta: già in FotoTimeline cancellata"        non_c_e "$P10/Foto/2015/vecchia.jpg"
+verifica "sposta: ...e non spostata"                     non_c_e "$RA/Foto/2015/vecchia.jpg"
+verifica "sposta: nuova spostata col suo percorso"       c_e "$RA/Foto/2015/nuova.jpg"
+verifica "sposta: nuova non più dov'era"                 non_c_e "$P10/Foto/2015/nuova.jpg"
+verifica "sposta: senza SHA-256 spostata, non cancellata" c_e "$RA/Foto/nascosto.jpg"
+verifica "sposta: nome preso, non sovrascritto"          grep -q collide-vecchia "$RA/Foto/collide.jpg"
+verifica "sposta: nome preso, l'altro con (2)"           grep -q collide-nuova "$RA/Foto/collide (2).jpg"
+verifica "sposta: insv e LRV (maiuscolo)"                bash -c '[ -f "$1/Insta/VID_20230715_101010_00_001.insv" ] && [ -f "$1/Insta/senza.LRV" ]' _ "$RA"
+verifica "sposta: dalla cima di pCloud"                  c_e "$RA/IMG_cima.JPG"
+verifica "sposta: il documento resta"                    c_e "$P10/Foto/lettera.pdf"
+verifica "sposta: cartella svuotata tolta"               non_c_e "$P10/Foto/2015"
+verifica "sposta: cartella in cima svuotata resta"       [ -d "$P10/Insta" ]
+verifica "sposta: zip non toccati"                       [ "$(find "$P10/Zip" -type f | wc -l)" -eq 5 ]
+verifica "sposta: le cartelle saltate intatte"           [ "$intatti10" = "$(fuori10)" ]
+verifica "sposta: nel registro"                          grep -q $'\tsposta\tcancellato, già in FotoTimeline\tFoto/2015/vecchia.jpg\t' "$L10/registro.tsv"
+"${R10[@]}" stato > "$T/r10-stato.txt" 2>&1
+verifica "stato: i conti di sposta"                      grep -Eq '^ +6  spostato' "$T/r10-stato.txt"
+verifica "stato: ESCLUDI ricordato"                      contiene "$T/r10-stato.txt" "documenti, schede sim"
+
+# zip --prova: i conti, niente cambia.
+prima10="$(sha_di "$P10")"
+"${R10[@]}" zip --prova > "$T/r10-prova.txt" 2>&1
+verifica "prova: pCloud com'era"                         [ "$prima10" = "$(sha_di "$P10")" ]
+verifica "prova: lo zip misto"                           grep -A1 'Zip/misto.zip' "$T/r10-prova.txt" | grep -q "3 foto e video: 1 già in FotoTimeline, 1 già in Video originali troppo grandi, 1 da copiare .*; 2 altri file restano. Lo zip: si rifà senza foto e video"
+verifica "prova: lo zip di sole foto si cancella"        grep -A1 'Zip/solo foto.zip' "$T/r10-prova.txt" | grep -q "si cancella"
+verifica "prova: il rovinato resta"                      grep -A1 'Zip/rotto.zip' "$T/r10-prova.txt" | grep -q "rovinato, resta com'è"
+verifica "prova: i totali"                               contiene "$T/r10-prova.txt" "2 zip si rifanno senza foto e video, 1 si cancellano"
+
+# zip, interrotto tra il caricamento del nuovo e la sostituzione, poi ripreso.
+: > "$T/r10-fallisci"
+echo CANCELLA | FALLISCI_SOSTITUISCI="$T/r10-fallisci" FALLISCI_SU=ripresa.zip.raccogli-nuovo "${R10[@]}" zip > "$T/r10-zip1.txt" 2>&1
+verifica "zip interrotto: esce con errore"               [ $? -ne 0 ]
+verifica "zip interrotto: il nuovo accanto"              c_e "$P10/Zip/ripresa.zip.raccogli-nuovo"
+verifica "zip interrotto: l'originale ancora intero"     [ "$(unzip -Z1 "$P10/Zip/ripresa.zip" | sort | tr '\n' ' ')" = "conto.xls e.jpg " ]
+verifica "zip interrotto: la foto già al sicuro"         c_e "$RA/dagli-zip/Zip/ripresa/e.jpg"
+: > "$R10_LOG"
+"${R10[@]}" zip --prova > "$T/r10-prova2.txt" 2>&1
+verifica "prova dopo: non tocca il .raccogli-nuovo"      c_e "$P10/Zip/ripresa.zip.raccogli-nuovo"
+: > "$R10_LOG"
+echo CANCELLA | "${R10[@]}" zip > "$T/r10-zip2.txt" 2>&1
+verifica "zip ripreso: finisce bene"                     [ $? -eq 0 ]
+verifica "zip ripreso: lo dice"                          contiene "$T/r10-zip2.txt" "era caricato e controllato, prende il posto di Zip/ripresa.zip"
+verifica "zip ripreso: senza riscaricarlo"               bash -c '! grep -q "^copyto $1/Zip/ripresa.zip " "$2"' _ "$P10" "$R10_LOG"
+verifica "zip ripreso: solo i documenti"                 [ "$(unzip -Z1 "$P10/Zip/ripresa.zip" | tr '\n' ' ')" = "conto.xls " ]
+verifica "zip ripreso: niente .raccogli-nuovo"           non_c_e "$P10/Zip/ripresa.zip.raccogli-nuovo"
+verifica "zip misto: foto nuova copiata"                 grep -q a$ "$RA/dagli-zip/Zip/misto/a.jpg"
+verifica "zip misto: in FotoTimeline non copiata"        non_c_e "$RA/dagli-zip/Zip/misto/b.jpg"
+verifica "zip misto: già in RACCOLTA non copiata"        non_c_e "$RA/dagli-zip/Zip/misto/f.jpg"
+verifica "zip misto: restano solo i documenti"           [ "$(unzip -Z1 "$P10/Zip/misto.zip" | grep -v '/$' | sort | tr '\n' ' ')" = "doc.pdf sub/nota.txt " ]
+verifica "zip misto: documenti byte per byte"            [ "$zip_misto_prima" = "$(unzip -Z -v "$P10/Zip/misto.zip" doc.pdf sub/nota.txt | grep -E 'CRC|compressed size')" ]
+verifica "zip misto: documenti con il loro contenuto"    [ "$(unzip -p "$P10/Zip/misto.zip" sub/nota.txt)" = "finto nota" ]
+verifica "zip misto: lo zip è intero"                    unzip -tqq "$P10/Zip/misto.zip"
+verifica "zip di sole foto: cancellato"                  non_c_e "$P10/Zip/solo foto.zip"
+verifica "zip di sole foto: la nuova copiata"            c_e "$RA/dagli-zip/Zip/solo foto/c.jpg"
+verifica "zip di sole foto: in FotoTimeline non copiata" non_c_e "$RA/dagli-zip/Zip/solo foto/d.jpg"
+verifica "zip rovinato: com'era"                         [ "$sha_rotto" = "$(s10 "$P10/Zip/rotto.zip")" ]
+verifica "zip rovinato: la foto recuperata copiata"      c_e "$RA/dagli-zip/Zip/rotto/salvata.jpg"
+verifica "zip rovinato: lo dice"                         contiene "$T/r10-zip1.txt" "lasciato com'è"
+verifica "zip di soli documenti: com'era"                [ "$sha_doc" = "$(s10 "$P10/Zip/documenti.zip")" ]
+verifica "zip: nessuna foto o video negli zip"           [ -z "$(for f in "$P10"/Zip/*.zip; do [ "$f" = "$P10/Zip/rotto.zip" ] || unzip -Z1 "$f"; done | grep -Ei '\.(jpg|mp4)$')" ]
+verifica "zip: le cartelle saltate intatte"              [ "$intatti10" = "$(fuori10)" ]
+: > "$R10_LOG"
+echo CANCELLA | "${R10[@]}" zip > "$T/r10-zip3.txt" 2>&1
+verifica "zip rilanciato: niente da fare"                contiene "$T/r10-zip3.txt" "Zip: 0 da fare"
+verifica "zip rilanciato: niente scaricato"              bash -c '! grep -q "^copyto " "$1"' _ "$R10_LOG"
+
+# riordina: per data, una copia sola, via quello che FotoTimeline ha già.
+: > "$R10_LOG"
+echo CANCELLA | "${R10[@]}" riordina > "$T/r10-riordina.txt" 2>&1
+verifica "riordina: finisce bene"                        [ $? -eq 0 ]
+verifica "riordina: EXIF"                                c_e "$RA/2016/07/nuova.jpg"
+verifica "riordina: EXIF di una foto da uno zip"         c_e "$RA/2017/01/a.jpg"
+verifica "riordina: data dal nome (insv)"                c_e "$RA/2023/07/VID_20230715_101010_00_001.insv"
+verifica "riordina: senza data"                          c_e "$RA/senza-data/senza.LRV"
+verifica "riordina: data del file"                       c_e "$RA/2012/03/collide.jpg"
+verifica "riordina: nome col (2) tenuto"                 c_e "$RA/2018/01/collide (2).jpg"
+verifica "riordina: video, data dal principio e dalla fine" c_e "$RA/2026/03/20260301_195506_293.mp4"
+verifica "riordina: letto a pezzi, non scaricato"        bash -c 'grep -q "^cat --offset" "$1" && ! grep -q "^copyto .*20260301_195506_293.mp4" "$1"' _ "$R10_LOG"
+verifica "riordina: il doppione una volta sola"          [ "$(find "$RA" -name '20260301_195506_293*' | wc -l)" -eq 1 ]
+verifica "riordina: già in FotoTimeline cancellata"      [ -z "$(find "$RA" -name 'gia-ft*')" ]
+verifica "riordina: senza SHA-256 non cancellata"        c_e "$RA/2014/02/nascosto.jpg"
+verifica "riordina: niente fuori da AAAA/MM e senza-data" [ -z "$(cd "$RA" && find . -type f | grep -Ev '^\./([0-9]{4}/[0-9]{2}|senza-data)/[^/]+$')" ]
+verifica "riordina: cartelle vuote tolte"                [ -z "$(find "$RA" -mindepth 1 -type d -empty)" ]
+verifica "riordina: le date ricordate"                   [ "$(wc -l < "$L10/date.tsv")" -ge 10 ]
+verifica "riordina: le cartelle saltate intatte"         [ "$intatti10" = "$(fuori10)" ]
+: > "$R10_LOG"
+echo CANCELLA | "${R10[@]}" riordina > "$T/r10-riordina2.txt" 2>&1
+verifica "riordina rilanciato: niente da fare"           contiene "$T/r10-riordina2.txt" "Niente da fare."
+verifica "riordina rilanciato: niente riletto"           bash -c '! grep -Eq "^(cat|copyto) " "$1"' _ "$R10_LOG"
+
+# In sottofondo: avvia chiede CANCELLA, stato lo segue; un giro solo alla volta.
+echo no | "${R10[@]}" avvia sposta > "$T/r10-avvia-no.txt" 2>&1
+verifica "avvia senza CANCELLA: non parte"               contiene "$T/r10-avvia-no.txt" "Non ho fatto niente."
+jpg "$P10/Insta/nuova2.jpg" nuova2 '2021:02:03 10:00:00'
+echo CANCELLA | "${R10[@]}" avvia sposta > "$T/r10-avvia.txt" 2>&1
+for ((i = 0; i < 600; i++)); do [ -f "$L10/pid" ] && kill -0 "$(cat "$L10/pid")" 2>/dev/null || break; sleep 0.1; done
+verifica "avvia: partito"                                contiene "$T/r10-avvia.txt" "sposta partito in sottofondo."
+verifica "avvia: fatto in sottofondo"                    c_e "$RA/Insta/nuova2.jpg"
+verifica "avvia: il log"                                 contiene "$L10/sposta.log" "Sposto in Video originali troppo grandi 1 foto e video"
+"${R10[@]}" stato > "$T/r10-stato2.txt" 2>&1
+verifica "stato: niente in sottofondo"                   contiene "$T/r10-stato2.txt" "In sottofondo: niente."
+( exec 9>"$L10/in-corso.lock"; flock 9; sleep 3 ) &
+sleep 0.5
+echo CANCELLA | "${R10[@]}" riordina > "$T/r10-lucchetto.txt" 2>&1
+verifica "un giro solo alla volta"                       contiene "$T/r10-lucchetto.txt" "c'è già un giro in corso"
+wait
+verifica "Automatic Upload mai toccata"                  bash -c '! grep "Automatic Upload" "$1" | grep -Eq "^(delete|deletefile|move|moveto|copy|copyto|rmdir|purge|sync) "' _ "$R10_LOG"
+if [ "$KO" -gt 0 ]; then
+    for f in anteprima2 sposta prova zip1 zip2 riordina; do echo "--- r10-$f"; cat "$T/r10-$f.txt"; done
 fi
 fi
 
