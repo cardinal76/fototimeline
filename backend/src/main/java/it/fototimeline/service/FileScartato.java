@@ -14,10 +14,20 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * @param modificatoIl la data di modifica del file quando è fallito
  * @param motivo       l'errore, come lo mostra l'app
  * @param quando       la prima volta che è fallito così
+ * @param lettura      la versione della lettura dei file con cui è fallito
+ *                     ({@link FotoService#VERSIONE_LETTURA}); null nei ricordi di prima
  */
 @Document("importazione_scartati")
 public record FileScartato(@Id String percorso, long dimensione, Instant modificatoIl, String motivo,
-        Instant quando) {
+        Instant quando, Integer lettura) {
+
+    /**
+     * True se è fallito con la lettura di adesso: con una più nuova (un
+     * formato in più, un lettore più tollerante) va riletto una volta, da solo.
+     */
+    public boolean conLetturaAttuale() {
+        return lettura != null && lettura == FotoService.VERSIONE_LETTURA;
+    }
 
     /** True se il file è ancora quello che era fallito. */
     public boolean uguale(long dimensione, Instant modificatoIl) {

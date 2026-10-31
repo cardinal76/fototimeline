@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -69,6 +70,9 @@ class ImportazioneAutomaticaTest {
 
     @Autowired
     FotoRepository repository;
+
+    @Autowired
+    MongoTemplate mongo;
 
     private Path telefono;
 
@@ -279,6 +283,38 @@ class ImportazioneAutomaticaTest {
         assertThat(giro.lette).containsExactly(foto.getFileName().toString());
         assertThat(esito.importate()).isEqualTo(1);
         assertThat(memoria.elenco()).isEmpty();
+    }
+
+    @Test
+    void unFileFallitoConUnaLetturaDiPrimaSiRileggeUnaVolta() throws IOException {
+        // Ricordato prima che la lettura imparasse i JPEG Xiaomi (o i JPEG col nome .heic):
+        // dopo l'aggiornamento rientra da solo, senza "Riprova".
+        Path foto = telefono.resolve("IMG_20260318_213435 (6).jpg");
+        Files.write(foto, immagine(Color.CYAN));
+        mongo.save(new FileScartato(foto.toAbsolutePath().normalize().toString(), Files.size(foto),
+                Files.getLastModifiedTime(foto).toInstant(),
+                "Immagine illeggibile (Invalid JPEG file structure: two SOI markers)", Instant.now(), null));
+
+        Registro giro = new Registro();
+        Importazione esito = importa(regole(), giro);
+
+        assertThat(giro.giaFallite).isZero();
+        assertThat(giro.lette).containsExactly(foto.getFileName().toString());
+        assertThat(esito.importate()).isEqualTo(1);
+        assertThat(memoria.elenco()).isEmpty();
+    }
+
+    @Test
+    void unFileFallitoConLaLetturaDiAdessoSiRicordaConLaVersione() throws IOException {
+        Path rotto = telefono.resolve("IMG_0002.jpg");
+        Files.write(rotto, new byte[256]);
+
+        importa(regole(), new Registro());
+
+        assertThat(memoria.elenco()).singleElement().satisfies(f -> {
+            assertThat(f.lettura()).isEqualTo(FotoService.VERSIONE_LETTURA);
+            assertThat(f.conLetturaAttuale()).isTrue();
+        });
     }
 
     @Test

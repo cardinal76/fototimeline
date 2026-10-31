@@ -38,6 +38,8 @@ public class StrumentiMedia {
     private static final Logger log = LoggerFactory.getLogger(StrumentiMedia.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final long TIMEOUT_SECONDI = 300;
+    /** Un fotogramma da un video di gigabyte sul cloud montato: ffmpeg legge anche il moov in fondo. */
+    private static final long TIMEOUT_FOTOGRAMMA_SECONDI = 600;
     /** "+41.9028+012.4964+050.000/" (ISO 6709, come lo scrivono iPhone e Android). */
     private static final Pattern ISO6709 = Pattern.compile("([+-]\\d+(?:\\.\\d+)?)([+-]\\d+(?:\\.\\d+)?)");
 
@@ -69,22 +71,113 @@ public class StrumentiMedia {
         return video;
     }
 
-    /** Converte un HEIC in JPEG, già ruotato come va visto. */
+    /**
+     * Converte un HEIC (o un AVIF, se libheif ha il decoder AV1) in JPEG, già
+     * ruotato come va visto. Se heif-convert non ce la fa prova ffmpeg
+     * ({@link #immagineInJpeg}); se non ce la fa nemmeno lui resta l'errore
+     * di heif-convert, che è quello che dice qualcosa.
+     */
     public void heicInJpeg(Path heif, Path jpeg) throws IOException {
-        esegui(List.of(properties.heifConvert(), "-q", "92", heif.toString(), jpeg.toString()));
-        if (!Files.exists(jpeg) || Files.size(jpeg) == 0) {
-            throw new IOException("heif-convert non ha prodotto il JPEG");
+        try {
+            esegui(List.of(properties.heifConvert(), "-q", "92", heif.toString(), jpeg.toString()));
+            if (!Files.exists(jpeg) || Files.size(jpeg) == 0) {
+                throw new IOException("heif-convert non ha prodotto il JPEG");
+            }
+        } catch (IOException e) {
+            if (!video) {
+                throw e;
+            }
+            try {
+                immagineInJpeg(heif, jpeg);
+                log.info("{}: heif-convert non riesce ({}), convertito con ffmpeg", heif.getFileName(), e.getMessage());
+            } catch (IOException ancora) {
+                e.addSuppressed(ancora);
+                throw e;
+            }
         }
     }
 
-    /** Un fotogramma del video (a un secondo, o a metà se è più corto), già ruotato. */
-    public void fotogramma(Path video, Double durata, Path jpeg) throws IOException {
-        double secondo = durata == null ? 0 : Math.min(1.0, durata / 2);
-        esegui(List.of(properties.ffmpeg(), "-y", "-v", "error", "-ss", String.valueOf(secondo),
-                "-i", video.toString(), "-frames:v", "1", "-q:v", "3", jpeg.toString()));
-        if (!Files.exists(jpeg) || Files.size(jpeg) == 0) {
-            throw new IOException("ffmpeg non ha estratto il fotogramma");
+    /**
+     * Un'immagine qualsiasi che ffmpeg sa leggere (JPEG che Java rifiuta,
+     * WebP, AVIF...) in JPEG: l'ultima risorsa quando ImageIO non ce la fa.
+     */
+    public void immagineInJpeg(Path immagine, Path jpeg) throws IOException {
+        if (!video) {
+            throw new IOException("Per convertire l'immagine serve ffmpeg sul server");
         }
+        Files.deleteIfExists(jpeg);
+        Uscita u = esegui(List.of(properties.ffmpeg(), "-y", "-nostdin", "-v", "error", "-i", immagine.toString(),
+                "-frames:v", "1", "-update", "1", "-pix_fmt", "yuvj420p", "-q:v", "2", jpeg.toString()), TIMEOUT_SECONDI);
+        if (!Files.exists(jpeg) || Files.size(jpeg) == 0) {
+            throw new IOException("ffmpeg non ha convertito l'immagine" + dettaglio(u.errori()));
+        }
+    }
+
+    /**
+     * Un fotogramma del video (a un secondo, o a metà se è più corto), già
+     * ruotato. Se lì non esce niente (ffmpeg finisce bene ma non scrive: il
+     * flusso video è più corto della durata del file, inizia dopo, la ricerca
+     * cade male) si riprova dal primo fotogramma, e poi lasciando scegliere a
+     * ffmpeg il flusso. {@code -pix_fmt yuvj420p}: i video a 10 bit e HDR
+     * diventano un JPEG a 8 bit. Nell'errore le ultime righe di ffmpeg di
+     * ogni tentativo.
+     */
+    public void fotogramma(Path video, Double durata, Path jpeg) throws IOException {
+        double secondo = durata == null || durata.isNaN() || durata <= 0 ? 0 : Math.min(1.0, durata / 2);
+        List<String> errori = new ArrayList<>();
+        for (Prova prova : prove(secondo)) {
+            Files.deleteIfExists(jpeg);
+            List<String> comando = new ArrayList<>(List.of(properties.ffmpeg(), "-y", "-nostdin", "-v", "warning"));
+            if (prova.secondo() > 0) {
+                comando.addAll(List.of("-ss", String.valueOf(prova.secondo())));
+            }
+            comando.addAll(List.of("-i", video.toString()));
+            if (prova.primoFlusso()) {
+                // V maiuscola: il primo flusso video che non è una copertina.
+                comando.addAll(List.of("-map", "0:V:0"));
+            }
+            comando.addAll(List.of("-an", "-sn", "-dn", "-frames:v", "1", "-update", "1",
+                    "-pix_fmt", "yuvj420p", "-q:v", "3", jpeg.toString()));
+            String errore;
+            try {
+                Uscita u = esegui(comando, TIMEOUT_FOTOGRAMMA_SECONDI);
+                if (Files.exists(jpeg) && Files.size(jpeg) > 0) {
+                    if (!errori.isEmpty()) {
+                        log.info("{}: fotogramma estratto {} (prima: {})", video.getFileName(), prova, errori);
+                    }
+                    return;
+                }
+                errore = u.errori().isBlank() ? "nessun fotogramma" : ultimeRighe(u.errori().strip(), 300);
+            } catch (IOException e) {
+                errore = e.getMessage();
+                if (e.getMessage() != null && e.getMessage().contains("non ha finito in")) {
+                    // Il file non arriva (cloud lento): riprovare vorrebbe dire aspettare ancora.
+                    errori.add(prova + ": " + errore);
+                    break;
+                }
+            }
+            errori.add(prova + ": " + errore);
+        }
+        Files.deleteIfExists(jpeg);
+        throw new IOException("ffmpeg non ha estratto il fotogramma (" + String.join("; ", errori) + ")");
+    }
+
+    /** Un tentativo di {@link #fotogramma}. */
+    record Prova(double secondo, boolean primoFlusso) {
+        @Override
+        public String toString() {
+            return (secondo > 0 ? "a " + secondo + " s" : "dall'inizio") + (primoFlusso ? "" : ", flusso scelto da ffmpeg");
+        }
+    }
+
+    static List<Prova> prove(double secondo) {
+        List<Prova> prove = new ArrayList<>();
+        if (secondo > 0) {
+            prove.add(new Prova(secondo, true));
+        }
+        prove.add(new Prova(0, true));
+        prove.add(new Prova(0, false));
+        return prove;
     }
 
     public InfoVideo leggiVideo(Path video, ZoneId zona) throws IOException {
@@ -288,7 +381,15 @@ public class StrumentiMedia {
     }
 
     private static String ultimeRighe(String testo) {
-        return testo.length() <= 500 ? testo : "…" + testo.substring(testo.length() - 500);
+        return ultimeRighe(testo, 500);
+    }
+
+    private static String ultimeRighe(String testo, int quanti) {
+        return testo.length() <= quanti ? testo : "…" + testo.substring(testo.length() - quanti);
+    }
+
+    private static String dettaglio(String errori) {
+        return errori == null || errori.isBlank() ? "" : " (" + ultimeRighe(errori.strip(), 300) + ")";
     }
 
     /**
@@ -405,6 +506,14 @@ public class StrumentiMedia {
     }
 
     private String esegui(List<String> comando) throws IOException {
+        return esegui(comando, TIMEOUT_SECONDI).uscita();
+    }
+
+    /** Quello che un programma ha scritto: l'uscita e gli errori (anche quando finisce bene). */
+    private record Uscita(String uscita, String errori) {
+    }
+
+    private Uscita esegui(List<String> comando, long timeoutSecondi) throws IOException {
         Process p = new ProcessBuilder(comando).redirectErrorStream(false).start();
         // L'uscita si legge mentre gira: se il buffer si riempie il processo si blocca.
         var uscita = new StringBuilder();
@@ -426,9 +535,9 @@ public class StrumentiMedia {
             }
         });
         try {
-            if (!p.waitFor(TIMEOUT_SECONDI, TimeUnit.SECONDS)) {
+            if (!p.waitFor(timeoutSecondi, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
-                throw new IOException(comando.getFirst() + " non ha finito in " + TIMEOUT_SECONDI + " secondi");
+                throw new IOException(comando.getFirst() + " non ha finito in " + timeoutSecondi + " secondi");
             }
             lettoreUscita.join(10_000);
             lettore.join(1000);
@@ -438,9 +547,10 @@ public class StrumentiMedia {
             throw new IOException("Interrotto", e);
         }
         if (p.exitValue() != 0) {
-            throw new IOException(comando.getFirst() + " è uscito con " + p.exitValue() + ": " + errori.toString().strip());
+            throw new IOException(comando.getFirst() + " è uscito con " + p.exitValue() + ": "
+                    + ultimeRighe(errori.toString().strip()));
         }
-        return uscita.toString();
+        return new Uscita(uscita.toString(), errori.toString());
     }
 
     private static boolean esiste(String programma, String opzione) {

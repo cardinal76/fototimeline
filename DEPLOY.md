@@ -178,8 +178,14 @@ e i pesi di CLIP: qualche minuto in più. Poi:
    spariscono dalla cartella di origine (quelle già in archivio pure: il
    contenuto è identico).
 
-Entrano anche le foto **HEIC** dell'iPhone e i **video** MP4/MOV (l'immagine
-Docker ha `heif-convert` e `ffmpeg`). Un'importazione grande richiede tempo:
+Entrano anche le foto **HEIC** (e AVIF) dell'iPhone e i **video** MP4/MOV (l'immagine
+Docker ha `heif-convert` e `ffmpeg`). Il formato lo dice il **contenuto**, non
+il nome: i download di Facebook `..._n.heic` che sono JPEG entrano come JPEG,
+un HEIC chiamato `.jpg` passa da heif-convert; il file non si rinomina. I JPEG
+con un SOI fuori posto (certe foto Xiaomi: "two SOI markers") si leggono da una
+copia riparata, che è anche la vista del visore; una foto che Java non legge
+proprio la converte ffmpeg. Il fotogramma dei video si riprova dall'inizio se
+a 1 s non esce niente, e l'errore riporta le righe di ffmpeg. Un'importazione grande richiede tempo:
 ogni foto passa da LifetimeCloud a server2 e torna indietro. Gira in sottofondo, una alla volta: la barra in basso
 a destra mostra l'avanzamento, si può chiudere la finestra e si può annullare.
 
@@ -205,7 +211,10 @@ Ogni giro lascia stare, senza leggerli:
   ricordano in MongoDB (`importazione_scartati`) e nel riquadro sono "N già
   falliti", con l'elenco e **Riprova tutti** (admin). Gli errori che possono
   passare da soli (cloud che non risponde, programmi mancanti) si riprovano a
-  ogni giro.
+  ogni giro. Ogni ricordo ha la versione della lettura con cui è fallito
+  (`FotoService.VERSIONE_LETTURA`): quando un rilascio impara a leggere file
+  che prima fallivano la versione sale, e i file ricordati con quella di prima
+  si rileggono una volta da soli, senza **Riprova**.
 
 Un file tolto da altri mentre il giro gira conta fra quelli "tolti
 dall'origine", non fra gli errori.
@@ -498,7 +507,9 @@ un'importazione); alla fine la timeline si ricarica.
   per un po' non risponde) si riprova una volta dopo
   `FOTOTIMELINE_INDICIZZA_ATTESA_RIPROVA` (3 secondi); i file rotti, cifrati o
   di un formato sconosciuto no. Se il mount è rimasto giù a lungo, basta
-  rilanciare: i file già fatti si saltano.
+  rilanciare: i file già fatti si saltano. Gli errori non si ricordano: ogni
+  "Indicizza archivio" (anche quello del giro notturno) rilegge i file senza
+  scheda, quindi dopo un rilascio che legge più formati basta rilanciarlo.
 - Legge `FOTOTIMELINE_INDICIZZA_PARALLELI` file insieme (predefinito 3), e lo
   stesso fanno "Importa cartella" e la cartella automatica: dal cloud quasi
   tutto il tempo di un file è attesa di rete (circa 1,3 s a file uno alla

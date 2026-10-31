@@ -2,6 +2,7 @@ package it.fototimeline.media;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Iterator;
 
@@ -96,14 +97,74 @@ public final class Riduzione {
         return (int) Math.max(1, Math.max(perIlLato, perLaMemoria));
     }
 
-    /** L'immagine sottocampionata secondo {@link #passo}. */
-    static BufferedImage leggi(Path sorgente, int lato) throws IOException {
-        try (ImageInputStream in = ImageIO.createImageInputStream(sorgente.toFile())) {
-            Iterator<ImageReader> lettori = in == null ? null : ImageIO.getImageReaders(in);
-            if (lettori == null || !lettori.hasNext()) {
-                throw new IOException("Nessun lettore per questa immagine");
+    /**
+     * Larghezza e altezza grezze (prima dell'orientamento EXIF), senza
+     * decodificare l'immagine; per un JPEG con la testa rotta dalla copia
+     * riparata ({@link JpegRiparato}).
+     */
+    public static int[] dimensioni(Path file) throws IOException {
+        return tollerante(file, f -> {
+            try (ImageInputStream in = ImageIO.createImageInputStream(f.toFile())) {
+                ImageReader lettore = lettore(in);
+                try {
+                    lettore.setInput(in, true, true);
+                    return new int[] {lettore.getWidth(0), lettore.getHeight(0)};
+                } finally {
+                    lettore.dispose();
+                }
             }
-            ImageReader lettore = lettori.next();
+        });
+    }
+
+    /** Una lettura di un file immagine. */
+    @FunctionalInterface
+    interface Lettura<T> {
+        T leggi(Path file) throws IOException;
+    }
+
+    /**
+     * {@code lettura} sul file e, se ImageIO non ce la fa ed è un JPEG con un
+     * SOI fuori posto (Xiaomi), sulla sua copia riparata, in un file
+     * temporaneo che poi si cancella. Se non c'è niente da riparare resta
+     * l'errore di prima.
+     */
+    static <T> T tollerante(Path file, Lettura<T> lettura) throws IOException {
+        try {
+            return lettura.leggi(file);
+        } catch (IOException e) {
+            if (!"image/jpeg".equals(Contenuto.tipo(file)) || !JpegRiparato.daRiparare(file)) {
+                throw e;
+            }
+            Path riparato = Files.createTempFile("fototimeline-riparato-", ".jpg");
+            try {
+                if (JpegRiparato.ripara(file, riparato)) {
+                    return lettura.leggi(riparato);
+                }
+            } catch (IOException ancora) {
+                e.addSuppressed(ancora);
+            } finally {
+                Files.deleteIfExists(riparato);
+            }
+            throw e;
+        }
+    }
+
+    private static ImageReader lettore(ImageInputStream in) throws IOException {
+        Iterator<ImageReader> lettori = in == null ? null : ImageIO.getImageReaders(in);
+        if (lettori == null || !lettori.hasNext()) {
+            throw new IOException("Nessun lettore per questa immagine");
+        }
+        return lettori.next();
+    }
+
+    /** L'immagine sottocampionata secondo {@link #passo}; per i JPEG rotti come {@link #tollerante}. */
+    static BufferedImage leggi(Path sorgente, int lato) throws IOException {
+        return tollerante(sorgente, f -> leggiDiretta(f, lato));
+    }
+
+    private static BufferedImage leggiDiretta(Path sorgente, int lato) throws IOException {
+        try (ImageInputStream in = ImageIO.createImageInputStream(sorgente.toFile())) {
+            ImageReader lettore = lettore(in);
             try {
                 lettore.setInput(in, true, true);
                 int passo = passo(lettore.getWidth(0), lettore.getHeight(0), lato);

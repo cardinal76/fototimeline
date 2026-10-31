@@ -44,7 +44,8 @@ public class MemoriaImportazione {
         String percorso = file.toAbsolutePath().normalize().toString();
         FileScartato prima = mongo.findById(percorso, FileScartato.class);
         mongo.save(new FileScartato(percorso, dimensione, modificatoIl, motivo,
-                prima != null && motivo.equals(prima.motivo()) ? prima.quando() : clock.instant()));
+                prima != null && motivo.equals(prima.motivo()) ? prima.quando() : clock.instant(),
+                FotoService.VERSIONE_LETTURA));
     }
 
     public void dimentica(Path file) {
