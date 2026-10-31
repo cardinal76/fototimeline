@@ -184,7 +184,13 @@ Il server: [DEPLOY.md](DEPLOY.md).
   "già presente, nel cestino" e si ripristina da lì. Dettagli in DEPLOY.md, "Cestino".
 - **Selezione multipla** (bottone *Seleziona* o Ctrl+clic): aggiungi/togli
   tag, sposta in un album, segna preferite, elimina (nel cestino); "seleziona giorno" per
-  prendere un giorno intero.
+  prendere un giorno intero. Come in Google Foto: il cerchio in alto a sinistra appare
+  passando col mouse; Maiusc+clic prende tutte le foto fra l'ultima toccata e questa
+  (o le toglie, se l'ultima era stata tolta), anche fra giorni e mesi diversi; tenendo
+  premuto sul cerchio (o su una foto, mentre si seleziona) e trascinando si prende
+  l'intervallo attraversato, e vicino al bordo la timeline scorre da sola. Sul telefono:
+  pressione lunga su una foto, poi il dito sulle altre. Valgono solo le foto già
+  caricate; Esc chiude la selezione.
 - **Condividere con un link** (chi non ha un account, per esempio gli amici
   dopo una festa): dalla selezione (*Condividi…*) o da un album aperto
   (*Condividi album*) si crea un link `https://<dominio>/c/<token>` con
