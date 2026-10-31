@@ -298,9 +298,9 @@ public class CondivisioniService {
             if (Files.exists(file)) {
                 return file;
             }
-            // Per gli HEIC la vista JPEG (già dritta), per le altre l'originale.
+            // Per gli HEIC la vista JPEG (già dritta), per le altre l'originale (o la sua vista riparata).
             Path sorgente = fotoService.fileVista(foto);
-            boolean exif = !heic(foto);
+            boolean exif = !fotoService.vistaDritta(foto);
             Files.createDirectories(file.getParent());
             temporaneo = Files.createTempFile(file.getParent(), "riduzione-", ".jpg");
             // Letta già ridotta (Riduzione), mai a piena risoluzione; Thumbnailator riscrive
@@ -408,11 +408,6 @@ public class CondivisioniService {
         int punto = p.lastIndexOf('.');
         String e = punto < 0 || punto < p.lastIndexOf('/') ? "" : p.substring(punto + 1).toLowerCase(Locale.ROOT);
         return e.matches("[a-z0-9]{1,5}") ? e : "bin";
-    }
-
-    private static boolean heic(Foto foto) {
-        String e = estensione(foto);
-        return e.equals("heic") || e.equals("heif");
     }
 
     /** Il titolo come nome di file per lo zip. */

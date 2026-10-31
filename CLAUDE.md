@@ -47,6 +47,16 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   programma manca quel formato viene rifiutato, il resto funziona.
 - Per leggere gli HEIC serve anche `libheif-plugin-libde265` (decoder HEVC):
   senza, `heif-convert` dice "Unsupported codec".
+- Il genere (FOTO/HEIC/VIDEO) e `contentType` vengono dal **contenuto**
+  (`media/Contenuto`, i primi byte), non dall'estensione, che vale solo se il
+  contenuto non si riconosce; dopo l'importazione si decide con
+  `FotoService.genere(Foto)`, cioè da `contentType`. Il file non si rinomina.
+  I JPEG con un SOI fuori posto si leggono da una copia riparata
+  (`media/JpegRiparato`, anche come vista); quelli che Java non legge li
+  converte ffmpeg (`StrumentiMedia.immagineInJpeg`). AVIF: `libheif-plugin-dav1d`.
+- Quando la lettura impara a leggere file che prima fallivano, aumenta
+  `FotoService.VERSIONE_LETTURA`: i falliti ricordati dalla cartella
+  automatica (`importazione_scartati`) si rileggono da soli.
 - Le date dei video: `com.apple.quicktime.creationdate` ha il fuso ed è già
   ora locale; `creation_time` è UTC e si converte nel fuso della JVM (nel
   container `TZ=Europe/Rome`). Le date prima del 1990 sono "sconosciuta".

@@ -30,8 +30,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import javax.imageio.ImageIO;
-
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +50,10 @@ import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.luoghi.GeocodificaInversa;
 import it.fototimeline.luoghi.LuoghiService;
 import it.fototimeline.dominio.StatoConversione;
+import it.fototimeline.media.Contenuto;
 import it.fototimeline.media.InfoVideo;
+import it.fototimeline.media.JpegRiparato;
+import it.fototimeline.media.Riduzione;
 import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.quasiuguali.Impronta;
 import it.fototimeline.repository.FotoRepository;
@@ -83,6 +84,7 @@ public class FotoService {
             Map.entry("webp", "image/webp"),
             Map.entry("heic", "image/heic"),
             Map.entry("heif", "image/heif"),
+            Map.entry("avif", "image/avif"),
             Map.entry("mp4", "video/mp4"),
             Map.entry("m4v", "video/mp4"),
             Map.entry("mov", "video/quicktime"));
@@ -94,6 +96,19 @@ public class FotoService {
     public static final String CIFRATO_LIFETIME = "File cifrato da LifetimeCloud (caricato dal sito o dall'app): "
             + "non si può leggere, va caricato via WebDAV";
     private static final byte[] INTESTAZIONE_LCB2 = {'L', 'C', 'B', '2'};
+
+    /**
+     * La versione di come si leggono i file: va aumentata quando la lettura
+     * impara a leggere file che prima fallivano. I file della cartella
+     * automatica ricordati come falliti con una versione di prima
+     * ({@link FileScartato#conLetturaAttuale}) si rileggono una volta da
+     * soli, senza "Riprova". "Indicizza archivio" non ricorda niente: rilegge
+     * sempre i file senza scheda.
+     *
+     * <p>2: formato dal contenuto (JPEG col nome .heic, HEIC col nome .jpg,
+     * AVIF), JPEG con un SOI fuori posto, fotogramma dei video con più tentativi.
+     */
+    public static final int VERSIONE_LETTURA = 2;
 
     /**
      * True se l'errore dipende dal contenuto del file (cifrato, formato
@@ -266,16 +281,51 @@ public class FotoService {
         }
     }
 
-    /** Come si legge un file: le foto con Java, HEIC e video con programmi esterni (StrumentiMedia). */
+    /**
+     * Come si legge un file: le foto con Java, HEIC (e AVIF) con heif-convert e
+     * video con ffmpeg (StrumentiMedia). Lo decide il contenuto
+     * ({@link Contenuto}), non il nome: l'estensione vale solo se il
+     * contenuto non si riconosce.
+     */
     enum Genere { FOTO, HEIC, VIDEO }
 
+    /** Il genere dall'estensione: quali file l'archivio accetta, e la riserva se il contenuto non si riconosce. */
     static Genere genere(String estensione) {
         return switch (estensione) {
             case "jpg", "jpeg", "png", "gif", "bmp", "webp" -> Genere.FOTO;
-            case "heic", "heif" -> Genere.HEIC;
+            case "heic", "heif", "avif" -> Genere.HEIC;
             case "mp4", "m4v", "mov" -> Genere.VIDEO;
             default -> null;
         };
+    }
+
+    /** Il genere da un tipo MIME (quello del contenuto, {@code Foto.contentType}); null se non è un media. */
+    static Genere genereDelTipo(String tipo) {
+        if (tipo == null) {
+            return null;
+        }
+        if (tipo.equals("image/heic") || tipo.equals("image/heif") || tipo.equals("image/avif")) {
+            return Genere.HEIC;
+        }
+        return tipo.startsWith("image/") ? Genere.FOTO : tipo.startsWith("video/") ? Genere.VIDEO : null;
+    }
+
+    /**
+     * Il genere di una foto in archivio: dal tipo del contenuto, che
+     * l'importazione scrive in {@code contentType} (un JPEG che si chiama
+     * {@code .heic} è un JPEG); se manca, dall'estensione del file.
+     */
+    static Genere genere(Foto foto) {
+        Genere g = genereDelTipo(foto.getContentType());
+        return g != null ? g : genere(estensione(foto.getPercorso()));
+    }
+
+    /**
+     * True se la vista di questa foto è un JPEG già dritto, da non girare
+     * secondo l'EXIF: quella degli HEIC e degli AVIF (heif-convert).
+     */
+    public boolean vistaDritta(Foto foto) {
+        return genere(foto) == Genere.HEIC;
     }
 
     private final FotoRepository repository;
@@ -575,10 +625,12 @@ public class FotoService {
      */
     private Letto leggi(String nome, Path file, ControlloFile controllo) throws Scartato {
         String estensione = estensione(nome);
-        Genere genere = genere(estensione);
-        if (genere == null) {
+        Genere genereDalNome = genere(estensione);
+        if (genereDalNome == null) {
             throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Formato non supportato"));
         }
+        Genere genere;
+        String tipo;
         String hash;
         long dimensione;
         // Una sola lettura dall'inizio alla fine: i primi byte dicono se è cifrato,
@@ -586,12 +638,21 @@ public class FotoService {
         // segue (metadati, miniatura) rilegge il file dalla cache di rclone.
         controllo.fase(ControlloFile.Fase.LETTURA);
         try (InputStream in = Files.newInputStream(file)) {
-            byte[] inizio = in.readNBytes(INTESTAZIONE_LCB2.length);
+            byte[] inizio = in.readNBytes(Contenuto.INIZIO);
             // Prima di tutto (anche degli strumenti che mancano): un file cifrato resta
             // illeggibile comunque, ed è un errore del file, da ricordare; e non vale la
             // pena di scaricarlo tutto per l'hash.
-            if (Arrays.equals(inizio, INTESTAZIONE_LCB2)) {
+            if (inizio.length >= INTESTAZIONE_LCB2.length
+                    && Arrays.equals(inizio, 0, INTESTAZIONE_LCB2.length, INTESTAZIONE_LCB2, 0, INTESTAZIONE_LCB2.length)) {
                 throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, CIFRATO_LIFETIME));
+            }
+            // Il formato lo dicono i primi byte, non il nome (i "_n.heic" di Facebook sono JPEG).
+            String dalContenuto = Contenuto.tipo(inizio);
+            Genere g = genereDelTipo(dalContenuto);
+            genere = g != null ? g : genereDalNome;
+            tipo = g != null ? dalContenuto : TIPI.get(estensione);
+            if (g != null && !dalContenuto.equals(TIPI.get(estensione))) {
+                log.info("{}: dal contenuto è {}, non {}", nome, dalContenuto, TIPI.get(estensione));
             }
             if (genere == Genere.HEIC && !media.heicDisponibile()) {
                 throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, "Per le foto HEIC serve heif-convert sul server"));
@@ -620,7 +681,7 @@ public class FotoService {
         Foto foto = new Foto();
         foto.setId(UUID.randomUUID().toString());
         foto.setNomeOriginale(nome);
-        foto.setContentType(TIPI.get(estensione));
+        foto.setContentType(tipo);
         foto.setDimensione(dimensione);
         foto.setHash(hash);
         foto.setCaricataIl(clock.instant());
@@ -631,10 +692,36 @@ public class FotoService {
             LocalDateTime data;
             switch (genere) {
                 case FOTO -> {
-                    int[] dimensioni = dimensioni(file);
                     MetadatiFoto metadati = estrattore.estrai(file);
-                    foto.setLarghezza(metadati.ruotata90() ? dimensioni[1] : dimensioni[0]);
-                    foto.setAltezza(metadati.ruotata90() ? dimensioni[0] : dimensioni[1]);
+                    int[] dimensioni;
+                    try {
+                        // Anche un JPEG con la testa rotta (Xiaomi), dalla copia riparata.
+                        dimensioni = Riduzione.dimensioni(file);
+                        foto.setLarghezza(metadati.ruotata90() ? dimensioni[1] : dimensioni[0]);
+                        foto.setAltezza(metadati.ruotata90() ? dimensioni[0] : dimensioni[1]);
+                    } catch (IOException e) {
+                        // Java non la legge: se ffmpeg c'è la converte lui, e il browser riceve quel JPEG.
+                        if (!media.videoDisponibile()) {
+                            throw e;
+                        }
+                        anteprima = Files.createTempFile("fototimeline-", ".jpg");
+                        Path jpeg = anteprima;
+                        try {
+                            unaAllaVolta(() -> {
+                                media.immagineInJpeg(file, jpeg);
+                                return null;
+                            }, ControlloFile.Fase.CONVERSIONE_HEIC, controllo);
+                        } catch (IOException ancora) {
+                            e.addSuppressed(ancora);
+                            throw e;
+                        }
+                        controllo.fase(ControlloFile.Fase.METADATI);
+                        log.info("{}: Java non la legge ({}), convertita con ffmpeg", nome, e.getMessage());
+                        // ffmpeg la scrive già dritta (applica l'EXIF): le dimensioni sono quelle del JPEG.
+                        dimensioni = Riduzione.dimensioni(anteprima);
+                        foto.setLarghezza(dimensioni[0]);
+                        foto.setAltezza(dimensioni[1]);
+                    }
                     applica(foto, metadati);
                     data = metadati.scattataIl();
                 }
@@ -647,7 +734,7 @@ public class FotoService {
                     }, ControlloFile.Fase.CONVERSIONE_HEIC, controllo);
                     controllo.fase(ControlloFile.Fase.METADATI);
                     // heif-convert lo scrive già dritto: le dimensioni sono quelle del JPEG.
-                    int[] dimensioni = dimensioni(anteprima);
+                    int[] dimensioni = Riduzione.dimensioni(anteprima);
                     foto.setLarghezza(dimensioni[0]);
                     foto.setAltezza(dimensioni[1]);
                     MetadatiFoto metadati = estrattore.estrai(file);
@@ -719,9 +806,13 @@ public class FotoService {
 
     private void faiAnteprime(Letto letto, Path file) throws IOException {
         Path anteprima = letto.anteprima();
-        archivio.creaMiniatura(letto.foto().getId(), anteprima != null ? anteprima : file, anteprima == null);
-        if (letto.genere() == Genere.HEIC) {
-            archivio.salvaVista(letto.foto().getId(), anteprima);
+        String id = letto.foto().getId();
+        archivio.creaMiniatura(id, anteprima != null ? anteprima : file, anteprima == null);
+        if (anteprima != null && letto.genere() != Genere.VIDEO) {
+            // HEIC, o una foto che solo ffmpeg legge: il browser riceve il JPEG convertito.
+            archivio.salvaVista(id, anteprima);
+        } else if (letto.genere() == Genere.FOTO) {
+            vistaRiparata(id, letto.foto().getContentType(), file);
         }
         if (letto.genere() != Genere.VIDEO) {
             try {
@@ -730,6 +821,24 @@ public class FotoService {
                 // Non blocca l'importazione: la riempie "Calcola impronte".
                 log.warn("Impronta di {} non calcolata: {}", letto.foto().getNomeOriginale(), e.toString());
             }
+        }
+    }
+
+    /**
+     * Per un JPEG con un SOI fuori posto ({@link JpegRiparato}), che anche i
+     * browser rifiutano: la vista è la copia riparata. Per gli altri non fa niente.
+     */
+    private void vistaRiparata(String id, String tipo, Path file) throws IOException {
+        if (!"image/jpeg".equals(tipo) || !JpegRiparato.daRiparare(file)) {
+            return;
+        }
+        Path riparato = Files.createTempFile("fototimeline-riparato-", ".jpg");
+        try {
+            if (JpegRiparato.ripara(file, riparato)) {
+                archivio.salvaVista(id, riparato);
+            }
+        } finally {
+            eliminaSilenzioso(riparato);
         }
     }
 
@@ -942,8 +1051,11 @@ public class FotoService {
      * manca), per il resto l'originale.
      */
     public Path fileVista(Foto foto) {
-        if (genere(estensione(foto.getPercorso())) != Genere.HEIC) {
-            return fileOriginale(foto);
+        Genere genere = genere(foto);
+        if (genere != Genere.HEIC) {
+            // Una foto con la vista fatta all'importazione (JPEG riparato, convertita da ffmpeg).
+            Path vista = genere == Genere.FOTO ? archivio.vista(foto.getId()) : null;
+            return vista != null && Files.exists(vista) ? vista : fileOriginale(foto);
         }
         Path vista = archivio.vista(foto.getId());
         if (!Files.exists(vista)) {
@@ -981,7 +1093,10 @@ public class FotoService {
     }
 
     public String contentTypeVista(Foto foto) {
-        return genere(estensione(foto.getPercorso())) == Genere.HEIC ? "image/jpeg" : foto.getContentType();
+        Genere genere = genere(foto);
+        boolean conVista = genere == Genere.HEIC
+                || (genere == Genere.FOTO && Files.exists(archivio.vista(foto.getId())));
+        return conVista ? "image/jpeg" : foto.getContentType();
     }
 
     private void rifaiAnteprime(Foto foto) {
@@ -1001,7 +1116,7 @@ public class FotoService {
         Path originale = fileOriginale(foto);
         Path anteprima = null;
         try {
-            switch (genere(estensione(foto.getPercorso()))) {
+            switch (genere(foto)) {
                 case HEIC -> {
                     anteprima = Files.createTempFile("fototimeline-", ".jpg");
                     media.heicInJpeg(originale, anteprima);
@@ -1012,7 +1127,20 @@ public class FotoService {
                     media.fotogramma(originale, foto.getDurata(), anteprima);
                 }
                 case null, default -> {
-                    // FOTO: si legge direttamente.
+                    // FOTO: si legge direttamente (un JPEG rotto dalla copia riparata); se Java
+                    // non ce la fa, come all'importazione la converte ffmpeg.
+                    try {
+                        archivio.creaMiniatura(foto.getId(), originale, true);
+                        vistaRiparata(foto.getId(), foto.getContentType(), originale);
+                        return;
+                    } catch (IOException e) {
+                        if (!media.videoDisponibile()) {
+                            throw e;
+                        }
+                        anteprima = Files.createTempFile("fototimeline-", ".jpg");
+                        media.immagineInJpeg(originale, anteprima);
+                        archivio.salvaVista(foto.getId(), anteprima);
+                    }
                 }
             }
             archivio.creaMiniatura(foto.getId(), anteprima != null ? anteprima : originale, anteprima == null);
@@ -1344,23 +1472,6 @@ public class FotoService {
     static String estensione(String nome) {
         int punto = nome == null ? -1 : nome.lastIndexOf('.');
         return punto < 0 ? "" : nome.substring(punto + 1).toLowerCase(Locale.ROOT);
-    }
-
-    /** Larghezza e altezza grezze (prima dell'orientamento EXIF), senza decodificare tutta l'immagine. */
-    private static int[] dimensioni(Path file) throws IOException {
-        try (var in = ImageIO.createImageInputStream(file.toFile())) {
-            var lettori = in == null ? null : ImageIO.getImageReaders(in);
-            if (lettori == null || !lettori.hasNext()) {
-                throw new IOException("Nessun lettore per questa immagine");
-            }
-            var lettore = lettori.next();
-            try {
-                lettore.setInput(in);
-                return new int[] {lettore.getWidth(0), lettore.getHeight(0)};
-            } finally {
-                lettore.dispose();
-            }
-        }
     }
 
     private static MessageDigest sha256() {

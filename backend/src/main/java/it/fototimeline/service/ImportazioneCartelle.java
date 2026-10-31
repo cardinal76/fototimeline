@@ -355,10 +355,11 @@ public class ImportazioneCartelle {
             if (automatica.inArrivo().test(p) || automatica.recente(modificatoIl)) {
                 inArrivo++;
             } else if (scartato != null && scartato.uguale(attr.size(), modificatoIl)
-                    && FotoService.erroreDelFile(scartato.motivo())) {
+                    && FotoService.erroreDelFile(scartato.motivo()) && scartato.conLetturaAttuale()) {
                 giaFallite++;
             } else {
-                // Anche un ricordo il cui motivo oggi non è più "del file" (la memoria finita): si rilegge.
+                // Anche un ricordo il cui motivo oggi non è più "del file" (la memoria finita), o
+                // fallito con una lettura di prima (FotoService.VERSIONE_LETTURA): si rilegge.
                 daLeggere.add(p);
                 attributi.put(p, attr);
                 if (scartato != null) {

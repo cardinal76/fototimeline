@@ -216,8 +216,8 @@ public class Rotazioni {
                 Files.createDirectories(file.getParent());
                 Path temporaneo = Files.createTempFile(file.getParent(), "riduzione-", ".jpg");
                 try {
-                    // La vista degli HEIC è già dritta; gli altri si raddrizzano con l'EXIF, poi si girano.
-                    boolean exif = foto.getContentType() == null || !foto.getContentType().startsWith("image/hei");
+                    // La vista degli HEIC (e AVIF) è già dritta; gli altri si raddrizzano con l'EXIF, poi si girano.
+                    boolean exif = !fotoService.vistaDritta(foto);
                     Riduzione.jpeg(sorgente, temporaneo, LATO_VISTA, exif, 0.92, false, foto.getRotazione());
                     Files.move(temporaneo, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 } finally {

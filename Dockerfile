@@ -51,9 +51,10 @@ COPY --from=frontend /src/backend/src/main/resources/static ./src/main/resources
 RUN mvn -B -q -DskipTests package
 
 FROM eclipse-temurin:21-jre
-# curl per l'healthcheck; heif-convert (+ decoder HEVC) per gli HEIC; ffmpeg per i video.
+# curl per l'healthcheck; heif-convert (+ decoder HEVC e AV1) per HEIC e AVIF; ffmpeg per i video
+# (e per le foto che Java non legge).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ffmpeg libheif-examples libheif-plugin-libde265 \
+        curl ffmpeg libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d \
     && rm -rf /var/lib/apt/lists/*
 # Stesso uid di marco su server2: scrive nel cloud montato da rclone con --uid 1000.
 RUN userdel -r ubuntu 2>/dev/null || true; useradd --uid 1000 --create-home fototimeline
