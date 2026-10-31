@@ -140,6 +140,9 @@ main {
 }
 .tassello {
   position: relative;
+  /* Maiusc+clic e trascinamento non selezionano testo. */
+  user-select: none;
+  -webkit-user-select: none;
   padding: 0;
   border: 0;
   background: var(--superficie-2);
@@ -149,6 +152,8 @@ main {
 }
 .tassello img {
   display: block;
+  /* Sul telefono la pressione lunga seleziona: niente menu "salva immagine". */
+  -webkit-touch-callout: none;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -187,6 +192,22 @@ main {
   font-size: 0.75rem;
   color: transparent;
   background: rgb(0 0 0 / 0.25);
+}
+/* Fuori dalla selezione il cerchio c'è solo col mouse sopra la foto (e non si tocca sul telefono). */
+.spunta.al-passaggio {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+@media (hover: hover) {
+  .tassello:hover .spunta.al-passaggio {
+    opacity: 1;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+}
+.spunta:hover {
+  background: rgb(0 0 0 / 0.45);
 }
 .scelto .spunta {
   background: var(--accento);

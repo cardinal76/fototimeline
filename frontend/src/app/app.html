@@ -519,17 +519,20 @@
         [style.flex-basis.px]="base(f)"
         [attr.aria-pressed]="selezione() ? galleria.selezionate().has(f.id) : null"
         [attr.aria-label]="f.titolo || f.nomeOriginale"
+        [attr.data-id]="f.id"
         (click)="clic(f, $event)"
+        (pointerdown)="trascinaSelezione.premi(f.id, $event)"
       >
-        <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" loading="lazy" decoding="async" alt="" />
+        <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" [attr.draggable]="selezione() ? 'false' : null" loading="lazy" decoding="async" alt="" />
         @if (f.preferita) {
           <span class="stella" aria-label="Preferita">★</span>
         }
         @if (f.video) {
           <span class="video" aria-label="Video">▶ {{ durata(f.durata) }}</span>
         }
-        @if (selezione()) {
-          <span class="spunta" aria-hidden="true">✓</span>
+        <!-- Il cerchio: fuori dalla selezione appare passandoci sopra col mouse (gestore); clic o trascinamento selezionano. -->
+        @if (selezione() || galleria.puoGestire()) {
+          <span class="spunta" [class.al-passaggio]="!selezione()" aria-hidden="true">✓</span>
         }
         @if (f.titolo) {
           <span class="didascalia">{{ f.titolo }}</span>

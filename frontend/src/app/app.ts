@@ -51,6 +51,7 @@ import { RiceviCondivisi } from './ricevi-condivisi';
 import { ScegliLuogo } from './scegli-luogo';
 import { SceltaEvento } from './scelta-evento';
 import { Ricordi } from './ricordi';
+import { TrascinaSelezione, conIntervallo, indiciPerId } from './selezione';
 import { TimelineNav } from './timeline-nav';
 import { TimelineScorrevole } from './timeline-scorrevole';
 import { Utenti } from './utenti';
@@ -176,6 +177,26 @@ export class App {
   private readonly fondo = viewChild.required<ElementRef<HTMLElement>>('fondo');
   private ricercaTimer?: ReturnType<typeof setTimeout>;
   private spiaInAttesa = false;
+  /** Posizione di ogni foto caricata, per gli intervalli della selezione. */
+  private readonly indice = computed(() => indiciPerId(this.galleria.foto()));
+  /** L'ultima foto scelta o tolta: da lì parte il Maiusc+clic. */
+  private ancora: string | null = null;
+  /** Trascinamento col mouse e, sul telefono, pressione lunga e poi il dito. */
+  protected readonly trascinaSelezione = new TrascinaSelezione({
+    contenitore: () => this.scorrimento().nativeElement,
+    puo: () => this.galleria.puoGestire(),
+    inSelezione: () => this.selezione(),
+    entra: () => this.selezione.set(true),
+    scelta: (id) => this.galleria.selezionate().has(id),
+    selezionate: () => this.galleria.selezionate(),
+    applica: (base, da, a, scegli) => {
+      const n = conIntervallo(base, this.galleria.foto(), this.indice(), da, a, scegli);
+      if (n) {
+        this.galleria.selezionate.set(n);
+      }
+    },
+    ancora: (id) => (this.ancora = id),
+  });
 
   constructor() {
     afterNextRender(() => {
@@ -290,10 +311,24 @@ export class App {
   }
 
   protected clic(f: Foto, e: MouseEvent): void {
+    if (this.trascinaSelezione.assorbiClic()) {
+      return;
+    }
     // La selezione serve alle azioni sulle foto: solo a chi le può cambiare.
-    if (this.galleria.puoGestire() && (this.selezione() || e.ctrlKey || e.metaKey)) {
+    const dalCerchio = !!(e.target as Element | null)?.closest('.spunta');
+    if (this.galleria.puoGestire() && (this.selezione() || e.ctrlKey || e.metaKey || e.shiftKey || dalCerchio)) {
       this.selezione.set(true);
-      this.galleria.commuta(f.id);
+      // Maiusc+clic: tutte quelle fra l'ultima toccata e questa, nello stato dell'ultima (come Google Foto).
+      const ancora = this.ancora;
+      const intervallo = e.shiftKey && ancora && ancora !== f.id
+        ? conIntervallo(this.galleria.selezionate(), this.galleria.foto(), this.indice(), ancora, f.id, this.galleria.selezionate().has(ancora))
+        : null;
+      if (intervallo) {
+        this.galleria.selezionate.set(intervallo);
+      } else {
+        this.galleria.commuta(f.id);
+      }
+      this.ancora = f.id;
     } else {
       this.aperta.set(f);
     }
@@ -509,6 +544,8 @@ export class App {
   }
 
   protected esciSelezione(): void {
+    this.trascinaSelezione.annulla();
+    this.ancora = null;
     this.selezione.set(false);
     this.galleria.deseleziona();
   }
