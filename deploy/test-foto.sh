@@ -1339,7 +1339,10 @@ jpg "$z/rotto/salvata.jpg" salvata '2013:03:03 10:00:00'
 head -c 300000 /dev/urandom > "$z/rotto/grande.bin"
 (cd "$z/rotto" && zip -q -X -0 "$z/rotto.zip" salvata.jpg grande.bin)
 head -c 200000 "$z/rotto.zip" > "$P10/Zip/rotto.zip"
-(cd "$z/misto" && zip -q -X "$P10/Zip/documenti.zip" doc.pdf)
+# Un nome che finisce col punto ("strano.") non ha estensione: prima era "bad array subscript".
+finto "$z/doc2/strano." strano '2019-03-04 10:00'
+cp -p "$z/misto/doc.pdf" "$z/doc2/"
+(cd "$z/doc2" && zip -q -X "$P10/Zip/documenti.zip" doc.pdf strano.)
 jpg "$z/ripresa/e.jpg" e '2012:12:12 10:00:00'
 finto "$z/ripresa/conto.xls" conto '2012-12-12 10:00'
 (cd "$z/ripresa" && zip -q -r -X "$P10/Zip/ripresa.zip" .)
