@@ -177,6 +177,8 @@ e_media() {
     local b="${1##*/}" e
     [[ "$b" == *.* ]] && [[ "$b" != ._* ]] || return 1
     e="${b##*.}"
+    # "nome." non ha estensione: E_MEDIA[""] sarebbe "bad array subscript".
+    [ -n "$e" ] || return 1
     [ -n "${E_MEDIA[${e,,}]:-}" ]
 }
 # Una riga di rclone hashsum ("sha256  percorso"), senza {64}: il mawk di Ubuntu 22.04 non lo sa.
