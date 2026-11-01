@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -61,7 +62,9 @@ import it.fototimeline.service.EventiFoto.FotoAggiunta;
 import it.fototimeline.service.EventiFoto.FotoDataCambiata;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
+import it.fototimeline.service.EventiFoto.FotoResaPrivata;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
+import it.fototimeline.service.EventiFoto.FotoTornataDiTutti;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Esito;
 import it.fototimeline.service.Risultati.Importazione;
@@ -779,8 +782,15 @@ public class FotoService {
         }
     }
 
-    /** Lo stesso contenuto c'è già: in archivio o nel cestino ({@link #NEL_CESTINO}). */
+    /**
+     * Lo stesso contenuto c'è già: in archivio o nel cestino ({@link #NEL_CESTINO}).
+     * Se è la foto privata di un altro (o si importa in sottofondo) niente scheda
+     * né cestino: solo "Già in archivio", come se fosse di tutti.
+     */
     private static Caricamento giaPresente(String nome, Foto esistente) {
+        if (esistente != null && !Visibilita.puoVedere(esistente)) {
+            return new Caricamento(nome, Esito.DUPLICATA, null, "Già in archivio");
+        }
         return new Caricamento(nome, Esito.DUPLICATA, esistente,
                 esistente != null && esistente.nelCestino() ? NEL_CESTINO : "Già in archivio");
     }
@@ -949,7 +959,7 @@ public class FotoService {
         String meseGiorno = "-%02d-%02d".formatted(oggi.getMonthValue(), oggi.getDayOfMonth());
         Query query = Query.query(Criteria.where("giorno").regex(Pattern.quote(meseGiorno) + "$")
                 .lt(oggi.getYear() + "-"))
-                .addCriteria(nonNelCestino())
+                .addCriteria(visibili())
                 .with(Sort.by(Sort.Order.desc("scattataIl")));
         Map<Integer, List<Foto>> perAnni = new java.util.LinkedHashMap<>();
         for (Foto f : mongo.find(query, Foto.class)) {
@@ -963,14 +973,27 @@ public class FotoService {
                 .toList();
     }
 
+    /**
+     * Per id, anche nel cestino e anche se è privata di qualcuno: per i lavori
+     * in sottofondo. Per chi guarda c'è {@link #trovaVisibile(String)}.
+     */
     public Optional<Foto> trova(String id) {
         return repository.findById(id);
+    }
+
+    /**
+     * Per id, come la vede chi fa la richiesta (anche nel cestino, come
+     * {@link #trova}): vuoto, cioè 404, se è privata di un altro. Ogni
+     * indirizzo che prende una foto per id passa da qui.
+     */
+    public Optional<Foto> trovaVisibile(String id) {
+        return repository.findById(id).filter(Visibilita::puoVedere);
     }
 
     public List<String> tag() {
         // Non distinct: per Mongo un array vuoto vale "undefined" e il driver non lo legge come stringa.
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(nonNelCestino()),
+                Aggregation.match(visibili()),
                 Aggregation.unwind("tag"),
                 Aggregation.group("tag"),
                 Aggregation.sort(Sort.Direction.ASC, "_id"));
@@ -980,7 +1003,7 @@ public class FotoService {
     }
 
     public List<String> album() {
-        return mongo.findDistinct(new Query(nonNelCestino()), "album", Foto.class, String.class).stream()
+        return mongo.findDistinct(new Query(visibili()), "album", Foto.class, String.class).stream()
                 .filter(a -> a != null && !a.isBlank())
                 .sorted(String.CASE_INSENSITIVE_ORDER)
                 .toList();
@@ -989,7 +1012,7 @@ public class FotoService {
     /** Per il filtro "Caricate da": chi ha portato foto e quante, dal più attivo. Senza le foto di nessuno. */
     public List<Caricatore> caricateDa() {
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(Criteria.where("caricataDa").ne(null).and(CESTINO).is(null)),
+                Aggregation.match(visibili().and("caricataDa").ne(null)),
                 Aggregation.group("caricataDa").count().as("conteggio"),
                 Aggregation.sort(Sort.by(Sort.Order.desc("conteggio"), Sort.Order.asc("_id"))));
         return mongo.aggregate(aggregazione, Foto.class, Document.class).getMappedResults().stream()
@@ -1157,10 +1180,10 @@ public class FotoService {
             Boolean preferita, LocalDateTime scattataIl) {
     }
 
-    /** Una foto nel cestino non si modifica (vuoto, cioè 404): prima si ripristina. */
+    /** Una foto nel cestino non si modifica (vuoto, cioè 404): prima si ripristina. Né una privata di un altro. */
     public Optional<Foto> modifica(String id, Modifica m) {
         boolean[] dataCambiata = {false};
-        Optional<Foto> modificata = repository.findById(id).filter(foto -> !foto.nelCestino()).map(foto -> {
+        Optional<Foto> modificata = trovaVisibile(id).filter(foto -> !foto.nelCestino()).map(foto -> {
             foto.setTitolo(vuotoANull(m.titolo()));
             foto.setDescrizione(vuotoANull(m.descrizione()));
             foto.setTag(pulisciTag(m.tag()));
@@ -1229,7 +1252,11 @@ public class FotoService {
      * luogo"; LUOGO_DA_GPS torna al luogo calcolato dal GPS.
      */
     public enum Operazione {
-        ELIMINA, AGGIUNGI_TAG, TOGLI_TAG, IMPOSTA_ALBUM, PREFERITA, NON_PREFERITA, IMPOSTA_LUOGO, LUOGO_DA_GPS
+        ELIMINA, AGGIUNGI_TAG, TOGLI_TAG, IMPOSTA_ALBUM, PREFERITA, NON_PREFERITA, IMPOSTA_LUOGO, LUOGO_DA_GPS,
+        /** Nell'album "Privato" di chi lo chiede: da lì la vede solo lui ({@link #mettiNelPrivato}). */
+        METTI_NEL_PRIVATO,
+        /** Fuori dal suo "Privato": torna di tutti ({@link #togliDalPrivato}). */
+        TOGLI_DAL_PRIVATO
     }
 
     /** Applica la stessa operazione a più foto; restituisce quante ne ha toccate. */
@@ -1237,8 +1264,8 @@ public class FotoService {
         if (ids == null || ids.isEmpty()) {
             return 0;
         }
-        // Tag, album, preferite e luoghi non toccano le foto nel cestino.
-        Query query = Query.query(Criteria.where("_id").in(ids).and(CESTINO).is(null));
+        // Tag, album, preferite e luoghi non toccano le foto nel cestino, né le private degli altri.
+        Query query = Query.query(visibili().and("_id").in(ids));
         return switch (operazione) {
             case ELIMINA -> ids.stream().filter(this::elimina).count();
             case AGGIUNGI_TAG -> {
@@ -1257,7 +1284,65 @@ public class FotoService {
             case NON_PREFERITA -> mongo.updateMulti(query, new Update().set("preferita", false), Foto.class).getModifiedCount();
             case IMPOSTA_LUOGO -> luoghiManuali.imposta(ids, valore);
             case LUOGO_DA_GPS -> luoghiManuali.usaGps(ids);
+            case METTI_NEL_PRIVATO -> mettiNelPrivato(ids);
+            case TOGLI_DAL_PRIVATO -> togliDalPrivato(ids);
         };
+    }
+
+    // ---------------------------------------------------------------- privato
+
+    /**
+     * Mette le foto nell'album "Privato" di chi lo chiede: da lì le vede solo
+     * lui, in tutta l'app (Visibilita). Solo foto che vede, fuori dal cestino,
+     * e non già private (di nessuno). Il file non si muove.
+     *
+     * @return quante sono diventate private
+     * @throws IllegalStateException senza login (il PC): non c'è nessuno di cui siano
+     */
+    public long mettiNelPrivato(Collection<String> ids) {
+        String chi = Visibilita.chiGuarda();
+        if (chi == null) {
+            throw new IllegalStateException("Le foto private servono il login: senza, non sono di nessuno.");
+        }
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        long messe = 0;
+        for (String id : new LinkedHashSet<>(ids)) {
+            boolean messa = mongo.updateFirst(Query.query(Criteria.where("_id").is(id).and(CESTINO).is(null)
+                            .and(Visibilita.CAMPO).is(null)),
+                    new Update().set(Visibilita.CAMPO, chi).set("privataIl", clock.instant()), Foto.class)
+                    .getModifiedCount() > 0;
+            if (messa) {
+                messe++;
+                eventi.publishEvent(new FotoResaPrivata(id));
+            }
+        }
+        return messe;
+    }
+
+    /**
+     * Toglie le foto dall'album "Privato" di chi lo chiede: tornano di tutti.
+     * Solo le sue: quelle private di un altro non le vede nemmeno.
+     *
+     * @return quante sono tornate di tutti
+     */
+    public long togliDalPrivato(Collection<String> ids) {
+        String chi = Visibilita.chiGuarda();
+        if (chi == null || ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        long tolte = 0;
+        for (String id : new LinkedHashSet<>(ids)) {
+            boolean tolta = mongo.updateFirst(Query.query(Criteria.where("_id").is(id).and(CESTINO).is(null)
+                            .and(Visibilita.CAMPO).is(chi)),
+                    new Update().unset(Visibilita.CAMPO).unset("privataIl"), Foto.class).getModifiedCount() > 0;
+            if (tolta) {
+                tolte++;
+                eventi.publishEvent(new FotoTornataDiTutti(id));
+            }
+        }
+        return tolte;
     }
 
     // ---------------------------------------------------------------- cestino
@@ -1266,12 +1351,39 @@ public class FotoService {
     public static final String CESTINO = "eliminataIl";
 
     /**
-     * Le foto che non sono nel cestino: ogni ricerca, conteggio e
-     * aggregazione delle foto parte da qui (o da {@link #criteri(FiltroFoto)},
-     * che lo comprende).
+     * Le foto che non sono nel cestino, <b>anche le private di chiunque</b>:
+     * solo per i lavori in sottofondo che non mostrano foto a nessuno (luoghi,
+     * impronte, contenuto, video, backup). Una lettura per chi guarda parte da
+     * {@link #visibili()} (o da {@link #criteri(FiltroFoto)}, che lo
+     * comprende); un risultato per tutti da {@link #diFamiglia()}.
      */
     public static Criteria nonNelCestino() {
         return Criteria.where(CESTINO).is(null);
+    }
+
+    /**
+     * Le foto che chi fa la richiesta può vedere: fuori dal cestino, e non
+     * private di un altro (Visibilita). Ogni ricerca, conteggio, aggregazione
+     * e modifica di più foto fatta per qualcuno parte da qui. Su un thread
+     * senza richiesta vale {@link #diFamiglia()}.
+     */
+    public static Criteria visibili() {
+        return visibiliA(Visibilita.chiGuarda());
+    }
+
+    /** Come {@link #visibili()} per {@code username} (null: solo quelle di tutti). */
+    public static Criteria visibiliA(String username) {
+        Criteria c = Criteria.where(CESTINO).is(null).and(Visibilita.CAMPO);
+        return username == null ? c.is(null) : c.in(Arrays.asList(null, username));
+    }
+
+    /**
+     * Le foto di tutta la famiglia: fuori dal cestino e non private di
+     * nessuno. Per quello che un lavoro fa vedere a tutti (eventi, quasi
+     * uguali, ricordi su Telegram, numeri della Salute).
+     */
+    public static Criteria diFamiglia() {
+        return visibiliA(null);
     }
 
     /** Le foto nel cestino. */
@@ -1286,11 +1398,12 @@ public class FotoService {
      * sempre ({@link #eliminaPerSempre}), a mano o dopo i giorni del cestino.
      * Col cloud smontato no, come prima.
      *
-     * @return false se non c'è o è già nel cestino
+     * @return false se non c'è, è già nel cestino o è privata di un altro
      */
     public boolean elimina(String id) {
         archivio.verificaDisponibile();
-        boolean messa = mongo.updateFirst(Query.query(Criteria.where("_id").is(id).and(CESTINO).is(null)),
+        // Le private di un altro non si toccano: per chi chiede non ci sono.
+        boolean messa = mongo.updateFirst(Query.query(visibili().and("_id").is(id)),
                 new Update().set(CESTINO, clock.instant()), Foto.class).getModifiedCount() > 0;
         if (messa) {
             eventi.publishEvent(new FotoNelCestino(id));
@@ -1349,7 +1462,8 @@ public class FotoService {
 
     /**
      * I filtri della timeline come criteri di Mongo (li usa anche la ricerca
-     * per contenuto), sempre senza le foto nel cestino.
+     * per contenuto), sempre senza le foto nel cestino e senza le private
+     * degli altri ({@link #visibili()}).
      */
     public static Criteria criteri(FiltroFoto f) {
         return criteri(f, Set.of());
@@ -1361,7 +1475,12 @@ public class FotoService {
      */
     public static Criteria criteri(FiltroFoto f, Collection<String> nazioni) {
         List<Criteria> e = new ArrayList<>();
-        e.add(nonNelCestino());
+        String chi = Visibilita.chiGuarda();
+        e.add(visibiliA(chi));
+        // L'album "Privato": solo le sue. Senza login non ce ne sono (null non è di nessuno).
+        if (Boolean.TRUE.equals(f.privato())) {
+            e.add(chi == null ? Criteria.where("_id").in(List.of()) : Criteria.where(Visibilita.CAMPO).is(chi));
+        }
         if (f.q() != null && !f.q().isBlank()) {
             Pattern p = Pattern.compile(Pattern.quote(f.q().trim()), Pattern.CASE_INSENSITIVE);
             List<Criteria> o = new ArrayList<>(List.of(

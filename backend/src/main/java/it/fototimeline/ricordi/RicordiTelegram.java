@@ -241,12 +241,15 @@ public class RicordiTelegram {
         return scelte.size() == 1 ? "Mandata 1 foto" : "Mandate " + scelte.size() + " foto";
     }
 
-    /** Foto e video scattati lo stesso giorno e mese negli anni prima, in ordine di scatto. */
+    /**
+     * Foto e video scattati lo stesso giorno e mese negli anni prima, in ordine
+     * di scatto. Solo quelli di tutti: la chat è della famiglia, le private no.
+     */
     private List<Foto> delGiorno(LocalDate oggi) {
         String meseGiorno = "-%02d-%02d".formatted(oggi.getMonthValue(), oggi.getDayOfMonth());
         Query query = Query.query(Criteria.where("giorno").regex(Pattern.quote(meseGiorno) + "$")
                 .lt(oggi.getYear() + "-"))
-                .addCriteria(FotoService.nonNelCestino())
+                .addCriteria(FotoService.diFamiglia())
                 .with(Sort.by(Sort.Order.asc("scattataIl")));
         return mongo.find(query, Foto.class);
     }

@@ -43,6 +43,7 @@ import it.fototimeline.media.Riduzione;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.service.Rotazioni;
+import it.fototimeline.service.Visibilita;
 
 /**
  * Link pubblici a un gruppo di foto. Il token è l'unica chiave: 256 bit
@@ -136,8 +137,8 @@ public class CondivisioniService {
             c.setDescrizioneOrigine(dal.equals(al) ? dal.toString() : dal + " – " + al);
             criteri = Criteria.where("scattataIl").gte(dal.atStartOfDay()).lt(al.plusDays(1).atStartOfDay());
         }
-        // Mai le foto nel cestino, nemmeno scelte per id.
-        Query query = new Query(criteri).addCriteria(FotoService.nonNelCestino())
+        // Mai le foto nel cestino, nemmeno scelte per id; né le private di un altro (le sue sì: le condivide lui).
+        Query query = new Query(criteri).addCriteria(FotoService.visibiliA(utente))
                 .with(Sort.by(Sort.Order.asc("scattataIl"), Sort.Order.asc("_id")));
         query.fields().include("_id");
         List<String> foto = mongo.find(query, Foto.class).stream().map(Foto::getId).toList();
@@ -255,10 +256,14 @@ public class CondivisioniService {
         return new Galleria(c.getTitolo(), c.getScadeIl(), c.isDownload(), archivio.disponibile(), foto);
     }
 
-    /** Le foto ancora esistenti della condivisione, nel suo ordine: quelle nel cestino no (tornano se ripristinate). */
+    /**
+     * Le foto ancora esistenti della condivisione, nel suo ordine: quelle nel
+     * cestino no (tornano se ripristinate), e nemmeno quelle diventate private
+     * di qualcuno che non è chi ha creato il link (tornano se escono dal privato).
+     */
     public List<Foto> foto(Condivisione c) {
-        Map<String, Foto> perId = mongo.find(Query.query(Criteria.where("id").in(c.getFoto())
-                        .and(FotoService.CESTINO).is(null)), Foto.class).stream()
+        Map<String, Foto> perId = mongo.find(Query.query(FotoService.visibiliA(c.getCreataDa())
+                        .and("id").in(c.getFoto())), Foto.class).stream()
                 .collect(Collectors.toMap(Foto::getId, Function.identity()));
         return c.getFoto().stream().map(perId::get).filter(f -> f != null).toList();
     }
@@ -268,8 +273,9 @@ public class CondivisioniService {
         if (!c.getFoto().contains(id)) {
             throw sconosciuto();
         }
-        // Nel cestino vale come eliminata: 404.
-        return fotoService.trova(id).filter(f -> !f.nelCestino()).orElseThrow(CondivisioniService::sconosciuto);
+        // Nel cestino vale come eliminata: 404. Privata di un altro (non di chi ha fatto il link): 404 lo stesso.
+        return fotoService.trova(id).filter(f -> !f.nelCestino() && Visibilita.puoVedere(f, c.getCreataDa()))
+                .orElseThrow(CondivisioniService::sconosciuto);
     }
 
     public Path miniatura(Foto foto) {

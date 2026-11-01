@@ -50,6 +50,7 @@ import it.fototimeline.google.ZipTakeout;
 import it.fototimeline.notte.GiroNotturno;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.Visibilita;
 import it.fototimeline.service.ImportazioneAutomaticaProperties;
 import it.fototimeline.service.LavoriImportazione;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
@@ -615,9 +616,10 @@ public class Salute {
     // ------------------------------------------------------------ numeri
 
     private VoceSalute archivio() throws IOException {
-        long totale = mongo.count(new Query(FotoService.nonNelCestino()), Foto.class);
-        long video = mongo.count(Query.query(Criteria.where("video").is(true).and(FotoService.CESTINO).is(null)), Foto.class);
-        long cestino = mongo.count(new Query(FotoService.nelCestino()), Foto.class);
+        // Solo le foto di tutti: le private non si contano (né quante sono, né nel cestino), per nessuno.
+        long totale = mongo.count(new Query(FotoService.diFamiglia()), Foto.class);
+        long video = mongo.count(Query.query(FotoService.diFamiglia().and("video").is(true)), Foto.class);
+        long cestino = mongo.count(Query.query(FotoService.nelCestino().and(Visibilita.CAMPO).is(null)), Foto.class);
         List<String> dettagli = new ArrayList<>();
         if (cestino > 0) {
             dettagli.add(numero(cestino) + " nel cestino (non contate)");

@@ -42,8 +42,11 @@ import it.fototimeline.eventi.RilevamentoEventi.Regole;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
 import it.fototimeline.service.EventiFoto.FotoDataCambiata;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
+import it.fototimeline.service.EventiFoto.FotoResaPrivata;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
+import it.fototimeline.service.EventiFoto.FotoTornataDiTutti;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.Visibilita;
 
 /**
  * Gli eventi: il calcolo ("Calcola eventi", tutto l'archivio, in sottofondo
@@ -73,6 +76,12 @@ import it.fototimeline.service.FotoService;
  * a mano) entrano in lui, anche se caricate prima dell'ultima modifica.
  * Due eventi per date non si sovrappongono; unire e dividere non valgono per
  * loro (si cambiano le date).
+ *
+ * <p><b>Foto private</b> (service.Visibilita): non entrano in nessun evento,
+ * né automatico né per date né a mano. Il riepilogo di un evento (nome, date,
+ * luogo, copertina, quante foto) lo vedono tutti e non deve dire niente di
+ * loro. Messa nel privato una foto esce dal suo evento; tornata di tutti, il
+ * ricalcolo leggero dei suoi giorni la rimette dove va.
  */
 @Service
 public class EventiService {
@@ -201,7 +210,7 @@ public class EventiService {
         }
         Criteria c = proprieta.casa() != null ? where("luogo").is(proprieta.casa()) : where("luogo").ne(null);
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(c.and(FotoService.CESTINO).is(null)),
+                Aggregation.match(c.and(FotoService.CESTINO).is(null).and(Visibilita.CAMPO).is(null)),
                 Aggregation.group(LuogoFoto.CAMPI.toArray(String[]::new)).count().as("conteggio"),
                 Aggregation.sort(Sort.Direction.DESC, "conteggio"),
                 Aggregation.limit(1));
@@ -293,7 +302,7 @@ public class EventiService {
     private record Esito(int foto, int inEventi, int eventi, boolean completo) {
     }
 
-    /** Le foto che il calcolo raggruppa: con una data, fuori dal cestino, non fissate a mano. */
+    /** Le foto che il calcolo raggruppa: con una data, fuori dal cestino, non private, non fissate a mano. */
     private static Criteria daRaggruppare(LocalDateTime da, LocalDateTime finoA) {
         Criteria data = where("scattataIl").ne(null);
         if (da != null) {
@@ -302,7 +311,7 @@ public class EventiService {
         if (finoA != null) {
             data = data.lte(finoA);
         }
-        return data.and(FotoService.CESTINO).is(null).and("eventoFisso").ne(true);
+        return data.and(FotoService.CESTINO).is(null).and(Visibilita.CAMPO).is(null).and("eventoFisso").ne(true);
     }
 
     private static Query perGruppo(Criteria c) {
@@ -411,7 +420,7 @@ public class EventiService {
         @Override
         public void chiuso(Gruppo g) {
             Criteria delGruppo = where("scattataIl").gte(g.inizio()).lte(g.fine())
-                    .and(FotoService.CESTINO).is(null).and("eventoFisso").ne(true);
+                    .and(FotoService.CESTINO).is(null).and(Visibilita.CAMPO).is(null).and("eventoFisso").ne(true);
             String id = null;
             if (g.conteggio() >= regole.minimoFoto()) {
                 id = idAutomatico(g);
@@ -621,6 +630,40 @@ public class EventiService {
     }
 
     /**
+     * Nel "Privato" di qualcuno: esce dal suo evento (anche fisso a mano), che
+     * aggiorna subito conteggio e copertina; il giorno si rifà. Non lancia.
+     */
+    @EventListener
+    public void resaPrivata(FotoResaPrivata evento) {
+        try {
+            synchronized (lock) {
+                Query q = Query.query(where("_id").is(evento.id()));
+                q.fields().include("giorno", "evento");
+                Foto f = mongo.findOne(q, Foto.class);
+                if (f == null) {
+                    return;
+                }
+                mongo.updateFirst(Query.query(where("_id").is(f.getId())),
+                        new Update().unset("evento").set("eventoFisso", false), Foto.class);
+                if (f.getEvento() != null) {
+                    aggiornaRiepilogo(f.getEvento());
+                }
+                if (f.getGiorno() != null) {
+                    segnaGiorno(f.getGiorno());
+                }
+            }
+        } catch (RuntimeException e) {
+            log.warn("Eventi: non riesco a togliere la foto privata {}: {}", evento.id(), e.toString());
+        }
+    }
+
+    /** Tornata di tutti: il ricalcolo leggero del suo giorno la rimette in un evento (anche per date). */
+    @EventListener
+    public void tornataDiTutti(FotoTornataDiTutti evento) {
+        toccata(evento.id());
+    }
+
+    /**
      * Una foto entrata, finita nel cestino o tornata: il suo giorno si rifà
      * al prossimo ricalcolo leggero, e il suo evento (se ne ha uno) aggiorna
      * subito conteggio e copertina. Non lancia: chi pubblica non deve fallire.
@@ -654,7 +697,7 @@ public class EventiService {
         }
         Gruppo g = null;
         try (Stream<Foto> foto = mongo.stream(perGruppo(where("evento").is(id).and(FotoService.CESTINO).is(null)
-                .and("scattataIl").ne(null)), Foto.class)) {
+                .and(Visibilita.CAMPO).is(null).and("scattataIl").ne(null)), Foto.class)) {
             for (var it = foto.iterator(); it.hasNext();) {
                 FotoPerEvento f = perEvento(it.next());
                 if (g == null) {
@@ -707,9 +750,9 @@ public class EventiService {
         mongo.updateMulti(Query.query(where("evento").is(e.getId())), new Update().set("eventoFisso", true), Foto.class);
     }
 
-    /** Le foto (fuori dal cestino, con una data) tra questi id. */
+    /** Le foto (fuori dal cestino, non private, con una data) tra questi id. */
     private static Criteria fotoValide(Collection<String> ids) {
-        return where("_id").in(ids).and(FotoService.CESTINO).is(null).and("scattataIl").ne(null);
+        return FotoService.diFamiglia().and("_id").in(ids).and("scattataIl").ne(null);
     }
 
     /** Gli eventi che hanno adesso queste foto. */
@@ -834,7 +877,7 @@ public class EventiService {
     public long togli(List<String> fotoIds) {
         synchronized (lock) {
             Criteria foto = new Criteria().andOperator(where("_id").in(fotoIds == null ? List.of() : fotoIds),
-                    where("evento").ne(null));
+                    where("evento").ne(null), FotoService.visibili());
             Set<String> prima = eventiDi(foto);
             long n = mongo.updateMulti(Query.query(foto), new Update().unset("evento").set("eventoFisso", true),
                     Foto.class).getModifiedCount();
@@ -969,8 +1012,8 @@ public class EventiService {
                 Query.query(new Criteria().andOperator(giorni, where("evento").ne(null))), "evento", Foto.class,
                 String.class));
         prima.remove(e.getId());
-        mongo.updateMulti(Query.query(giorni), new Update().set("evento", e.getId()).set("eventoFisso", true),
-                Foto.class);
+        mongo.updateMulti(Query.query(new Criteria().andOperator(giorni, where(Visibilita.CAMPO).is(null))),
+                new Update().set("evento", e.getId()).set("eventoFisso", true), Foto.class);
         aggiornaRiepilogo(e.getId());
         prima.forEach(this::aggiornaRiepilogo);
     }
@@ -1015,9 +1058,14 @@ public class EventiService {
         try {
             synchronized (lock) {
                 Query q = Query.query(where("_id").is(evento.id()));
-                q.fields().include("scattataIl", "giorno", "evento");
+                q.fields().include("scattataIl", "giorno", "evento", Visibilita.CAMPO);
                 Foto f = mongo.findOne(q, Foto.class);
                 if (f == null || f.getScattataIl() == null) {
+                    return;
+                }
+                if (f.getPrivataDi() != null) {
+                    // Privata: fuori dagli eventi. Il giorno si rifà lo stesso, se un giorno torna di tutti.
+                    segnaGiorno(f.getScattataIl().toLocalDate().toString());
                     return;
                 }
                 LocalDate giorno = f.getScattataIl().toLocalDate();

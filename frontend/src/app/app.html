@@ -126,6 +126,17 @@
         >
           ★ Preferite
         </button>
+        @if (galleria.puoPrivato()) {
+          <button
+            type="button"
+            class="interruttore"
+            title="Il tuo album: le foto che vedi solo tu"
+            [attr.aria-pressed]="!!galleria.filtro().privato"
+            (click)="galleria.imposta({ privato: !galleria.filtro().privato || undefined })"
+          >
+            🔒 Privato
+          </button>
+        }
         <div class="piede">
           <span class="tenue">{{ quantiFiltri() ? quantiFiltri() + (quantiFiltri() === 1 ? ' filtro attivo' : ' filtri attivi') : 'Nessun filtro' }}</span>
           @if (filtriAttivi()) {
@@ -502,6 +513,13 @@
     @if (galleria.filtro().evento) {
       <p class="salto"><app-filtro-evento [riga]="true" /></p>
     }
+    @if (galleria.filtro().privato) {
+      <p class="salto privato">
+        🔒 Il tuo album <b>Privato</b>: queste foto le vedi solo tu, nemmeno l'amministratore le trova nell'app.
+        <button type="button" class="link" (click)="dialogoCestinoPrivato.set(true)">nel cestino</button>
+        <button type="button" class="link" (click)="galleria.imposta({ privato: undefined })">tutte le foto</button>
+      </p>
+    }
     @if (galleria.filtro().al; as al) {
       <p class="salto">
         Foto fino a {{ al | date: 'MMMM y' }}
@@ -526,6 +544,9 @@
         <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" [attr.draggable]="selezione() ? 'false' : null" loading="lazy" decoding="async" alt="" />
         @if (f.preferita) {
           <span class="stella" aria-label="Preferita">★</span>
+        }
+        @if (f.privataDi) {
+          <span class="lucchetto" title="Nel tuo Privato: la vedi solo tu" aria-label="Privata">🔒</span>
         }
         @if (f.video) {
           <span class="video" aria-label="Video">▶ {{ durata(f.durata) }}</span>
@@ -626,6 +647,13 @@
     <button type="button" title="Ruota a destra di 90°" aria-label="Ruota a destra" (click)="ruota(90)">↻ Ruota</button>
     <button type="button" (click)="apriCondividiSelezione()">Condividi…</button>
     <button type="button" title="Nuovo evento, aggiungi, togli, dividi" (click)="dialogoSceltaEvento.set(true)">Evento…</button>
+    @if (galleria.puoPrivato()) {
+      @if (galleria.filtro().privato) {
+        <button type="button" title="Tornano di tutti" (click)="operazione('TOGLI_DAL_PRIVATO')">Togli dal privato</button>
+      } @else {
+        <button type="button" title="Le vedrai solo tu" (click)="operazione('METTI_NEL_PRIVATO')">🔒 Nel privato</button>
+      }
+    }
     <button type="button" class="pericolo" (click)="operazione('ELIMINA')">Elimina</button>
     <button type="button" class="link" (click)="galleria.deseleziona()">Deseleziona</button>
   </div>
@@ -1244,6 +1272,9 @@
   <app-persone [admin]="!!galleria.io()?.admin" (chiudi)="dialogoPersone.set(false)" />
 }
 
+@if (dialogoCestinoPrivato()) {
+  <app-cestino [disponibile]="galleria.archivioDisponibile()" [privato]="true" (chiudi)="dialogoCestinoPrivato.set(false)" />
+}
 @if (dialogoCestino()) {
   <app-cestino [disponibile]="galleria.archivioDisponibile()" (chiudi)="dialogoCestino.set(false)" />
 }

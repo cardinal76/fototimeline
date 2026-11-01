@@ -86,11 +86,11 @@ public class LuoghiService {
     /**
      * Nazioni, regioni (con le province in Italia) e città con quante foto, le
      * più fotografate prima. Contano anche le foto con solo una regione o una
-     * nazione scelta a mano; quelle nel cestino no.
+     * nazione scelta a mano; quelle nel cestino no, le private degli altri nemmeno.
      */
     public ElencoLuoghi elenco() {
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(where("codiceNazione").ne(null).and(FotoService.CESTINO).is(null)),
+                Aggregation.match(FotoService.visibili().and("codiceNazione").ne(null)),
                 Aggregation.group("codiceNazione", "nazione", "regione", "provincia", "luogo").count().as("conteggio"));
         Map<String, Map<String, List<Document>>> albero = new LinkedHashMap<>();
         Map<String, String> nomiNazioni = new LinkedHashMap<>();
@@ -270,7 +270,7 @@ public class LuoghiService {
             u = campi(l.luogo(), l.provincia(), l.regione(), l.nazione(), l.codiceNazione(), l.latitudine(),
                     l.longitudine(), OrigineLuogo.MANUALE);
         }
-        return mongo.updateMulti(Query.query(where("_id").in(ids).and(FotoService.CESTINO).is(null)), u, Foto.class)
+        return mongo.updateMulti(Query.query(FotoService.visibili().and("_id").in(ids)), u, Foto.class)
                 .getModifiedCount();
     }
 
@@ -285,7 +285,7 @@ public class LuoghiService {
         if (ids == null || ids.isEmpty()) {
             return 0;
         }
-        Query query = Query.query(where("_id").in(ids).and(FotoService.CESTINO).is(null));
+        Query query = Query.query(FotoService.visibili().and("_id").in(ids));
         query.fields().include("latitudine", "longitudine");
         BulkOperations gruppo = mongo.bulkOps(BulkOperations.BulkMode.UNORDERED, Foto.class);
         int quante = 0;

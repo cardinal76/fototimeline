@@ -1486,8 +1486,8 @@ gli risponde 403 su tutto tranne `/api/io`).
 | Ruolo | Può |
 |---|---|
 | `fototimeline-admin` (amministratore) | tutto: anche Strumenti (lavori, cloud, backup, salute, telefoni, Google Foto, cestino, quasi uguali, pagine Persone ed Eventi, le condivisioni di tutti) e la pagina **Utenti** |
-| `fototimeline-gestore` (gestore) | le foto: vedere, scaricare gli originali, caricare foto e video, cambiare data, tag, album, luogo, evento e persone dal visore e dalla selezione, creare, cambiare ed eliminare gli eventi per date, ruotare, preferite, eliminare (nel cestino), condividere con un link. **Niente Strumenti né utenti** |
-| `fototimeline-utilizzatore` (utilizzatore) | **solo guardare**: timeline, ricerca, filtri, mappa, visore, "Accadde oggi". Niente ⤓ né originali (il server dà la foto ridotta a 2048 px senza EXIF, e i video solo da guardare), niente modifiche, eliminazioni, link, selezione, Strumenti. Uno screenshot resta possibile: non lo si impedisce |
+| `fototimeline-gestore` (gestore) | le foto: vedere, scaricare gli originali, caricare foto e video, cambiare data, tag, album, luogo, evento e persone dal visore e dalla selezione, creare, cambiare ed eliminare gli eventi per date, ruotare, preferite, eliminare (nel cestino), condividere con un link, il suo album **Privato** (sotto, "Foto private"). **Niente Strumenti né utenti** |
+| `fototimeline-utilizzatore` (utilizzatore) | **solo guardare**: timeline, ricerca, filtri, mappa, visore, "Accadde oggi". Niente ⤓ né originali (il server dà la foto ridotta a 2048 px senza EXIF, e i video solo da guardare), niente modifiche, eliminazioni, link, selezione, album Privato, Strumenti. Uno screenshot resta possibile: non lo si impedisce |
 
 Il permesso di ogni indirizzo è in `ConfigurazioneSicurezza.permessi` e, riga per riga,
 in `SicurezzaTest.INVENTARIO` (un indirizzo nuovo che non c'è fa fallire i test).
@@ -1659,6 +1659,50 @@ FOTOTIMELINE_CESTINO_GIORNI=30
   pagina *Cestino* (ripristinare, eliminare per sempre, svuotare) e le *Quasi
   uguali* stanno in Strumenti e sono dell'**amministratore**. Le preferite non
   si tolgono dalle quasi uguali, come prima.
+
+## Foto private
+
+Ogni account che può scegliere le foto (**gestore** e **amministratore**, col login acceso)
+ha un album **Privato**: *Seleziona* → **🔒 Nel privato**, o 🔓 nel visore. Una foto nel
+Privato di qualcuno la vede **solo lui**, in tutta l'app: non la vedono gli altri familiari
+e **nemmeno l'amministratore**. Si toglie dal Privato (torna di tutti) solo da chi ce l'ha
+messa: Filtri → **🔒 Privato**, *Seleziona* → **Togli dal privato**, o 🔒 nel visore. Nella
+sua timeline le sue private hanno un lucchetto.
+
+- **Chi la mette**: chiunque la veda e la possa selezionare, anche se l'ha caricata un
+  altro; da lì in poi è sua (`privataDi` = il suo username). Chi l'aveva caricata non la
+  vede più. L'**utilizzatore** no: guarda soltanto, e non ha foto sue da nascondere agli
+  altri. Senza login (il PC) non c'è nessuno di cui sia: niente Privato.
+- **Dove non si vede, per gli altri**: timeline e colonna dei mesi, ricerca (testi e
+  contenuto), filtri (tag, album, luoghi, "Caricate da", persone, eventi, date) e i loro
+  conteggi, mappa, "Accadde oggi" (su **Telegram** le private non vanno mai, nemmeno le sue: la
+  chat è della famiglia), album, quasi uguali, pagina Cestino dell'admin, numeri della
+  **Salute**. Per id (scheda, miniatura, vista, file, download, volti) risponde **404**,
+  come se non ci fosse. Nessuno degli altri la modifica, la gira, la elimina, la mette in
+  un evento o in un link: le azioni sulla selezione la saltano.
+- **Eventi e persone**: una foto privata sta fuori dagli eventi (automatici, per date, a
+  mano) e i suoi volti non contano nelle persone (come nel cestino): nome, date, luogo,
+  copertina e numeri di un evento o di una persona li vedono tutti. Il ricalcolo leggero
+  degli eventi (ogni 10 minuti) rifà il giorno; tolta dal Privato, rientra.
+- **Link condivisi**: un link di un altro che la conteneva smette di mostrarla (404, e non
+  è nello zip); un link creato da chi l'ha messa nel Privato la mostra ancora (l'ha
+  condivisa lui). Un link nuovo di un altro non la prende, nemmeno per id o per album.
+- **Cestino**: eliminata, va nel cestino come le altre ma la pagina *Cestino*
+  dell'amministratore non la mostra. Il proprietario la ritrova in Filtri → 🔒 Privato →
+  **nel cestino** e la ripristina (resta privata), anche da gestore. Dopo
+  `FOTOTIMELINE_CESTINO_GIORNI` se ne va da sola come le altre; *Svuota cestino* non la tocca.
+- **I lavori** (Indicizza archivio, luoghi, contenuto, impronte, video compatibili, backup
+  dei metadati) lavorano su tutte le foto, private comprese: non mostrano foto a nessuno.
+  Il backup dei metadati ha `privataDi`, quindi un ripristino la lascia privata.
+
+**Il limite, da sapere**: il Privato è una regola **dell'app**, non una cassaforte. Il file
+resta dov'era su LifetimeCloud (`FotoTimeline/AAAA/MM/GG/`), con la miniatura sul disco di
+server2 e la scheda in MongoDB; niente è cifrato né spostato. Chi ha accesso diretto al
+cloud (WebDAV, l'app di LifetimeCloud, rclone), a server2 (`ssh`, i volumi di Docker) o a
+MongoDB (`mongosh`, il backup in `.backup/`) la vede lo stesso: in pratica
+**l'amministratore come proprietario del sistema**. Nell'app no, nemmeno lui. Chi l'aveva
+già aperta prima che diventasse privata può averne ancora la miniatura nella cache del suo
+browser.
 
 ## Eventi
 

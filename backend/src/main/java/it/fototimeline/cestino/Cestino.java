@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import it.fototimeline.dominio.Foto;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.Visibilita;
 
 /**
  * Il cestino: le foto eliminate (da visore, selezione e quasi uguali,
@@ -65,9 +66,24 @@ public class Cestino {
         this.clock = clock.orElse(Clock.systemUTC());
     }
 
-    /** Le foto nel cestino, dall'ultima eliminata. */
+    /** Le foto nel cestino, dall'ultima eliminata: senza le private degli altri (per chi guarda non ci sono). */
     public PaginaCestino elenco(int pagina, int dimensione) {
-        Query query = new Query(FotoService.nelCestino());
+        return elenco(Visibilita.perChiGuarda(), pagina, dimensione);
+    }
+
+    /**
+     * Le foto private di chi guarda che sono nel cestino: le vede e le
+     * ripristina solo lui, anche da gestore (album "Privato"), perché la pagina
+     * Cestino dell'amministratore non le mostra.
+     */
+    public PaginaCestino elencoPrivate(int pagina, int dimensione) {
+        String chi = Visibilita.chiGuarda();
+        return elenco(chi == null ? Criteria.where("_id").in(List.of()) : Criteria.where(Visibilita.CAMPO).is(chi),
+                pagina, dimensione);
+    }
+
+    private PaginaCestino elenco(Criteria quali, int pagina, int dimensione) {
+        Query query = new Query(FotoService.nelCestino()).addCriteria(quali);
         long totale = mongo.count(query, Foto.class);
         query.with(Sort.by(Sort.Order.desc(FotoService.CESTINO), Sort.Order.desc("_id")))
                 .skip((long) pagina * dimensione)
@@ -92,24 +108,55 @@ public class Cestino {
                 : eliminataIl.plus(Duration.ofDays(properties.giorni()));
     }
 
-    /** Rimette nell'archivio le foto scelte; restituisce quante. Col cloud smontato 503. */
+    /**
+     * Rimette nell'archivio le foto scelte; restituisce quante. Solo quelle che
+     * chi chiede vede (le private degli altri no). Col cloud smontato 503.
+     */
     public long ripristina(Collection<String> ids) {
         archivio.verificaDisponibile();
-        return distinti(ids).stream().filter(fotoService::ripristina).count();
+        return visibili(distinti(ids), Visibilita.perChiGuarda()).stream().filter(fotoService::ripristina).count();
     }
 
-    /** Elimina per sempre le foto scelte, file compresi; solo quelle nel cestino. Col cloud smontato 503. */
+    /** Il ripristino dall'album "Privato": solo le private di chi chiede. Col cloud smontato 503. */
+    public long ripristinaPrivate(Collection<String> ids) {
+        archivio.verificaDisponibile();
+        String chi = Visibilita.chiGuarda();
+        if (chi == null) {
+            return 0;
+        }
+        return visibili(distinti(ids), Criteria.where(Visibilita.CAMPO).is(chi)).stream()
+                .filter(fotoService::ripristina).count();
+    }
+
+    /**
+     * Elimina per sempre le foto scelte, file compresi; solo quelle nel cestino
+     * e che chi chiede vede. Col cloud smontato 503.
+     */
     public long eliminaPerSempre(Collection<String> ids) {
         archivio.verificaDisponibile();
-        return distinti(ids).stream().filter(fotoService::eliminaPerSempre).count();
+        return visibili(distinti(ids), Visibilita.perChiGuarda()).stream().filter(fotoService::eliminaPerSempre)
+                .count();
     }
 
-    /** "Svuota cestino": tutte, per sempre. Col cloud smontato 503. */
+    /** Fra gli id scelti, quelli che passano {@code quali}, nell'ordine dato. */
+    private List<String> visibili(Collection<String> ids, Criteria quali) {
+        Query query = Query.query(Criteria.where("_id").in(ids)).addCriteria(quali);
+        query.fields().include("_id");
+        var buoni = mongo.find(query, Foto.class).stream().map(Foto::getId).collect(java.util.stream.Collectors.toSet());
+        return ids.stream().filter(buoni::contains).toList();
+    }
+
+    /**
+     * "Svuota cestino": tutte quelle che chi chiede vede, per sempre; le
+     * private degli altri restano (se ne vanno da sole dopo i giorni del
+     * cestino, {@link #pulisci()}). Col cloud smontato 503.
+     */
     public long svuota() {
         archivio.verificaDisponibile();
         long eliminate = 0;
         String ultimo = "";
-        for (List<Foto> blocco; !(blocco = blocco(FotoService.nelCestino(), ultimo)).isEmpty();) {
+        Criteria quali = new Criteria().andOperator(FotoService.nelCestino(), Visibilita.perChiGuarda());
+        for (List<Foto> blocco; !(blocco = blocco(quali, ultimo)).isEmpty();) {
             for (Foto f : blocco) {
                 if (fotoService.eliminaPerSempre(f.getId())) {
                     eliminate++;

@@ -383,6 +383,19 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   apre vede solo quelle foto, senza login. Spunta "Permetti di scaricare" solo se servono gli
   originali (hanno dentro i dati della fotocamera e la posizione). I link creati, con le visite, sono in
   *Condivisioni*, da dove si revocano. Col cloud smontato chi ha il link vede solo le miniature.
+- **Privato** (gestore e amministratore): le foto che vuoi vedere solo tu. *Seleziona* le foto →
+  **🔒 Nel privato**, o il lucchetto 🔓 nel visore. Da quel momento quelle foto le vedi solo tu:
+  spariscono per gli altri familiari e anche per l'amministratore, da timeline, ricerca, mappa,
+  album, eventi, persone, "Accadde oggi", Telegram e dai link condivisi dagli altri. Le ritrovi con
+  Filtri → **🔒 Privato** (nella timeline hanno un lucchetto); da lì **Togli dal privato** le
+  rimette per tutti. Se ne elimini una, la ritrovi lì sotto, **nel cestino**. Chi guarda soltanto
+  (utilizzatore) non ha un Privato.
+
+  **Attenzione, in parole semplici**: il Privato nasconde le foto *nell'app*, non le chiude in
+  cassaforte. I file restano dove sono su LifetimeCloud, nelle cartelle per giorno, e non sono
+  cifrati. Chi entra direttamente nel cloud (WebDAV, l'app di LifetimeCloud), nel server o nel
+  database li vede lo stesso: cioè l'amministratore, che è il proprietario del sistema (Marco). Per
+  cose davvero segrete, meglio non caricarle.
 - **Quasi uguali**: raffiche e copie della stessa foto (ridimensionate, passate da WhatsApp). Per
   ogni gruppo la suggerita è segnata **Tieni**; un clic su una foto cambia tieni/togli, poi
   **Togli le altre** (chiede conferma; serve il cloud montato), **Non sono doppioni** o **Salta**.
@@ -440,13 +453,14 @@ Run workflow) la mette su server2.
 
 ## 5. Aggiungere un familiare
 
-L'archivio è di famiglia: tutti vedono tutte le foto, ma ognuno ha il suo telefono, e ogni foto
-sa chi l'ha portata. Per aggiungere Anna:
+L'archivio è di famiglia: tutti vedono tutte le foto (tranne quelle che ognuno mette nel suo
+**Privato**, sezione 4), ma ognuno ha il suo telefono, e ogni foto sa chi l'ha portata. Per aggiungere Anna:
 
 **5.1 L'utente.** Dall'app, da amministratore: Strumenti → **Utenti** → **Nuovo utente**
 (username, nome, email, ruolo, password iniziale o invito per email). Il ruolo:
 
-- **Gestore**: carica, modifica, elimina (nel cestino) e condivide le foto; niente Strumenti.
+- **Gestore**: carica, modifica, elimina (nel cestino) e condivide le foto, ha il suo Privato;
+  niente Strumenti.
 - **Utilizzatore**: guarda soltanto, senza scaricare.
 - **Amministratore**: tutto, compresi utenti e Strumenti.
 

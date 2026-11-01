@@ -175,6 +175,10 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers(HttpMethod.PUT, "/api/eventi/*/per-date").hasAnyAuthority(gestione);
             a.requestMatchers(HttpMethod.DELETE, "/api/eventi/*/per-date").hasAnyAuthority(gestione);
             a.requestMatchers(HttpMethod.PUT, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
+            // L'album "Privato" nel cestino: solo le proprie foto private (Visibilita). Metterle nel privato
+            // passa da /api/foto/multiple, sopra; l'utilizzatore non ha un album privato (guarda soltanto).
+            a.requestMatchers(HttpMethod.GET, "/api/privato/cestino").hasAnyAuthority(gestione);
+            a.requestMatchers(HttpMethod.POST, "/api/privato/cestino/ripristina").hasAnyAuthority(gestione);
             a.requestMatchers(HttpMethod.DELETE, "/api/foto/*", "/api/foto/*/luogo").hasAnyAuthority(gestione);
             // Cercare un luogo serve solo a sceglierlo per una foto.
             a.requestMatchers(HttpMethod.GET, "/api/luoghi/cerca").hasAnyAuthority(gestione);

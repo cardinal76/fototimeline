@@ -339,6 +339,16 @@ export class FotoApi {
     return this.http.get<PaginaCestino>('/api/cestino', { params: { pagina, dimensione } });
   }
 
+  /** Le proprie foto private nel cestino: la pagina Cestino dell'amministratore non le mostra. */
+  cestinoPrivato(pagina: number, dimensione = 60): Observable<PaginaCestino> {
+    return this.http.get<PaginaCestino>('/api/privato/cestino', { params: { pagina, dimensione } });
+  }
+
+  /** Rimette nell'archivio (sempre private) le proprie foto private del cestino; 503 col cloud smontato. */
+  ripristinaPrivate(ids: string[]): Observable<{ fatte: number }> {
+    return this.http.post<{ fatte: number }>('/api/privato/cestino/ripristina', { ids });
+  }
+
   /** Rimette nell'archivio le foto del cestino; 503 col cloud smontato. */
   ripristina(ids: string[]): Observable<{ fatte: number }> {
     return this.http.post<{ fatte: number }>('/api/cestino/ripristina', { ids });

@@ -16,7 +16,7 @@ import { FormsModule } from '@angular/forms';
 
 import { EventoFoto } from './evento-foto';
 import { FotoApi } from './foto-api';
-import { Galleria } from './galleria';
+import { Galleria, domandaPrivato } from './galleria';
 import { durata } from './formati';
 import { LuogoFoto } from './luogo-foto';
 import { Foto } from './modelli';
@@ -67,7 +67,7 @@ const SWIPE_PX = 50;
   styleUrl: './visore.css',
 })
 export class Visore {
-  private readonly galleria = inject(Galleria);
+  protected readonly galleria = inject(Galleria);
   private readonly elemento = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly foto = input.required<Foto>();
@@ -304,11 +304,44 @@ export class Visore {
     }
   }
 
+  /** Dentro o fuori dal proprio "Privato" (gestore e amministratore, col login). */
+  protected async privato(): Promise<void> {
+    if (!this.galleria.puoPrivato()) {
+      return;
+    }
+    const f = this.foto();
+    const metti = !f.privataDi;
+    if (metti && !confirm(domandaPrivato(1))) {
+      return;
+    }
+    const lista = this.galleria.foto();
+    const i = this.indice();
+    const vicina = lista[i + 1] ?? lista[i - 1];
+    try {
+      const cambiata = await this.galleria.privato(f, metti);
+      if (!metti && this.galleria.filtro().privato) {
+        // Uscita dalla lista del Privato: si passa alla vicina, come dopo "Elimina".
+        const prossima = vicina;
+        if (prossima) {
+          this.cambia.emit(prossima);
+        } else {
+          this.chiudi.emit();
+        }
+      } else {
+        this.cambia.emit(cambiata);
+      }
+    } catch {
+      this.galleria.avvisa('Non riuscito');
+    }
+  }
+
   protected async elimina(): Promise<void> {
     if (!this.gestione()) {
       return;
     }
-    const dove = this.galleria.admin() ? 'si ripristina da Strumenti → Cestino' : 'un amministratore può ripristinarla';
+    const dove = this.foto().privataDi
+      ? 'la ritrovi nel tuo Privato → nel cestino'
+      : this.galleria.admin() ? 'si ripristina da Strumenti → Cestino' : 'un amministratore può ripristinarla';
     if (!confirm(`Eliminare "${this.foto().nomeOriginale}"? Va nel cestino: ${dove}.`)) {
       return;
     }

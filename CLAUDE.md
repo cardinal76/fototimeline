@@ -240,7 +240,7 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   token: li legge `RuoliKeycloak`. Tre ruoli (`Ruolo`, nomi in `LoginProperties`):
   `fototimeline-admin` (tutto: utenti e menu Strumenti), `fototimeline-gestore`
   (le foto: caricare, modificare, ruotare, eliminare nel cestino, condividere,
-  scaricare; niente Strumenti), `fototimeline-utilizzatore` (solo guardare). Il
+  scaricare, l'album "Privato"; niente Strumenti), `fototimeline-utilizzatore` (solo guardare). Il
   più alto vince; senza nessuno si entra ma si vede solo `/api/io` (l'app dice
   "Chiedi l'accesso").
 - **I permessi sono tutti in `ConfigurazioneSicurezza.permessi`**, per indirizzo:
@@ -627,7 +627,9 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `ripristina` toglie il campo, `eliminaPerSempre` (solo dal cestino) cancella
   prima i file e poi la scheda. Tutti e tre vogliono il cloud montato.
 - **Ogni query sulle foto esclude il cestino**: `FotoService.criteri` lo fa da
-  solo, altrimenti `FotoService.nonNelCestino()` o `.and(FotoService.CESTINO).is(null)`.
+  solo, altrimenti `FotoService.visibili()` (per chi guarda: anche senza le
+  private degli altri), `diFamiglia()` o, solo per i lavori che non mostrano
+  niente, `nonNelCestino()` (sezione "Foto private").
   Una ricerca, un conteggio o un'aggregazione nuova su `foto` deve passare da
   lì. Restano su tutte le schede, apposta: `trova` (per id: miniature e file
   della pagina del cestino), `riordinaArchivio`, il backup (il file è ancora
@@ -644,6 +646,55 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   sempre: toglie il vettore da visione). `QuasiUguali` li ascolta, perché nel
   cestino il numero di schede non cambia e la cache non se ne accorgerebbe;
   `RiconoscimentoVolti` pure (volti `nelCestino`, fuori dall'indice dei vicini).
+
+## Foto private (album "Privato")
+
+- `Foto.privataDi` (username Keycloak, come `caricataDa`; indice sparso) e
+  `privataIl`. Una foto privata la vede **solo** quell'account, in tutta l'app:
+  né gli altri familiari né l'amministratore. Si mette e si toglie con
+  `POST /api/foto/multiple` (`METTI_NEL_PRIVATO`, `TOGLI_DAL_PRIVATO`, gestore e
+  admin; solo foto che si vedono, fuori dal cestino; toglie solo le proprie).
+  L'utilizzatore no (guarda soltanto); senza login nemmeno (`IllegalStateException`,
+  409: non sarebbe di nessuno). Il file non si sposta.
+- **La regola è in `service/Visibilita`** e chi guarda lo dice la richiesta
+  (`UtenteCorrente.usernameDellaRichiesta()`, thread-local di Spring Security):
+  - `FotoService.visibili()` / `criteri(FiltroFoto)`: ogni lettura, conteggio,
+    aggregazione e modifica di più foto fatta per qualcuno. Un thread senza
+    richiesta (lavori, scheduler, `@Async`) non vede le private di nessuno:
+    dimenticarsi di passare l'utente nasconde, non mostra.
+  - `FotoService.trovaVisibile(id)`: ogni indirizzo per id (scheda, miniatura,
+    vista, file, volti, ritaglio, luogo, ruota, modifica): 404, non 403, per non
+    dire che c'è. `trova(id)` resta per i lavori.
+  - `FotoService.diFamiglia()`: quello che un lavoro mostra a tutti (eventi,
+    quasi uguali, ricordi su Telegram, numeri della Salute, volti): solo le non
+    private, anche per il proprietario.
+  - `nonNelCestino()` è "tutte, anche le private": solo per i lavori che non
+    mostrano niente (luoghi, impronte, contenuto, video, backup, indicizza).
+  Una query nuova su `foto` sceglie una di queste quattro, apposta.
+- Filtro `privato=true` (`FiltroFoto.privato`) su foto, timeline, mappa e
+  `cerca-contenuto`: l'album "Privato" di chi guarda.
+- Eventi, volti e quasi uguali trattano una privata **come il cestino**
+  (`FotoResaPrivata` / `FotoTornataDiTutti`, accanto a `FotoNelCestino` /
+  `FotoRipristinata`): esce dal suo evento e da tutti gli eventi (anche per
+  date), i suoi volti diventano `nelCestino` (il campo vale anche per loro) e
+  "Riconosci volti" la salta; tornata di tutti, il ricalcolo leggero e i volti la
+  rimettono. `RiconoscimentoVolti.rimetti` non rimette i volti di una privata
+  ripristinata dal cestino.
+- Link condivisi: valgono le foto visibili a **chi ha creato il link**
+  (`visibiliA(c.getCreataDa())`): il link di un altro smette di servirla (404),
+  quello del proprietario no. `creataDa` ora è lo stesso username
+  (`CondivisioniController.nome`).
+- Cestino: la pagina dell'admin, ripristino, eliminazione e Svuota vedono e
+  toccano solo le visibili; le private nel cestino le vede e le ripristina solo
+  il proprietario (`/api/privato/cestino`, gestore); la pulizia dopo i giorni del
+  cestino le elimina come le altre.
+- Un doppione caricato da un altro: `giaPresente` non restituisce la scheda della
+  privata (solo "Già in archivio").
+- `FotoPrivateTest` (pacchetto `sicurezza`) prova ogni GET dell'inventario con
+  una privata (`CONTROLLATI`) o lo dichiara senza foto (`SENZA_FOTO`): un
+  indirizzo GET nuovo fa fallire finché non lo metti in uno dei due.
+- **Non è cifratura**: file, miniature e scheda restano dove sono; chi ha il
+  cloud, il server o MongoDB le vede (DEPLOY.md, "Foto private").
 
 ## Eventi
 

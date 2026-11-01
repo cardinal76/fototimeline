@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import it.fototimeline.service.FotoService;
 
 import it.fototimeline.volti.Persone.ElencoPersone;
 import it.fototimeline.volti.Persone.NomeGiaUsato;
@@ -59,10 +62,35 @@ public class VoltiController {
     private final Persone persone;
     private final RitaglioVolto ritaglio;
 
-    public VoltiController(RiconoscimentoVolti riconoscimento, Persone persone, RitaglioVolto ritaglio) {
+    private final FotoService fotoService;
+
+    public VoltiController(RiconoscimentoVolti riconoscimento, Persone persone, RitaglioVolto ritaglio,
+            FotoService fotoService) {
         this.riconoscimento = riconoscimento;
         this.persone = persone;
         this.ritaglio = ritaglio;
+        this.fotoService = fotoService;
+    }
+
+    /**
+     * La foto deve essere visibile a chi chiede (service.Visibilita): i volti
+     * di una foto privata di un altro rispondono 404, come la foto.
+     */
+    private void fotoVisibile(String fotoId) {
+        if (fotoId == null || fotoService.trovaVisibile(fotoId).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Foto non trovata");
+        }
+    }
+
+    /** Il volto, solo se la sua foto è visibile a chi chiede; se no 404. */
+    private Volto voltoVisibile(String id) {
+        Volto v = persone.volto(id);
+        try {
+            fotoVisibile(v.getFotoId());
+        } catch (ResponseStatusException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Volto non trovato");
+        }
+        return v;
     }
 
     // ------------------------------------------------------------ il lavoro
@@ -89,6 +117,7 @@ public class VoltiController {
     @GetMapping("/api/foto/{id}/volti")
     public List<VoltoInFoto> dellaFoto(@PathVariable String id) {
         riconoscimento.richiediAttiva();
+        fotoVisibile(id);
         return persone.dellaFoto(id);
     }
 
@@ -99,13 +128,14 @@ public class VoltiController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.maxAge(Duration.ofDays(1)).cachePrivate())
                 .contentType(MediaType.IMAGE_JPEG)
-                .body(ritaglio.jpeg(persone.volto(id)));
+                .body(ritaglio.jpeg(voltoVisibile(id)));
     }
 
     /** "Non è lei/lui": il volto esce dalla sua persona. */
     @PostMapping("/api/volti/{id}/togli")
     public ResponseEntity<Void> togli(@PathVariable String id) {
         riconoscimento.richiediAttiva();
+        voltoVisibile(id);
         persone.togliVolto(id);
         return ResponseEntity.noContent().build();
     }
@@ -113,6 +143,7 @@ public class VoltiController {
     @PostMapping("/api/volti/{id}/assegna")
     public ResponseEntity<Void> assegna(@PathVariable String id, @RequestBody Assegnazione a) {
         riconoscimento.richiediAttiva();
+        voltoVisibile(id);
         persone.assegnaVolto(id, a.persona());
         return ResponseEntity.noContent().build();
     }
@@ -121,12 +152,14 @@ public class VoltiController {
     @PostMapping("/api/volti/{id}/nome")
     public VocePersona nominaVolto(@PathVariable String id, @RequestBody Nome n) {
         riconoscimento.richiediAttiva();
+        voltoVisibile(id);
         return persone.nominaVolto(id, n.nome());
     }
 
     @PostMapping("/api/volti/{id}/rifiuta")
     public ResponseEntity<Void> rifiuta(@PathVariable String id) {
         riconoscimento.richiediAttiva();
+        voltoVisibile(id);
         persone.rifiutaProposta(id);
         return ResponseEntity.noContent().build();
     }
@@ -171,6 +204,9 @@ public class VoltiController {
     @PostMapping("/api/persone/{id}/copertina")
     public ResponseEntity<Void> copertina(@PathVariable String id, @RequestBody Copertina c) {
         riconoscimento.richiediAttiva();
+        if (c.volto() != null) {
+            voltoVisibile(c.volto());
+        }
         persone.copertina(id, c.volto());
         return ResponseEntity.noContent().build();
     }

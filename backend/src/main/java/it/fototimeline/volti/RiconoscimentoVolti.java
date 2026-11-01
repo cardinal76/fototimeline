@@ -42,7 +42,9 @@ import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.EventiFoto.FotoAggiunta;
 import it.fototimeline.service.EventiFoto.FotoEliminata;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
+import it.fototimeline.service.EventiFoto.FotoResaPrivata;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
+import it.fototimeline.service.EventiFoto.FotoTornataDiTutti;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.volti.VisioneVolti.ImmagineVolti;
 import it.fototimeline.volti.VisioneVolti.Rilevamento;
@@ -67,6 +69,10 @@ import jakarta.annotation.PreDestroy;
  * <li>Cestino: i volti di una foto nel cestino non contano e lasciano
  *     l'indice dei vicini; ripristinata tornano; eliminata per sempre se ne
  *     vanno.</li>
+ * <li>Foto private (service.Visibilita): come il cestino. Persone, copertine
+ *     e conteggi li vedono tutti, quindi i volti di una foto privata non
+ *     contano ({@code nelCestino} vale anche per loro) e una foto privata non
+ *     si guarda; tornata di tutti, i volti tornano (o si cercano).</li>
  * </ul>
  *
  * Spento senza visione o con {@code fototimeline.volti.attiva=false}.
@@ -162,19 +168,42 @@ public class RiconoscimentoVolti {
     @EventListener
     public void ripristinata(FotoRipristinata evento) {
         if (attiva()) {
-            singole.execute(() -> {
-                Map<String, float[]> vettori = persone.ripristinata(evento.id());
-                try {
-                    visione.metti(vettori);
-                } catch (RuntimeException e) {
-                    // Contano già (sono in Mongo); mancano solo come vicini dei volti nuovi, finché non si ricostruisce.
-                    log.warn("Volti di {} non rimessi nell'indice: {}", evento.id(), e.getMessage());
-                }
-                Foto foto = mongo.findById(evento.id(), Foto.class);
-                if (foto != null && foto.getVoltiCercati() == null) {
-                    unaFoto(evento.id());
-                }
-            });
+            singole.execute(() -> rimetti(evento.id()));
+        }
+    }
+
+    /** Nel "Privato" di qualcuno: i suoi volti escono da persone e vicini, come nel cestino. */
+    @EventListener
+    public void resaPrivata(FotoResaPrivata evento) {
+        if (attiva()) {
+            singole.execute(() -> togliDallIndice(evento.id(), persone.nelCestino(evento.id())));
+        }
+    }
+
+    /** Tornata di tutti: i volti tornano, come dal cestino. */
+    @EventListener
+    public void tornataDiTutti(FotoTornataDiTutti evento) {
+        if (attiva()) {
+            singole.execute(() -> rimetti(evento.id()));
+        }
+    }
+
+    /** I volti di una foto tornata (dal cestino o dal privato): solo se adesso la vedono tutti. */
+    private void rimetti(String id) {
+        Foto stato = mongo.findById(id, Foto.class);
+        if (stato == null || stato.nelCestino() || stato.getPrivataDi() != null) {
+            // Ripristinata ma privata (o di nuovo nel cestino): i volti restano fuori.
+            return;
+        }
+        Map<String, float[]> vettori = persone.ripristinata(id);
+        try {
+            visione.metti(vettori);
+        } catch (RuntimeException e) {
+            // Contano già (sono in Mongo); mancano solo come vicini dei volti nuovi, finché non si ricostruisce.
+            log.warn("Volti di {} non rimessi nell'indice: {}", id, e.getMessage());
+        }
+        if (stato.getVoltiCercati() == null) {
+            unaFoto(id);
         }
     }
 
@@ -196,8 +225,8 @@ public class RiconoscimentoVolti {
 
     private void unaFoto(String id) {
         Foto foto = mongo.findById(id, Foto.class);
-        if (foto == null || foto.isVideo() || foto.getEliminataIl() != null || foto.getVoltiCercati() != null
-                || !Files.exists(archivio.miniatura(id))) {
+        if (foto == null || foto.isVideo() || foto.getEliminataIl() != null || foto.getPrivataDi() != null
+                || foto.getVoltiCercati() != null || !Files.exists(archivio.miniatura(id))) {
             return;
         }
         try {
@@ -222,7 +251,7 @@ public class RiconoscimentoVolti {
             // Rilette qui dentro: una foto nuova può averla già fatta il thread delle singole.
             List<String> ids = blocco.stream().map(Foto::getId).toList();
             Map<String, Foto> daFare = new LinkedHashMap<>();
-            mongo.find(Query.query(Criteria.where("_id").in(ids).and(CAMPO).is(null).and(FotoService.CESTINO).is(null)),
+            mongo.find(Query.query(FotoService.diFamiglia().and("_id").in(ids).and(CAMPO).is(null)),
                     Foto.class).forEach(f -> daFare.put(f.getId(), f));
             Map<String, Path> miniature = new LinkedHashMap<>();
             for (Foto foto : daFare.values()) {
@@ -350,9 +379,9 @@ public class RiconoscimentoVolti {
                 new Update().set("attivo", attivo).set("ricostruisci", ricostruisci), IMPOSTAZIONI);
     }
 
-    /** Le foto da guardare: senza volti cercati, non video, non nel cestino. */
+    /** Le foto da guardare: senza volti cercati, non video, non nel cestino, non private. */
     private static Query daCercare() {
-        return Query.query(Criteria.where(CAMPO).is(null).and("video").is(false).and(FotoService.CESTINO).is(null));
+        return Query.query(FotoService.diFamiglia().and(CAMPO).is(null).and("video").is(false));
     }
 
     private void esegui(Lavoro lavoro) {
@@ -366,8 +395,8 @@ public class RiconoscimentoVolti {
                 }
             }
             while (!lavoro.annullato) {
-                Query query = Query.query(Criteria.where(CAMPO).is(null).and("video").is(false)
-                                .and(FotoService.CESTINO).is(null).and("_id").gt(ultimoId))
+                Query query = Query.query(FotoService.diFamiglia().and(CAMPO).is(null).and("video").is(false)
+                                .and("_id").gt(ultimoId))
                         .with(Sort.by("_id")).limit(properties.blocco());
                 List<Foto> blocco = mongo.find(query, Foto.class);
                 if (blocco.isEmpty()) {
@@ -458,7 +487,7 @@ public class RiconoscimentoVolti {
         if (!attiva()) {
             return new StatoVolti(false, 0, 0, 0, 0, null, 0, null);
         }
-        long foto = mongo.count(Query.query(Criteria.where("video").is(false).and(FotoService.CESTINO).is(null)), Foto.class);
+        long foto = mongo.count(Query.query(FotoService.diFamiglia().and("video").is(false)), Foto.class);
         long mancanti = mongo.count(daCercare(), Foto.class);
         long volti = mongo.count(Query.query(Criteria.where("nelCestino").is(false)), Volto.class);
         long nominate = mongo.count(Query.query(Criteria.where("nome").ne(null)), Persona.class);
