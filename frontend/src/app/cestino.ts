@@ -40,6 +40,11 @@ export class Cestino {
 
   /** Col cloud smontato non si ripristina né si elimina, come l'eliminazione. */
   readonly disponibile = input(true);
+  /**
+   * Le proprie foto private nel cestino (dall'album "Privato", anche da
+   * gestore): si ripristinano soltanto; per sempre se ne vanno da sole.
+   */
+  readonly privato = input(false);
   readonly chiudi = output<void>();
 
   protected readonly foto = signal<VoceCestino[]>([]);
@@ -65,7 +70,9 @@ export class Cestino {
     this.caricando.set(true);
     try {
       const pagina = daCapo ? 0 : this.pagina + 1;
-      const p = await firstValueFrom(this.api.cestino(pagina, DIMENSIONE));
+      const p = await firstValueFrom(
+        this.privato() ? this.api.cestinoPrivato(pagina, DIMENSIONE) : this.api.cestino(pagina, DIMENSIONE),
+      );
       this.pagina = pagina;
       this.foto.update((prima) => (daCapo ? p.foto : [...prima, ...p.foto]));
       this.totale.set(p.totale);
@@ -99,7 +106,8 @@ export class Cestino {
   // ------------------------------------------------------------ azioni
 
   protected ripristina(ids: string[]): Promise<void> {
-    return this.esegui(ids, () => this.api.ripristina(ids), (n) => `${n} foto ripristinate`, true);
+    const chiamata = () => (this.privato() ? this.api.ripristinaPrivate(ids) : this.api.ripristina(ids));
+    return this.esegui(ids, chiamata, (n) => `${n} foto ripristinate`, true);
   }
 
   protected eliminaPerSempre(ids: string[], nome?: string): Promise<void> {

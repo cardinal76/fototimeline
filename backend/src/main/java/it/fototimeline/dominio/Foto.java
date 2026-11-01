@@ -162,6 +162,16 @@ public class Foto {
      */
     @Indexed
     private Instant eliminataIl;
+    /**
+     * Lo username Keycloak di chi l'ha messa nel suo album "Privato"; null =
+     * la vedono tutti. Una foto privata la vede solo lui, in tutta l'app
+     * (anche l'amministratore no): la regola è in {@code service.Visibilita}.
+     * Il file resta dov'è. Indice sparso: le private sono poche.
+     */
+    @Indexed(sparse = true)
+    private String privataDi;
+    /** Quando è diventata privata (per l'album "Privato"); null per le foto di tutti. */
+    private Instant privataIl;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -305,4 +315,10 @@ public class Foto {
     public void setEliminataIl(Instant eliminataIl) { this.eliminataIl = eliminataIl; }
 
     public boolean nelCestino() { return eliminataIl != null; }
+
+    public String getPrivataDi() { return privataDi; }
+    public void setPrivataDi(String privataDi) { this.privataDi = privataDi; }
+
+    public Instant getPrivataIl() { return privataIl; }
+    public void setPrivataIl(Instant privataIl) { this.privataIl = privataIl; }
 }

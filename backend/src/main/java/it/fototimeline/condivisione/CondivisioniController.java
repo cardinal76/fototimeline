@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import it.fototimeline.condivisione.CondivisioniService.NuovaCondivisione;
 import it.fototimeline.condivisione.CondivisioniService.VoceCondivisione;
 import it.fototimeline.sicurezza.LoginProperties;
+import it.fototimeline.sicurezza.UtenteCorrente;
 
 /**
  * Creare, vedere e revocare i link (dietro login, come il resto di /api).
@@ -57,8 +58,13 @@ public class CondivisioniController {
                 : ResponseEntity.notFound().build();
     }
 
+    /** Lo stesso username delle foto private (Visibilita): un link di chi le ha nel privato le mostra. */
     private String nome(Authentication utente) {
-        return !login.attivo() || utente == null ? UTENTE_LOCALE : utente.getName();
+        if (!login.attivo() || utente == null) {
+            return UTENTE_LOCALE;
+        }
+        String username = UtenteCorrente.usernameDellaRichiesta();
+        return username != null ? username : utente.getName();
     }
 
     private boolean admin(Authentication utente) {

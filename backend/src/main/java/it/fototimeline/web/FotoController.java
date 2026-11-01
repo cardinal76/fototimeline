@@ -98,10 +98,11 @@ public class FotoController {
             @RequestParam(required = false) String evento,
             @RequestParam(required = false) String persona,
             @RequestParam(required = false) String periodo,
+            @RequestParam(required = false) Boolean privato,
             @RequestParam(defaultValue = "0") int pagina,
             @RequestParam(defaultValue = "60") int dimensione) {
         return service.cerca(new FiltroFoto(q, tag, album, preferite, dal, al, nazione, regione, luogo, caricataDa,
-                provincia, evento, persona, Periodo.leggi(periodo)),
+                provincia, evento, persona, Periodo.leggi(periodo), privato),
                 Math.max(pagina, 0), Math.clamp(dimensione, 1, 500));
     }
 
@@ -118,9 +119,10 @@ public class FotoController {
             @RequestParam(required = false) String caricataDa,
             @RequestParam(required = false) String evento,
             @RequestParam(required = false) String persona,
-            @RequestParam(required = false) String periodo) {
+            @RequestParam(required = false) String periodo,
+            @RequestParam(required = false) Boolean privato) {
         return service.timeline(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo,
-                caricataDa, provincia, evento, persona, Periodo.leggi(periodo)));
+                caricataDa, provincia, evento, persona, Periodo.leggi(periodo), privato));
     }
 
     @GetMapping("/mappa")
@@ -136,9 +138,10 @@ public class FotoController {
             @RequestParam(required = false) String caricataDa,
             @RequestParam(required = false) String evento,
             @RequestParam(required = false) String persona,
-            @RequestParam(required = false) String periodo) {
+            @RequestParam(required = false) String periodo,
+            @RequestParam(required = false) Boolean privato) {
         return service.mappa(new FiltroFoto(q, tag, album, preferite, null, null, nazione, regione, luogo,
-                caricataDa, provincia, evento, persona, Periodo.leggi(periodo)));
+                caricataDa, provincia, evento, persona, Periodo.leggi(periodo), privato));
     }
 
     /** "Accadde oggi": stesso giorno negli anni passati; {@code data} per provare altri giorni. */
@@ -148,9 +151,10 @@ public class FotoController {
         return service.ricordi(data != null ? data : LocalDate.now(), 12);
     }
 
+    /** La scheda; 404 anche se è privata di un altro (FotoService.trovaVisibile), come per file e miniature. */
     @GetMapping("/foto/{id}")
     public ResponseEntity<Foto> foto(@PathVariable String id) {
-        return ResponseEntity.of(service.trova(id));
+        return ResponseEntity.of(service.trovaVisibile(id));
     }
 
     @PostMapping(path = "/foto", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -266,7 +270,7 @@ public class FotoController {
 
     @GetMapping("/foto/{id}/miniatura")
     public ResponseEntity<Resource> miniatura(@PathVariable String id) {
-        return service.trova(id)
+        return service.trovaVisibile(id)
                 .map(foto -> ResponseEntity.ok()
                         .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
                         .contentType(MediaType.IMAGE_JPEG)
@@ -283,9 +287,9 @@ public class FotoController {
     @GetMapping("/foto/{id}/vista")
     public ResponseEntity<Resource> vista(@PathVariable String id) {
         if (!corrente.chi().puoGestire()) {
-            return service.trova(id).map(this::vistaRidotta).orElse(ResponseEntity.notFound().build());
+            return service.trovaVisibile(id).map(this::vistaRidotta).orElse(ResponseEntity.notFound().build());
         }
-        return service.trova(id)
+        return service.trovaVisibile(id)
                 .map(rotazioni::vista)
                 .map(vista -> ResponseEntity.ok()
                         .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
@@ -324,7 +328,7 @@ public class FotoController {
             @RequestParam(defaultValue = "false") boolean scarica,
             @RequestParam(defaultValue = "false") boolean originale) {
         boolean soloGuardare = !corrente.chi().puoGestire();
-        return service.trova(id)
+        return service.trovaVisibile(id)
                 .map(foto -> {
                     if (soloGuardare && (!foto.isVideo() || scarica || originale)) {
                         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Il tuo account può solo guardare le foto");

@@ -44,6 +44,15 @@ export interface StatoCaricamento {
 }
 
 /** Lo stato della timeline: filtri, foto caricate finora, mesi, selezione. */
+/** La conferma prima di "Nel privato", dalla selezione e dal visore. */
+export function domandaPrivato(n: number): string {
+  return (
+    (n === 1 ? 'Mettere la foto nel tuo Privato? ' : `Mettere ${n} foto nel tuo Privato? `) +
+    "Le vedrai solo tu: spariscono per tutti gli altri, anche per chi le ha caricate e per l'amministratore " +
+    '(dai link condivisi da altri, dagli eventi, dalle persone). Le togli dal Privato quando vuoi.'
+  );
+}
+
 @Injectable({ providedIn: 'root' })
 export class Galleria {
   private readonly api = inject(FotoApi);
@@ -157,6 +166,11 @@ export class Galleria {
   readonly admin = computed(() => !!this.io()?.admin);
   /** Gestore o amministratore: carica, cambia, elimina, condivide, scarica gli originali. */
   readonly puoGestire = computed(() => !!this.io()?.gestore);
+  /**
+   * Ha un album "Privato": chi può scegliere le foto (gestore, amministratore), col
+   * login acceso. L'utilizzatore guarda soltanto; senza login le foto non sono di nessuno.
+   */
+  readonly puoPrivato = computed(() => !!this.io()?.login && this.puoGestire());
   /** Entrato ma senza nessun ruolo: vede solo "chiedi l'accesso". */
   readonly senzaAccesso = computed(() => {
     const io = this.io();
@@ -543,6 +557,27 @@ export class Galleria {
     this.togliDallaLista([foto.id]);
   }
 
+  /**
+   * Una foto dentro o fuori dal proprio "Privato" (visore). Tolta mentre si
+   * guarda il Privato esce dalla lista; altrimenti resta, col lucchetto o senza.
+   */
+  async privato(foto: Foto, metti: boolean): Promise<Foto> {
+    const { modificate } = await firstValueFrom(
+      this.api.multipla([foto.id], metti ? 'METTI_NEL_PRIVATO' : 'TOGLI_DAL_PRIVATO'),
+    );
+    if (!modificate) {
+      throw new Error('Non cambiata');
+    }
+    const cambiata: Foto = { ...foto, privataDi: metti ? this.io()?.username : undefined };
+    if (!metti && this.filtro().privato) {
+      this.togliDallaLista([foto.id]);
+    } else {
+      this.foto.update((lista) => lista.map((f) => (f.id === foto.id ? cambiata : f)));
+    }
+    this.avvisa(metti ? 'Nel tuo Privato: la vedi solo tu' : 'Tolta dal Privato: la vedono tutti');
+    return cambiata;
+  }
+
   /** Gira una foto (90 a destra, -90 a sinistra): la scheda nuova prende il suo posto nella lista. */
   async ruota(foto: Foto, gradi: number): Promise<Foto> {
     const girata = await firstValueFrom(this.api.ruota(foto.id, gradi));
@@ -570,6 +605,9 @@ export class Galleria {
     if (operazione === 'ELIMINA') {
       this.togliDallaLista(ids);
       this.avvisa(`${modificate} foto nel cestino`);
+    } else if (operazione === 'METTI_NEL_PRIVATO' || operazione === 'TOGLI_DAL_PRIVATO') {
+      this.avvisa(operazione === 'METTI_NEL_PRIVATO' ? `${modificate} foto nel tuo Privato` : `${modificate} foto tornate di tutti`);
+      this.ricarica();
     } else {
       this.avvisa(`${modificate} foto aggiornate`);
       this.ricarica();

@@ -44,16 +44,39 @@ public class UtenteCorrente {
         if (!login.attivo()) {
             return new Chi(null, null, null, Ruolo.AMMINISTRATORE);
         }
-        Authentication a = SecurityContextHolder.getContext().getAuthentication();
-        if (a == null || !a.isAuthenticated() || a instanceof AnonymousAuthenticationToken) {
+        Authentication a = entrato();
+        if (a == null) {
             return new Chi(null, null, null, null);
         }
         Ruolo ruolo = login.ruoloDi(a.getAuthorities());
+        String username = username(a);
         if (a.getPrincipal() instanceof OidcUser u) {
-            String username = u.getPreferredUsername() != null ? u.getPreferredUsername() : a.getName();
             String nome = u.getFullName() != null ? u.getFullName() : username;
             return new Chi(username, nome, u.getEmail(), ruolo);
         }
-        return new Chi(a.getName(), a.getName(), null, ruolo);
+        return new Chi(username, username, null, ruolo);
+    }
+
+    /**
+     * Lo username di chi fa questa richiesta, senza passare dal bean: lo usa
+     * {@code service.Visibilita} per le foto private. Null con il login spento,
+     * senza sessione e sui thread in sottofondo (lavori, scheduler), che non
+     * hanno una richiesta: lì le private di qualcuno non si vedono.
+     */
+    public static String usernameDellaRichiesta() {
+        Authentication a = entrato();
+        return a == null ? null : username(a);
+    }
+
+    private static Authentication entrato() {
+        Authentication a = SecurityContextHolder.getContext().getAuthentication();
+        return a == null || !a.isAuthenticated() || a instanceof AnonymousAuthenticationToken ? null : a;
+    }
+
+    private static String username(Authentication a) {
+        if (a.getPrincipal() instanceof OidcUser u && u.getPreferredUsername() != null) {
+            return u.getPreferredUsername();
+        }
+        return a.getName();
     }
 }

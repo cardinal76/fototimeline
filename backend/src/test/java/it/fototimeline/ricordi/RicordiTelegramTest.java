@@ -194,6 +194,26 @@ class RicordiTelegramTest {
     }
 
     @Test
+    void leFotoPrivateNonVannoSuTelegram() throws IOException {
+        foto("a25", 2025, 10, false, null);
+        Foto privata = foto("a23", 2023, 10, true, null);
+        privata.setPrivataDi("anna");
+        mongo.save(privata);
+        miniatura("a25");
+        miniatura("a23");
+
+        alle(2026, 10, 5, 8, 0);
+        RicordiTelegram r = ricordi(true, "foto.example.it");
+        assertThat(r.controlla()).isTrue();
+        // La chat è della famiglia: solo la foto di tutti, e la didascalia non conta l'anno della privata.
+        assertThat(finto.chiamate).singleElement().satisfies(c -> {
+            assertThat(c.metodo()).isEqualTo("sendPhoto");
+            assertThat(c.corpo()).contains("MINIATURA-a25").doesNotContain("a23");
+            assertThat(c.campo("caption")).doesNotContain("3 anni fa");
+        });
+    }
+
+    @Test
     void laVistaSenzaExifSeCeGiaEUnaChatAParte() throws IOException {
         foto("a25", 2025, 10, false, null);
         miniatura("a25");

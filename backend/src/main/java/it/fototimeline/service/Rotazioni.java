@@ -91,7 +91,8 @@ public class Rotazioni {
         int quanto = Rotazione.normalizza(gradi);
         girando.lock();
         try {
-            Foto foto = fotoService.trova(id).filter(f -> !f.nelCestino()).orElse(null);
+            // Né nel cestino né privata di un altro: per chi chiede non c'è.
+            Foto foto = fotoService.trovaVisibile(id).filter(f -> !f.nelCestino()).orElse(null);
             if (foto == null || quanto == 0) {
                 return Optional.ofNullable(foto);
             }
@@ -114,7 +115,7 @@ public class Rotazioni {
             }
             // L'indice del contenuto si rifà (FotoRuotata); se visione non risponde lo riprende "Indicizza contenuto".
             update.unset("contenutoIndicizzato");
-            long cambiate = mongo.updateFirst(Query.query(Criteria.where("_id").is(id).and(FotoService.CESTINO).is(null)),
+            long cambiate = mongo.updateFirst(Query.query(FotoService.visibili().and("_id").is(id)),
                     update, Foto.class).getModifiedCount();
             if (cambiate == 0) {
                 // Finita nel cestino proprio adesso.
@@ -126,13 +127,13 @@ public class Rotazioni {
                 log.debug("File girati di prima di {} non tolti: {}", id, e.toString());
             }
             eventi.publishEvent(new FotoRuotata(id));
-            return fotoService.trova(id);
+            return fotoService.trovaVisibile(id);
         } finally {
             girando.unlock();
         }
     }
 
-    /** "Ruota" sulla selezione: quante ne ha girate (non quelle nel cestino). */
+    /** "Ruota" sulla selezione: quante ne ha girate (non quelle nel cestino né le private degli altri). */
     public long ruota(List<String> ids, int gradi) {
         Rotazione.normalizza(gradi);
         return ids == null ? 0 : ids.stream().distinct().filter(id -> ruota(id, gradi).isPresent()).count();

@@ -64,6 +64,14 @@ export interface Foto {
   eliminataIl?: string;
   /** Persone e gruppi di volti di questa foto (solo id). */
   persone?: string[];
+  /**
+   * Username di chi l'ha messa nel suo album "Privato": la vede solo lui, il
+   * server non la dà a nessun altro (nemmeno all'amministratore). Assente per
+   * le foto di tutti; c'è solo nelle proprie.
+   */
+  privataDi?: string;
+  /** Quando è entrata nel "Privato". */
+  privataIl?: string;
 }
 
 export type StatoConversione = 'IN_CODA' | 'IN_CORSO' | 'FATTA' | 'ERRORE';
@@ -128,6 +136,8 @@ export interface Filtro {
   contenuto?: boolean;
   /** Id di una persona o di un gruppo di volti senza nome: solo le sue foto. */
   persona?: string;
+  /** Solo le foto del proprio album "Privato" (le private degli altri il server non le dà mai). */
+  privato?: boolean;
 }
 
 export type Esito = 'CARICATA' | 'DUPLICATA' | 'ERRORE';
@@ -300,7 +310,11 @@ export type Operazione =
   | 'NON_PREFERITA'
   /** valore: la chiave di un Luogo, vuoto per "nessun luogo". */
   | 'IMPOSTA_LUOGO'
-  | 'LUOGO_DA_GPS';
+  | 'LUOGO_DA_GPS'
+  /** Nel proprio album "Privato": da lì la vede solo chi l'ha messa. */
+  | 'METTI_NEL_PRIVATO'
+  /** Fuori dal proprio "Privato": torna di tutti. */
+  | 'TOGLI_DAL_PRIVATO';
 
 /** Giorno della timeline: le foto scattate quel giorno, in ordine. */
 export interface Giorno {

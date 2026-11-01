@@ -32,6 +32,17 @@ public final class EventiFoto {
     public record FotoRuotata(String id) {
     }
 
+    /**
+     * Una foto è entrata nell'album "Privato" di qualcuno: per gli altri è come
+     * nel cestino (eventi, volti e quasi uguali la tolgono da quello che mostrano).
+     */
+    public record FotoResaPrivata(String id) {
+    }
+
+    /** Una foto è uscita dall'album "Privato": torna di tutti, come ripristinata. */
+    public record FotoTornataDiTutti(String id) {
+    }
+
     /** Una foto è stata eliminata per sempre, scheda e file. */
     public record FotoEliminata(String id) {
     }

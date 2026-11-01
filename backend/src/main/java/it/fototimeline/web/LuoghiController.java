@@ -80,11 +80,11 @@ public class LuoghiController {
     }
 
     private ResponseEntity<Foto> aggiorna(String id, Consumer<List<String>> cambio) {
-        Optional<Foto> trovata = foto.trova(id).filter(f -> !f.nelCestino());
+        Optional<Foto> trovata = foto.trovaVisibile(id).filter(f -> !f.nelCestino());
         if (trovata.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         cambio.accept(List.of(id));
-        return ResponseEntity.of(foto.trova(id));
+        return ResponseEntity.of(foto.trovaVisibile(id));
     }
 }

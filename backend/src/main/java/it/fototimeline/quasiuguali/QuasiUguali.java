@@ -32,7 +32,9 @@ import it.fototimeline.dominio.OrigineData;
 import it.fototimeline.quasiuguali.Raggruppamento.Voce;
 import it.fototimeline.service.ArchivioFile;
 import it.fototimeline.service.EventiFoto.FotoNelCestino;
+import it.fototimeline.service.EventiFoto.FotoResaPrivata;
 import it.fototimeline.service.EventiFoto.FotoRipristinata;
+import it.fototimeline.service.EventiFoto.FotoTornataDiTutti;
 import it.fototimeline.service.EventiFoto.FotoRuotata;
 import it.fototimeline.service.FotoService;
 
@@ -110,7 +112,8 @@ public class QuasiUguali {
         List<List<String>> scelti = tutti.subList(da, a);
 
         Set<String> ids = scelti.stream().flatMap(List::stream).collect(Collectors.toSet());
-        Map<String, Foto> foto = mongo.find(Query.query(Criteria.where("_id").in(ids).and(FotoService.CESTINO).is(null)),
+        // Le private (di chiunque) stanno fuori, come quelle nel cestino: i gruppi sono gli stessi per tutti.
+        Map<String, Foto> foto = mongo.find(Query.query(FotoService.diFamiglia().and("_id").in(ids)),
                         Foto.class).stream()
                 .collect(Collectors.toMap(Foto::getId, Function.identity()));
         List<Gruppo> gruppi = new ArrayList<>();
@@ -164,6 +167,17 @@ public class QuasiUguali {
         invalida();
     }
 
+    /** Nel "Privato" di qualcuno: per le quasi uguali è come nel cestino. */
+    @EventListener
+    public void resaPrivata(FotoResaPrivata evento) {
+        aggiornaCache(Set.of(evento.id()), Set.of());
+    }
+
+    @EventListener
+    public void tornataDiTutti(FotoTornataDiTutti evento) {
+        invalida();
+    }
+
     /** Girata a mano: l'impronta è cambiata (si calcola sulla miniatura come si vede). */
     @EventListener
     public void ruotata(FotoRuotata evento) {
@@ -172,7 +186,7 @@ public class QuasiUguali {
 
     private List<List<String>> calcolaGruppi() {
         long inizio = System.nanoTime();
-        Query query = Query.query(Criteria.where("impronta").ne(null).and(FotoService.CESTINO).is(null));
+        Query query = Query.query(FotoService.diFamiglia().and("impronta").ne(null));
         query.fields().include("impronta", "scattataIl", "origineData", "fotocamera");
         List<Voce> voci = mongo.find(query, Foto.class).stream()
                 .map(f -> new Voce(f.getId(), f.getImpronta(), f.getScattataIl(), haExif(f)))

@@ -9,7 +9,7 @@
     (click)="$event.stopPropagation()"
   >
     <header>
-      <h2 id="titolo-cestino">Cestino</h2>
+      <h2 id="titolo-cestino">{{ privato() ? '🔒 Privato nel cestino' : 'Cestino' }}</h2>
       @if (totale()) {
         <span class="tenue">{{ totale() }} foto</span>
       }
@@ -17,6 +17,9 @@
     </header>
 
     <p class="tenue">
+      @if (privato()) {
+        Le tue foto private eliminate: le vedi solo tu, anche qui. Ripristinate tornano nel tuo Privato.
+      }
       Le foto eliminate restano qui, file compreso,
       @if (giorni()) {
         per {{ giorni() }} giorni; poi si eliminano per sempre da sole.
@@ -37,11 +40,15 @@
         @if (scelte().size) {
           <b>{{ scelte().size }} scelte</b>
           <button type="button" [disabled]="occupato() || !disponibile()" (click)="ripristina(scelteIds())">Ripristina</button>
-          <button type="button" class="pericolo" [disabled]="occupato() || !disponibile()" (click)="eliminaPerSempre(scelteIds())">
-            Elimina per sempre
-          </button>
+          @if (!privato()) {
+            <button type="button" class="pericolo" [disabled]="occupato() || !disponibile()" (click)="eliminaPerSempre(scelteIds())">
+              Elimina per sempre
+            </button>
+          }
         }
-        <button type="button" class="pericolo svuota" [disabled]="occupato() || !disponibile()" (click)="svuota()">Svuota cestino</button>
+        @if (!privato()) {
+          <button type="button" class="pericolo svuota" [disabled]="occupato() || !disponibile()" (click)="svuota()">Svuota cestino</button>
+        }
       </div>
     }
 
@@ -80,14 +87,16 @@
             </dl>
             <div class="azioni">
               <button type="button" [disabled]="occupato() || !disponibile()" (click)="ripristina([f.id])">Ripristina</button>
-              <button
-                type="button"
-                class="pericolo"
-                [disabled]="occupato() || !disponibile()"
-                (click)="eliminaPerSempre([f.id], f.nomeOriginale)"
-              >
-                Elimina per sempre
-              </button>
+              @if (!privato()) {
+                <button
+                  type="button"
+                  class="pericolo"
+                  [disabled]="occupato() || !disponibile()"
+                  (click)="eliminaPerSempre([f.id], f.nomeOriginale)"
+                >
+                  Elimina per sempre
+                </button>
+              }
             </div>
           </li>
         }
@@ -98,7 +107,7 @@
         </div>
       }
     } @else {
-      <p class="vuoto">Il cestino è vuoto.</p>
+      <p class="vuoto">{{ privato() ? 'Nessuna foto privata nel cestino.' : 'Il cestino è vuoto.' }}</p>
       <div class="piede">
         <button type="button" (click)="chiudi.emit()">Chiudi</button>
       </div>

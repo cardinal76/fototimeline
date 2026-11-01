@@ -597,3 +597,11 @@ main[hidden] {
   gap: 0.4rem;
 }
 
+/* Nel proprio Privato: la vede solo chi l'ha messa (l'icona c'è solo nelle sue, il server le altre non le dà). */
+.lucchetto {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  font-size: 0.8rem;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+}
