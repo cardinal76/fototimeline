@@ -1192,9 +1192,7 @@ public class FotoService {
                 foto.setPreferita(m.preferita());
             }
             if (m.scattataIl() != null && !m.scattataIl().equals(foto.getScattataIl())) {
-                foto.setScattataIl(m.scattataIl());
-                foto.setOrigineData(OrigineData.MANUALE);
-                mettiAlSuoPosto(foto);
+                cambiaData(foto, m.scattataIl());
                 dataCambiata[0] = true;
             }
             return repository.save(foto);
@@ -1203,6 +1201,85 @@ public class FotoService {
             eventi.publishEvent(new FotoDataCambiata(id));
         }
         return modificata;
+    }
+
+    /**
+     * La data scelta a mano (visore e "📅 Data…" sulla selezione): origine
+     * MANUALE e l'originale nella cartella del giorno nuovo. Da salvare, poi
+     * {@link FotoDataCambiata}; se lo spostamento non riesce lancia e la
+     * scheda (non salvata) resta com'era.
+     */
+    private void cambiaData(Foto foto, LocalDateTime nuova) {
+        foto.setScattataIl(nuova);
+        foto.setOrigineData(OrigineData.MANUALE);
+        mettiAlSuoPosto(foto);
+    }
+
+    /** Quante foto al più per "📅 Data…": una richiesta sola, e sul cloud ogni spostamento è un MOVE. */
+    public static final int MASSIMO_DATE = 500;
+
+    /** Una foto che "📅 Data…" non è riuscito a cambiare, e perché. */
+    public record ErroreData(String id, String nome, String motivo) {
+    }
+
+    /**
+     * @param modificate con la data nuova (e il file nella cartella nuova)
+     * @param invariate  avevano già quella data
+     * @param saltate    nel cestino, private di un altro, sparite, o senza data da spostare
+     */
+    public record EsitoDate(int modificate, int invariate, int saltate, List<ErroreData> errori) {
+    }
+
+    /**
+     * "📅 Data…" sulla selezione: le date nuove ({@link NuoveDate}) una foto
+     * alla volta, per la stessa strada della modifica dal visore (MANUALE,
+     * file spostato, {@link FotoDataCambiata} per gli eventi). Le foto che chi
+     * chiede non vede o non può cambiare (cestino, private di un altro) si
+     * saltano; un errore su una non ferma le altre.
+     *
+     * @throws IllegalArgumentException richiesta incompleta o più di {@link #MASSIMO_DATE} foto (400)
+     * @throws it.fototimeline.cloud.ArchivioNonDisponibile col cloud smontato, prima di toccarne una (503)
+     */
+    public EsitoDate cambiaDate(List<String> ids, NuoveDate.Richiesta richiesta) {
+        richiesta.valida();
+        List<String> distinti = ids == null ? List.of() : ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (distinti.size() > MASSIMO_DATE) {
+            throw new IllegalArgumentException("Al più " + MASSIMO_DATE + " foto alla volta (ne hai scelte "
+                    + distinti.size() + "): dividile in più gruppi");
+        }
+        if (distinti.isEmpty()) {
+            return new EsitoDate(0, 0, 0, List.of());
+        }
+        archivio.verificaDisponibile();
+        List<Foto> foto = mongo.find(Query.query(visibili().and("_id").in(distinti)), Foto.class);
+        Map<String, Foto> perId = foto.stream().collect(Collectors.toMap(Foto::getId, f -> f));
+        Map<String, LocalDateTime> nuove = NuoveDate.calcola(foto, richiesta);
+        int saltate = distinti.size() - nuove.size();
+        int modificate = 0;
+        int invariate = 0;
+        List<ErroreData> errori = new ArrayList<>();
+        for (var voce : nuove.entrySet()) {
+            Foto f = perId.get(voce.getKey());
+            if (voce.getValue().equals(f.getScattataIl())) {
+                invariate++;
+                continue;
+            }
+            try {
+                NuoveDate.annoAmmesso(voce.getValue().getYear());
+                cambiaData(f, voce.getValue());
+                repository.save(f);
+                modificate++;
+            } catch (RuntimeException e) {
+                String motivo = motivoData(e);
+                log.warn("Data di {} non cambiata: {}", f.getPercorso(), motivo);
+                errori.add(new ErroreData(f.getId(), f.getNomeOriginale(), motivo));
+                continue;
+            }
+            eventi.publishEvent(new FotoDataCambiata(f.getId()));
+        }
+        log.info("Data a mano ({}): {} foto cambiate, {} già così, {} saltate, {} errori", richiesta.modo(), modificate,
+                invariate, saltate, errori.size());
+        return new EsitoDate(modificate, invariate, saltate, errori);
     }
 
     /** Sposta l'originale nella cartella del giorno di scatto, se non c'è già. */
@@ -1287,6 +1364,17 @@ public class FotoService {
             case METTI_NEL_PRIVATO -> mettiNelPrivato(ids);
             case TOGLI_DAL_PRIVATO -> togliDalPrivato(ids);
         };
+    }
+
+    /** Perché una data non è cambiata, senza i percorsi del server (il messaggio di NoSuchFileException è solo quello). */
+    private static String motivoData(RuntimeException e) {
+        if (e.getCause() instanceof java.nio.file.NoSuchFileException) {
+            return e.getMessage() + ": il file non c'è più";
+        }
+        if (e.getCause() instanceof IOException io && io.getMessage() != null) {
+            return e.getMessage() + ": " + io.getClass().getSimpleName();
+        }
+        return String.valueOf(e.getMessage());
     }
 
     // ---------------------------------------------------------------- privato

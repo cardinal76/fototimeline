@@ -378,6 +378,23 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   *Seleziona*, poi **📍 Luogo…** nella barra in basso. Un luogo scelto a mano non lo cambia più
   nessun ricalcolo. Le foto senza GPS con una città scelta a mano compaiono sulla mappa lì, con il
   bordo tratteggiato (posizione approssimativa).
+- **Data a mano per tante foto insieme** (gestore e amministratore): *Seleziona* le foto, poi
+  **📅 Data…** nella barra in basso. Tre modi:
+  - **Stessa data per tutte, ognuna con la sua ora** (il solito): scegli il giorno, l'ora di ogni
+    foto resta; quelle senza un'ora vera (data presa dalla cartella) vanno alle 12. Togliendo
+    "Tieni l'ora di ognuna" vanno tutte alle 12, un secondo l'una dall'altra.
+  - **Stessa data e ora per tutte**: tutte a quel momento, un secondo in più per foto, nell'ordine
+    in cui erano: nella timeline non si mescolano.
+  - **Sposta di…**: avanti o indietro di anni, mesi, giorni, ore e minuti, tutte della stessa
+    quantità: le distanze fra le foto restano. Serve quando l'orologio della fotocamera era
+    sbagliato (per esempio indietro di un anno e due ore). Le foto senza data restano così.
+
+  Prima di confermare una riga dice cosa succede ("5 foto: dal 20/06/1993 10:00 al 20/06/1993
+  18:40") e avvisa se l'ordine fra le foto cambia. Come dal visore, la data diventa "scelta a mano"
+  e i file passano nella cartella del giorno nuovo (con molte foto, sul cloud, ci vuole un po');
+  gli eventi per date le prendono o le lasciano da soli. Al più 500 foto alla volta; quelle nel
+  cestino o private di un altro si saltano, e se una non si sposta (file sparito, cloud smontato a
+  metà) le altre cambiano lo stesso e la finestra dice quale e perché.
 - **Condividere con chi non ha un account**: *Seleziona* le foto (o apri un album), *Condividi…*
   (o *Condividi album*), scegli titolo e scadenza, *Crea link*, *Copia* e mandalo su WhatsApp. Chi lo
   apre vede solo quelle foto, senza login. Spunta "Permetti di scaricare" solo se servono gli

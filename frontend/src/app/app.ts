@@ -44,6 +44,7 @@ import { daQuanto, durata, peso } from './formati';
 import { esci } from './sessione';
 import { Mappa } from './mappa';
 import { Cestino } from './cestino';
+import { DataSelezione } from './data-selezione';
 import { Persone } from './persone';
 import { QuasiUguali } from './quasi-uguali';
 import { inAttesa } from './condivisi-in-attesa';
@@ -70,7 +71,7 @@ const ALTEZZA_RIGA = 210;
   imports: [
     Accesso,
     Cestino, DatePipe, DecimalPipe, FiltroLuogo, FormsModule, GoogleFoto, Mappa, NgTemplateOutlet, QuasiUguali, RiceviCondivisi, Ricordi, ScegliLuogo, TimelineNav, TimelineScorrevole, Visore,
-    Eventi, FiltroData, FiltroEvento, SceltaEvento,
+    DataSelezione, Eventi, FiltroData, FiltroEvento, SceltaEvento,
     Persone, Utenti,
   ],
   host: {
@@ -129,6 +130,8 @@ export class App {
   protected readonly dialogoCondivisioni = signal(false);
   /** "Luogo…" sulla selezione: lo stesso luogo a tutte le foto scelte, anche senza GPS. */
   protected readonly dialogoLuogo = signal(false);
+  /** "📅 Data…" sulla selezione: la data di tutte le foto scelte insieme. */
+  protected readonly dialogoData = signal(false);
   protected readonly condivisioni = signal<Condivisione[] | null>(null);
   protected readonly dialogoSalute = signal(false);
   protected readonly controlloSalute = signal(false);
@@ -441,6 +444,8 @@ export class App {
       this.dialogoCondivisioni.set(false);
     } else if (this.dialogoLuogo()) {
       this.dialogoLuogo.set(false);
+    } else if (this.dialogoData()) {
+      this.dialogoData.set(false);
     } else if (this.dialogoImporta()) {
       this.chiudiImporta();
     } else if (this.telefonoInModifica()) {
