@@ -18,7 +18,7 @@ import { Foto, VoltoInFoto } from './modelli';
       <section class="persone-foto" aria-label="Persone nella foto">
         <h3>Persone</h3>
         <ul>
-          @for (v of visibili(); track v.id) {
+          @for (v of volti(); track v.id) {
             <li>
               <img [src]="ritaglio(v.id)" alt="" loading="lazy" />
               @if (v.nome) {
@@ -45,9 +45,6 @@ import { Foto, VoltoInFoto } from './modelli';
             </li>
           }
         </ul>
-        @if (nascosti()) {
-          <p class="tenue">e {{ nascosti() }} {{ nascosti() === 1 ? 'volto nascosto' : 'volti nascosti' }}</p>
-        }
         <datalist id="nomi-persone">
           @for (p of galleria.personeNominate(); track p.id) {
             <option [value]="p.nome"></option>
@@ -134,9 +131,8 @@ export class PersoneFoto {
   readonly scelta = output<void>();
 
   protected readonly attiva = computed(() => !!this.galleria.volti()?.attiva && !this.foto().video);
+  /** Le persone nascoste non ci sono: il server non le manda. */
   protected readonly volti = signal<VoltoInFoto[]>([]);
-  protected readonly visibili = computed(() => this.volti().filter((v) => !v.nascosta));
-  protected readonly nascosti = computed(() => this.volti().length - this.visibili().length);
   protected readonly inModifica = signal<string | null>(null);
   protected readonly occupato = signal(false);
 

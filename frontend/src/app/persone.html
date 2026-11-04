@@ -79,10 +79,12 @@
           </form>
           <div class="azioni">
             <button type="button" (click)="mostraFoto(p)">Mostra le {{ p.volti }} foto</button>
-            <button type="button" [disabled]="occupato()" (click)="nascondi(!p.nascosta)"
-              [title]="p.nascosta ? '' : 'Sconosciuti, folla: non si vede più tra le persone (i volti simili ci finiscono lo stesso)'">
-              {{ p.nascosta ? 'Mostra di nuovo' : 'Non mostrare' }}
-            </button>
+            @if (admin()) {
+              <button type="button" [disabled]="occupato()" (click)="nascondi(!p.nascosta)"
+                [title]="p.nascosta ? 'Torna tra le persone, nel filtro e nel visore' : titoloNascondi">
+                {{ p.nascosta ? 'Mostra di nuovo' : 'Nascondi' }}
+              </button>
+            }
           </div>
         </div>
 
@@ -145,7 +147,7 @@
       </div>
     } @else {
       <div class="schede" role="tablist" aria-label="Quali persone">
-        @for (s of schede; track s.tipo) {
+        @for (s of schede(); track s.tipo) {
           <button type="button" role="tab" [attr.aria-selected]="tipo() === s.tipo" (click)="scegliScheda(s.tipo)">{{ s.nome }}</button>
         }
         <span class="spazio"></span>
@@ -189,6 +191,17 @@
                   · <span class="proposte" [title]="p.proposte + ' volti forse suoi'">{{ p.proposte }}?</span>
                 }
               </span>
+              @if (admin() && !unendo()) {
+                <button
+                  type="button"
+                  class="link nascondi"
+                  [disabled]="occupato()"
+                  [title]="p.nascosta ? 'Torna tra le persone, nel filtro e nel visore' : titoloNascondi"
+                  (click)="nascondiVoce(p, !p.nascosta)"
+                >
+                  {{ p.nascosta ? 'Mostra di nuovo' : 'Nascondi' }}
+                </button>
+              }
             </li>
           } @empty {
             <li class="vuoto">
@@ -200,7 +213,7 @@
                   Nessun gruppo di volti{{ stato()?.mancanti ? ': le foto non sono ancora state guardate tutte' : '' }}.
                 }
                 @default {
-                  Niente di nascosto.
+                  Nessuna persona nascosta. «Nascondi» su un volto lo toglie dagli elenchi, dal filtro e dal visore; le foto restano.
                 }
               }
             </li>

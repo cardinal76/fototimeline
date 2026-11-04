@@ -224,6 +224,10 @@ h3 {
 .proposte {
   color: var(--accento-forte);
 }
+/* "Nascondi" / "Mostra di nuovo" sotto il volto: piccolo, per non rubare il clic sul nome. */
+.nascondi {
+  font-size: 0.8rem;
+}
 .avviso-unione {
   padding: 0.5rem 0.8rem;
   border-radius: 10px;

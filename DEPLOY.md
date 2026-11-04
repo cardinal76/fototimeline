@@ -910,8 +910,14 @@ foto o vettori che escono).
    da grande, con e senza occhiali) e si uniscono; nel dettaglio di una persona
    c'è anche "Somigliano: la stessa persona?" con i gruppi più vicini;
 4. nel dettaglio, i volti **meno somiglianti per primi**: ✕ toglie un volto
-   sbagliato (e non ci torna da solo), ★ lo usa come copertina; **Non
-   mostrare** nasconde un gruppo (sconosciuti, folla) in "Nascoste";
+   sbagliato (e non ci torna da solo), ★ lo usa come copertina; **Nascondi**
+   (anche sotto ogni volto della griglia) manda una persona o un gruppo
+   (sconosciuti, folla) in **Persone nascoste**: sparisce per tutta la famiglia
+   da elenchi, filtro, visore, proposte, "Somigliano" e conteggi, le foto
+   restano; i volti nuovi simili ci entrano e restano nascosti. **Mostra di
+   nuovo** la rimette. Le nascoste le vede solo l'amministratore
+   (`GET /api/persone/nascoste`); agli altri `GET /api/persone/{id}` di una
+   nascosta risponde 404;
 5. **clic sul volto**: le foto di quella persona nella timeline; il filtro
    **Persona** (Filtri) si combina con tag, album, luogo, date e con la
    ricerca per contenuto. Nel visore, nel pannello dei dettagli, chi c'è nella
@@ -988,7 +994,7 @@ resta, con 0 foto).
 **Chi può fare cosa**: vedere le persone (visore, filtro "Persona") lo può
 chiunque abbia un ruolo; dare il nome a un volto dal visore, confermare o
 rifiutare una proposta lì, il **gestore**; la pagina **Persone** di Strumenti
-(rinominare, unire, nascondere, togliere un volto, copertina, proposte) e
+(rinominare, unire, nascondere e "Persone nascoste", togliere un volto, copertina, proposte) e
 **Riconosci volti** / **Ricostruisci indice** l'**amministratore**. Nessuna API
 dei volti è pubblica.
 

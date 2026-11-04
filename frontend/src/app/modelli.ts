@@ -548,6 +548,7 @@ export interface StatoVolti {
   lavoro?: LavoroVolti;
 }
 
+/** NASCOSTE si legge da /api/persone/nascoste, solo l'amministratore. */
 export type TipoPersone = 'NOMINATE' | 'GRUPPI' | 'NASCOSTE';
 
 /** Una persona (con nome) o un gruppo di volti senza nome. */
@@ -587,7 +588,6 @@ export interface VoltoInFoto {
   riquadro: { x: number; y: number; larghezza: number; altezza: number };
   personaId?: string;
   nome?: string;
-  nascosta: boolean;
   proposta?: string;
   nomeProposta?: string;
 }
