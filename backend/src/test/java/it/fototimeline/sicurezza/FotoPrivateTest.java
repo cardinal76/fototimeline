@@ -396,6 +396,13 @@ class FotoPrivateTest {
             mvc.perform(post("/api/foto/ruota").with(chi).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                     .content(JSON.writeValueAsString(Map.of("ids", List.of(id), "gradi", 90))))
                     .andExpect(jsonPath("$.modificate").value(0));
+            // "📅 Data…": per loro non c'è, si salta.
+            mvc.perform(post("/api/foto/data").with(chi).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                    .content(JSON.writeValueAsString(Map.of("ids", List.of(id), "modo", "STESSO_GIORNO",
+                            "giorno", "1999-01-01"))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.modificate").value(0))
+                    .andExpect(jsonPath("$.saltate").value(1));
             // Negli eventi non la mettono, né la tolgono.
             mvc.perform(post("/api/eventi").with(chi).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                     .content(JSON.writeValueAsString(Map.of("nome", "Rubata", "ids", List.of(id)))))
@@ -407,6 +414,7 @@ class FotoPrivateTest {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.conteggio").value(2));
         Foto ricaricata = fotoRepository.findById(id).orElseThrow();
         assertThat(ricaricata.getTitolo()).isEqualTo("Solo mia");
+        assertThat(ricaricata.getGiorno()).isEqualTo("2020-05-10");
         assertThat(ricaricata.getTag()).containsExactly("segreto-anna");
         assertThat(ricaricata.getRotazione()).isZero();
         assertThat(ricaricata.isPreferita()).isFalse();
@@ -425,6 +433,28 @@ class FotoPrivateTest {
         // L'evento per date dei suoi giorni la riprende al ricalcolo leggero.
         eventi.ricalcolaGiorniToccati();
         assertThat(fotoRepository.findById(id).orElseThrow().getEvento()).isNotNull();
+    }
+
+    @Test
+    void annaCambiaLaDataDellaSuaPrivataInsiemeAQuelleDiTutti() throws Exception {
+        mettiNelPrivato(ANNA, privata, 1);
+        mvc.perform(post("/api/foto/data").with(ANNA).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("ids", List.of(privata.getId(), altra.getId()),
+                                "modo", "SPOSTA", "sposta", Map.of("anni", 0, "mesi", 0, "giorni", 1, "ore", 0,
+                                        "minuti", 0)))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.modificate").value(2))
+                .andExpect(jsonPath("$.saltate").value(0));
+        Foto sua = fotoRepository.findById(privata.getId()).orElseThrow();
+        assertThat(sua.getGiorno()).isEqualTo("2020-05-11");
+        assertThat(sua.getPrivataDi()).isEqualTo("anna");
+        assertThat(sua.getPercorso()).startsWith("2020/05/11/");
+        assertThat(fotoRepository.findById(altra.getId()).orElseThrow().getGiorno()).isEqualTo("2020-05-11");
+        // L'utilizzatrice non cambia date, nemmeno di quelle che vede.
+        mvc.perform(post("/api/foto/data").with(NONNA).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("ids", List.of(altra.getId()), "modo", "STESSO_GIORNO",
+                                "giorno", "1999-01-01"))))
+                .andExpect(status().isForbidden());
     }
 
     @Test
