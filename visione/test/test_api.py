@@ -58,6 +58,7 @@ def test_senza_segreto_niente(tmp_path, modello):
         assert c.get("/clip/indice").status_code == 401
         assert c.get("/clip/indice", headers={"X-Visione-Segreto": "sbagliato"}).status_code == 401
         assert c.put("/clip/indice/a", content=jpeg((255, 0, 0)), headers={"Content-Type": "image/jpeg"}).status_code == 401
+        assert c.post("/clip/somiglianze", json={"coppie": []}).status_code == 401
 
 
 def test_senza_segreto_configurato_non_parte(tmp_path, modello, monkeypatch):
@@ -115,6 +116,18 @@ def test_indice_da_vettore_json(client):
     assert client.get("/clip/cerca", params={"q": "blu", "k": 1}).json()["risultati"][0]["punteggio"] == pytest.approx(1)
     assert client.put("/clip/indice/b", json={"vettore": [1, 2]}).status_code == 400
     assert client.put("/clip/indice/b", json={"vettore": [0, 0, 0]}).status_code == 400
+
+
+def test_somiglianze_tra_coppie_per_le_quasi_uguali(client):
+    client.put("/clip/indice/a", json={"vettore": [1, 0, 0]})
+    client.put("/clip/indice/b", json={"vettore": [2, 0, 0]})
+    client.put("/clip/indice/c", json={"vettore": [0, 1, 0]})
+    r = client.post("/clip/somiglianze", json={"coppie": [["a", "b"], ["a", "c"], ["a", "manca"]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["punteggi"] == [pytest.approx(1), pytest.approx(0), None]
+    assert client.post("/clip/somiglianze", json={"coppie": [["a"]]}).status_code == 400
+    assert client.post("/clip/somiglianze", json={"coppie": [["a", "x y"]]}).status_code == 400
+    assert client.post("/clip/somiglianze", json={"coppie": [["a", "b"]] * 5001}).status_code == 413
 
 
 def test_id_non_validi(client):

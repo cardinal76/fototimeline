@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import it.fototimeline.quasiuguali.CalcoloImpronte.StatoCalcolo;
+import it.fototimeline.quasiuguali.Confronto.Sensibilita;
 import it.fototimeline.quasiuguali.QuasiUguali.Esito;
 import it.fototimeline.quasiuguali.QuasiUguali.PaginaGruppi;
 
@@ -30,10 +31,12 @@ public class QuasiUgualiController {
         this.calcolo = calcolo;
     }
 
+    /** {@code sensibilita}: SEVERA (predefinita), NORMALE o LARGA. */
     @GetMapping
     public PaginaGruppi gruppi(@RequestParam(defaultValue = "0") int pagina,
-            @RequestParam(defaultValue = "20") int dimensione) {
-        return quasiUguali.gruppi(Math.max(pagina, 0), Math.clamp(dimensione, 1, 200));
+            @RequestParam(defaultValue = "20") int dimensione,
+            @RequestParam(defaultValue = "SEVERA") Sensibilita sensibilita) {
+        return quasiUguali.gruppi(sensibilita, Math.max(pagina, 0), Math.clamp(dimensione, 1, 200));
     }
 
     public record Risoluzione(List<String> tieni, List<String> togli) {
@@ -51,6 +54,16 @@ public class QuasiUgualiController {
     @PostMapping("/ignora")
     public ResponseEntity<Void> ignora(@RequestBody Ignora r) {
         quasiUguali.ignora(r.ids());
+        return ResponseEntity.noContent().build();
+    }
+
+    public record Separa(String id, List<String> da) {
+    }
+
+    /** "Non è uguale": la foto {@code id} non si propone più con nessuna di {@code da}. */
+    @PostMapping("/separa")
+    public ResponseEntity<Void> separa(@RequestBody Separa r) {
+        quasiUguali.separa(r.id(), r.da());
         return ResponseEntity.noContent().build();
     }
 

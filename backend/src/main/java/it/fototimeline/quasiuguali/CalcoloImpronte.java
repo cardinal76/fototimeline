@@ -22,10 +22,13 @@ import it.fototimeline.service.FotoService;
 import jakarta.annotation.PreDestroy;
 
 /**
- * "Calcola impronte": dà l'impronta alle foto che sono in archivio da prima
- * delle foto quasi uguali (le nuove la prendono all'importazione). In
+ * "Calcola impronte": dà impronta (pHash) e {@link Firma} alle foto che sono
+ * in archivio da prima (le nuove le prendono all'importazione). In
  * sottofondo, a blocchi in ordine di id, una foto alla volta dalla sua
- * miniatura; si può annullare e rilanciare: tocca solo le foto senza impronta.
+ * miniatura; si può annullare e rilanciare: tocca solo le foto senza impronta
+ * o senza la firma della {@link Impronta#VERSIONE} di adesso. Un pHash che c'è
+ * già non si riscrive (la firma nuova non lo cambia): si legge la miniatura
+ * una volta sola per foto, qualche millisecondo, niente cloud.
  * Su un thread suo: non ferma le importazioni.
  */
 @Service
@@ -72,9 +75,16 @@ public class CalcoloImpronte {
         this.clock = clock.orElse(Clock.systemUTC());
     }
 
-    /** Le foto senza impronta: niente video (quelli che non hanno il campo sono foto vecchie) né foto nel cestino. */
+    /**
+     * Le foto senza impronta o con la firma mancante o di un'altra versione:
+     * niente video (quelli che non hanno il campo sono foto vecchie) né foto
+     * nel cestino. Anche le private: il calcolo non mostra niente.
+     */
     private static Criteria senzaImpronta() {
-        return Criteria.where("impronta").exists(false).and("video").ne(true).and(FotoService.CESTINO).is(null);
+        return new Criteria().andOperator(
+                Criteria.where("video").ne(true).and(FotoService.CESTINO).is(null),
+                new Criteria().orOperator(Criteria.where("impronta").exists(false),
+                        Criteria.where("firma.versione").ne(Impronta.VERSIONE)));
     }
 
     /**
@@ -128,7 +138,7 @@ public class CalcoloImpronte {
             String ultimo = "";
             while (!annullato) {
                 // Per id crescente dopo l'ultimo visto: una foto che non riesce non si ripesca all'infinito.
-                Query blocco = Query.query(senzaImpronta().and("_id").gt(ultimo))
+                Query blocco = Query.query(new Criteria().andOperator(senzaImpronta(), Criteria.where("_id").gt(ultimo)))
                         .with(Sort.by("_id"))
                         .limit(BLOCCO);
                 List<Foto> foto = mongo.find(blocco, Foto.class);
@@ -173,9 +183,12 @@ public class CalcoloImpronte {
     private boolean calcola(Foto f) {
         try {
             // La miniatura sta sul disco del server; se manca si rifà dall'originale (serve il cloud).
-            long impronta = Impronta.calcola(fotoService.fileMiniatura(f));
-            mongo.updateFirst(Query.query(Criteria.where("_id").is(f.getId())), new Update().set("impronta", impronta),
-                    Foto.class);
+            Impronta.Analisi analisi = Impronta.analizza(fotoService.fileMiniatura(f));
+            Update update = new Update().set("firma", analisi.firma());
+            if (f.getImpronta() == null) {
+                update.set("impronta", analisi.impronta());
+            }
+            mongo.updateFirst(Query.query(Criteria.where("_id").is(f.getId())), update, Foto.class);
             return true;
         } catch (Exception e) {
             log.debug("Impronta di {} non calcolata: {}", f.getPercorso(), e.toString());

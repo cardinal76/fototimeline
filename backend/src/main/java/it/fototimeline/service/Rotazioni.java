@@ -106,10 +106,11 @@ public class Rotazioni {
             }
             if (!foto.isVideo()) {
                 try {
-                    update.set("impronta", Impronta.calcola(miniatura));
+                    Impronta.Analisi analisi = Impronta.analizza(miniatura);
+                    update.set("impronta", analisi.impronta()).set("firma", analisi.firma());
                 } catch (IOException | RuntimeException e) {
                     // La rifà "Calcola impronte": quella di prima varrebbe per la foto non girata.
-                    update.unset("impronta");
+                    update.unset("impronta").unset("firma");
                     log.warn("Impronta di {} non ricalcolata: {}", foto.getNomeOriginale(), e.toString());
                 }
             }

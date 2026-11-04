@@ -37,6 +37,7 @@ import {
   Ricordo,
   RicordiTelegram,
   Salute,
+  Sensibilita,
   StatoCloud,
   StatoContenuto,
   StatoConversioni,
@@ -324,9 +325,9 @@ export class FotoApi {
     return this.http.post<void>(`/api/telefoni/video-grandi/${encodeURIComponent(id)}/riprova`, {});
   }
 
-  /** Gruppi di foto quasi uguali, dal più numeroso. */
-  quasiUguali(pagina: number, dimensione = 20): Observable<PaginaGruppi> {
-    return this.http.get<PaginaGruppi>('/api/quasi-uguali', { params: { pagina, dimensione } });
+  /** Gruppi di foto quasi uguali, dal più numeroso, con questa sensibilità. */
+  quasiUguali(pagina: number, dimensione = 20, sensibilita: Sensibilita = 'SEVERA'): Observable<PaginaGruppi> {
+    return this.http.get<PaginaGruppi>('/api/quasi-uguali', { params: { pagina, dimensione, sensibilita } });
   }
 
   /** Elimina le foto "togli" di un gruppo; quelle tenute (se più d'una) non si propongono più insieme. */
@@ -366,6 +367,11 @@ export class FotoApi {
   /** "Non sono doppioni". */
   ignora(ids: string[]): Observable<void> {
     return this.http.post<void>('/api/quasi-uguali/ignora', { ids });
+  }
+
+  /** "Non è uguale": la foto id non si propone più con nessuna di "da". */
+  separa(id: string, da: string[]): Observable<void> {
+    return this.http.post<void>('/api/quasi-uguali/separa', { id, da });
   }
 
   statoImpronte(): Observable<StatoImpronte> {

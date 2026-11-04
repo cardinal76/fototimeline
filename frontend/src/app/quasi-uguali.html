@@ -16,6 +16,28 @@
       <button type="button" class="chiudi" aria-label="Chiudi" (click)="chiudi.emit()">✕</button>
     </header>
 
+    <fieldset class="sensibilita">
+      <legend>Sensibilità</legend>
+      @for (s of sensibilitaPossibili; track s.valore) {
+        <label [title]="s.spiegazione">
+          <input
+            type="radio"
+            name="sensibilita"
+            [value]="s.valore"
+            [checked]="sensibilita() === s.valore"
+            [disabled]="caricando() || occupato()"
+            (change)="cambiaSensibilita(s.valore)"
+          />
+          {{ s.nome }}
+        </label>
+      }
+      @for (s of sensibilitaPossibili; track s.valore) {
+        @if (s.valore === sensibilita()) {
+          <span class="tenue">{{ s.spiegazione }}</span>
+        }
+      }
+    </fieldset>
+
     @if (impronte(); as s) {
       @if (s.stato === 'IN_CORSO') {
         <div class="impronte" role="status">
@@ -30,7 +52,8 @@
       } @else if (s.senzaImpronta) {
         <div class="impronte">
           <p class="tenue">
-            {{ s.senzaImpronta }} foto ancora senza impronta: non entrano nel confronto.
+            {{ s.senzaImpronta }} foto ancora senza impronta o senza i controlli nuovi (bordi, colori): entrano nel
+            confronto solo se quasi identiche.
             @if (!admin()) {
               Un amministratore può calcolarle.
             }
@@ -87,8 +110,23 @@
               @if (f.suggerita) {
                 <dt class="nascosto">Consiglio</dt>
                 <dd class="suggerita">Suggerita</dd>
+              } @else if (f.somiglianza !== undefined && f.somiglianza !== null) {
+                <dt class="nascosto">Somiglianza con la suggerita</dt>
+                <dd class="somiglianza" [title]="f.motivi.join(' · ')">
+                  Uguale al {{ f.somiglianza }}%
+                  <span class="motivi">{{ f.motivi.join(' · ') }}</span>
+                </dd>
               }
             </dl>
+            <button
+              type="button"
+              class="link"
+              [disabled]="occupato()"
+              title="Questa foto non si propone più insieme alle altre del gruppo"
+              (click)="nonUguale(f)"
+            >
+              Non è uguale
+            </button>
           </li>
         }
       </ul>

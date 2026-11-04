@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, R
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from .indice import IndiceVettori
+from .indice import IndiceVettori, normalizza
 from .modello import Modello, apri_immagine
 from .volti import ModelloVolti
 
@@ -42,6 +42,8 @@ MAX_K = 2000
 MAX_IMMAGINI_VOLTI = 64
 MAX_DOMANDE = 256
 MAX_VICINI = 200
+# Quasi uguali: quante coppie di foto per richiesta.
+MAX_COPPIE = 5000
 # Il testo di CLIP è addestrato su didascalie: "una foto di cane" va meglio di "cane" da solo.
 FRASE = os.environ.get("VISIONE_FRASE", "una foto di {}")
 
@@ -65,6 +67,10 @@ class Voci(BaseModel):
 
 class Ids(BaseModel):
     ids: list[str]
+
+
+class Coppie(BaseModel):
+    coppie: list[list[str]]
 
 
 class DomandaVicini(BaseModel):
@@ -271,6 +277,23 @@ def crea_app(modello: Modello | None = None, cartella: str | Path | None = None,
             raise HTTPException(400, str(e)) from e
         risultati = indice().cerca(v, k, soglia)
         return {"modello": m().nome, "risultati": [{"id": i, "punteggio": round(p, 4)} for i, p in risultati]}
+
+    @clip.post("/somiglianze")
+    def somiglianze(corpo: Coppie):
+        """Per le quasi uguali: il coseno tra i vettori di ogni coppia di id già nell'indice,
+        nello stesso ordine; null se manca il vettore di una delle due."""
+        if len(corpo.coppie) > MAX_COPPIE:
+            raise HTTPException(413, f"Al più {MAX_COPPIE} coppie per richiesta")
+        punteggi: list[float | None] = []
+        for coppia in corpo.coppie:
+            if len(coppia) != 2:
+                raise HTTPException(400, "Ogni coppia ha due id")
+            a, b = (indice().vettore(controlla_id(i)) for i in coppia)
+            if a is None or b is None:
+                punteggi.append(None)
+            else:
+                punteggi.append(round(float(normalizza(a) @ normalizza(b)), 4))
+        return {"punteggi": punteggi}
 
     app.include_router(clip)
 
