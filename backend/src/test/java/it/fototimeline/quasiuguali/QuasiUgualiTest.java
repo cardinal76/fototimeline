@@ -230,6 +230,77 @@ class QuasiUgualiTest {
         assertThat(ancora.calcolate()).isZero();
     }
 
+    @Test
+    void calcolaImpronteRifaSoloLaFirmaETieneIlPhashCheCeGia() throws Exception {
+        Foto[] f = importaTre();
+        assertThat(repository.findAll()).allSatisfy(foto -> assertThat(foto.getFirma()).isNotNull());
+        // Le foto di prima: il pHash c'è, la firma no (o di una versione vecchia).
+        long segnaposto = f[2].getImpronta() ^ 1L;
+        mongo.updateFirst(Query.query(org.springframework.data.mongodb.core.query.Criteria.where("_id")
+                .is(f[2].getId())), new Update().set("impronta", segnaposto).unset("firma"), Foto.class);
+        mongo.updateFirst(Query.query(org.springframework.data.mongodb.core.query.Criteria.where("_id")
+                .is(f[1].getId())), new Update().set("firma.versione", Impronta.VERSIONE - 1), Foto.class);
+        assertThat(calcolo.stato().senzaImpronta()).isEqualTo(2);
+
+        var fine = aspetta(calcolo.avvia());
+        assertThat(fine.stato()).isEqualTo(Stato.FINITO);
+        assertThat(fine.calcolate()).isEqualTo(2);
+        assertThat(fine.senzaImpronta()).isZero();
+        Foto rifatta = repository.findById(f[2].getId()).orElseThrow();
+        assertThat(rifatta.getFirma().versione()).isEqualTo(Impronta.VERSIONE);
+        // Il pHash non si è riscritto: è ancora il segnaposto.
+        assertThat(rifatta.getImpronta()).isEqualTo(segnaposto);
+        assertThat(repository.findById(f[1].getId()).orElseThrow().getFirma().versione())
+                .isEqualTo(Impronta.VERSIONE);
+    }
+
+    @Test
+    void ogniFotoDelGruppoDiceQuantoSomigliaAllaSuggeritaEPerche() throws IOException {
+        Foto[] f = importaTre();
+        var pagina = quasiUguali.gruppi(Confronto.Sensibilita.SEVERA, 0, 20);
+        assertThat(pagina.sensibilita()).isEqualTo(Confronto.Sensibilita.SEVERA);
+        var foto = perId(pagina.gruppi().getFirst().foto());
+        assertThat(foto.get(f[0].getId()).somiglianza()).isNull();
+        assertThat(foto.get(f[0].getId()).motivi()).isEmpty();
+        assertThat(foto.get(f[1].getId()).somiglianza()).isBetween(80, 100);
+        assertThat(foto.get(f[1].getId()).motivi()).anyMatch(m -> m.startsWith("forma "))
+                .anyMatch(m -> m.startsWith("colori "));
+    }
+
+    @Test
+    void conLaLargaEntraUnaFotoSimileCheLaSeveraLascia() throws IOException {
+        var scena = Immagini.scena(1, 1200, 900);
+        Foto a = importa("a.png", Immagini.png(scena), "2024-05-03T10:00:00Z");
+        Foto b = importa("b.png", Immagini.png(Immagini.misto(scena, Immagini.scena(101, 1200, 900), 0.25)),
+                "2024-06-03T10:00:00Z");
+        assertThat(quasiUguali.gruppi(Confronto.Sensibilita.SEVERA, 0, 20).totale()).isZero();
+        assertThat(quasiUguali.gruppi(Confronto.Sensibilita.LARGA, 0, 20).gruppi()).singleElement()
+                .satisfies(g -> assertThat(g.foto()).extracting(FotoSimile::id)
+                        .containsExactlyInAnyOrder(a.getId(), b.getId()));
+    }
+
+    @Test
+    void nonEUgualeTogliLaFotoDalGruppoEPoiNonCiTornaPiu() throws IOException {
+        Foto[] f = importaTre();
+        var scena = Immagini.scena(1, 1200, 900);
+        Foto media = importa("media.jpg", Immagini.jpeg(Immagini.ridimensiona(scena, 900, 675), 0.6f),
+                "2024-05-05T10:00:00Z");
+        assertThat(quasiUguali.gruppi(0, 20).gruppi().getFirst().foto()).hasSize(3);
+
+        quasiUguali.separa(media.getId(), List.of(f[0].getId(), f[1].getId()));
+        assertThat(quasiUguali.gruppi(0, 20).gruppi()).singleElement()
+                .satisfies(g -> assertThat(g.foto()).extracting(FotoSimile::id)
+                        .containsExactlyInAnyOrder(f[0].getId(), f[1].getId()));
+        // Anche rifacendo i gruppi da capo, e con ogni sensibilità.
+        quasiUguali.invalida();
+        for (Confronto.Sensibilita s : Confronto.Sensibilita.values()) {
+            assertThat(quasiUguali.gruppi(s, 0, 20).gruppi()).as("%s", s).singleElement()
+                    .satisfies(g -> assertThat(g.foto()).extracting(FotoSimile::id).doesNotContain(media.getId()));
+        }
+        assertThatThrownBy(() -> quasiUguali.separa(media.getId(), List.of(media.getId())))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private CalcoloImpronte.StatoCalcolo aspetta(CalcoloImpronte.StatoCalcolo avviato) throws InterruptedException {
         // Con poche foto (o nessuna) il calcolo può essere già finito quando avvia() risponde.
         assertThat(avviato.stato()).isIn(Stato.IN_CORSO, Stato.FINITO);

@@ -208,3 +208,43 @@ dd {
   overflow: hidden;
   clip-path: inset(50%);
 }
+
+/* ---------------------------------------------------------- sensibilità */
+.sensibilita {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+}
+.sensibilita legend {
+  padding: 0 0.3rem;
+  font-size: 0.85rem;
+  color: var(--testo-tenue);
+}
+.sensibilita label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+.somiglianza {
+  margin-top: 0.3rem;
+  font-weight: 600;
+}
+.motivi {
+  display: block;
+  font-weight: normal;
+  color: var(--testo-tenue);
+  font-size: 0.8rem;
+}
+li > .link {
+  margin-top: 0.3rem;
+}
+.link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

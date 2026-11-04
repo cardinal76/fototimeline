@@ -16,15 +16,35 @@ import { firstValueFrom } from 'rxjs';
 
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
-import { FotoSimile, GruppoSimili, StatoImpronte } from './modelli';
+import { FotoSimile, GruppoSimili, Sensibilita, StatoImpronte } from './modelli';
 
 /** Gruppi chiesti al server per volta. */
 const DIMENSIONE = 20;
+/** La sensibilità scelta resta per la prossima volta, su questo browser. */
+const CHIAVE_SENSIBILITA = 'quasi-uguali.sensibilita';
+
+/** Le sensibilità, dalla più stretta: cosa trova in più ognuna. */
+export const SENSIBILITA: readonly { valore: Sensibilita; nome: string; spiegazione: string }[] = [
+  { valore: 'SEVERA', nome: 'Severa', spiegazione: 'solo copie e raffiche: forma, bordi e colori quasi identici' },
+  { valore: 'NORMALE', nome: 'Normale', spiegazione: 'anche copie ritagliate o ritoccate' },
+  { valore: 'LARGA', nome: 'Larga', spiegazione: 'anche foto solo simili: da controllare una per una' },
+];
+
+function sensibilitaSalvata(): Sensibilita {
+  try {
+    const s = localStorage.getItem(CHIAVE_SENSIBILITA);
+    return SENSIBILITA.some((x) => x.valore === s) ? (s as Sensibilita) : 'SEVERA';
+  } catch {
+    return 'SEVERA';
+  }
+}
 
 /**
  * "Quasi uguali": un gruppo di foto simili alla volta (raffiche, copie
  * ricompresse o ridimensionate). Si sceglie quali tenere e si tolgono le
- * altre, oppure si dice che non sono doppioni, o si salta. Esc lo chiude (App).
+ * altre, oppure si dice che non sono doppioni (tutto il gruppo) o che una foto
+ * non è uguale alle altre, o si salta. La sensibilità (Severa, Normale,
+ * Larga) decide quanto devono somigliarsi. Esc lo chiude (App).
  */
 @Component({
   selector: 'app-quasi-uguali',
@@ -50,6 +70,8 @@ export class QuasiUguali implements OnDestroy {
   /** Per il gruppo mostrato: id → da tenere. */
   protected readonly tieni = signal<ReadonlyMap<string, boolean>>(new Map());
   protected readonly impronte = signal<StatoImpronte | null>(null);
+  protected readonly sensibilita = signal<Sensibilita>(sensibilitaSalvata());
+  protected readonly sensibilitaPossibili = SENSIBILITA;
 
   protected readonly gruppo = computed(() => this.coda()[0] ?? null);
   protected readonly daTogliere = computed(() => this.gruppo()?.foto.filter((f) => !this.tieni().get(f.id)) ?? []);
@@ -81,7 +103,7 @@ export class QuasiUguali implements OnDestroy {
     try {
       let pagina = Math.floor(this.saltati.size / DIMENSIONE);
       for (;;) {
-        const p = await firstValueFrom(this.api.quasiUguali(pagina, DIMENSIONE));
+        const p = await firstValueFrom(this.api.quasiUguali(pagina, DIMENSIONE, this.sensibilita()));
         this.totale.set(p.totale);
         this.altre = p.altre;
         const nuovi = p.gruppi.filter((g) => !this.saltati.has(chiave(g)));
@@ -151,6 +173,46 @@ export class QuasiUguali implements OnDestroy {
       await firstValueFrom(this.api.ignora(g.foto.map((f) => f.id)));
       this.totale.update((t) => t - 1);
       this.avanti();
+    } catch (e: unknown) {
+      this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito');
+    } finally {
+      this.occupato.set(false);
+    }
+  }
+
+  /** Un'altra sensibilità: i gruppi si rileggono da capo (anche i saltati). */
+  protected cambiaSensibilita(s: Sensibilita): void {
+    if (s === this.sensibilita()) return;
+    this.sensibilita.set(s);
+    try {
+      localStorage.setItem(CHIAVE_SENSIBILITA, s);
+    } catch {
+      // senza localStorage vale solo per questa visita
+    }
+    this.saltati.clear();
+    this.quantiSaltati.set(0);
+    void this.carica();
+  }
+
+  /** "Non è uguale": la foto esce dal gruppo e non ci torna più (con nessuna delle altre). */
+  protected async nonUguale(f: FotoSimile): Promise<void> {
+    const g = this.gruppo();
+    if (!g) return;
+    const altre = g.foto.filter((x) => x.id !== f.id);
+    this.occupato.set(true);
+    try {
+      await firstValueFrom(this.api.separa(f.id, altre.map((x) => x.id)));
+      if (altre.length < 2) {
+        this.totale.update((t) => t - 1);
+        this.avanti();
+        return;
+      }
+      this.coda.update((c) => [{ ...g, foto: altre }, ...c.slice(1)]);
+      const tieni = new Map(this.tieni());
+      tieni.delete(f.id);
+      // Se era l'unica da tenere, si tiene la prima rimasta (la più grande).
+      if (![...tieni.values()].some((v) => v)) tieni.set(altre[0].id, true);
+      this.tieni.set(tieni);
     } catch (e: unknown) {
       this.galleria.avvisa(dettaglio(e) ?? 'Non riuscito');
     } finally {

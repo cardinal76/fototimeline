@@ -5,11 +5,14 @@ import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.TreeSet;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
+
+import it.fototimeline.quasiuguali.Firma;
 
 @Document("foto")
 @CompoundIndexes({
@@ -134,6 +137,11 @@ public class Foto {
      * quasi uguali; null per i video e finché non è calcolata.
      */
     private Long impronta;
+    /**
+     * Gli altri segnali delle quasi uguali (dHash, colori, luce, contrasto),
+     * calcolati con l'impronta; null finché non li fa "Calcola impronte".
+     */
+    private Firma firma;
     /**
      * Quando la miniatura è entrata nell'indice della ricerca per contenuto
      * (servizio visione); null = non ancora, la prende "Indicizza contenuto".
@@ -301,6 +309,10 @@ public class Foto {
 
     public Long getImpronta() { return impronta; }
     public void setImpronta(Long impronta) { this.impronta = impronta; }
+    /** Non serve a chi guarda: resta fuori dalle risposte (le quasi uguali danno i loro motivi). */
+    @JsonIgnore
+    public Firma getFirma() { return firma; }
+    public void setFirma(Firma firma) { this.firma = firma; }
 
     public Instant getContenutoIndicizzato() { return contenutoIndicizzato; }
     public void setContenutoIndicizzato(Instant contenutoIndicizzato) { this.contenutoIndicizzato = contenutoIndicizzato; }

@@ -152,12 +152,16 @@ fototimeline:
     controllo: PT5S
     # Ogni quanto si guarda se è l'ora del giro.
     controllo-orario: PT1M
-  # Foto quasi uguali: bit di differenza massimi tra le impronte (pHash a 64
-  # bit), e una soglia più larga per le raffiche (data EXIF a pochi secondi).
+  # Foto quasi uguali: le soglie sono quelle della sensibilità scelta nella
+  # pagina (Severa, Normale, Larga: quasiuguali/Confronto). Qui il tempo: le
+  # raffiche (data EXIF a pochi secondi) e le foto dello stesso momento hanno
+  # soglie più larghe. soglia-raffica la usano i Ricordi su Telegram.
   quasi-uguali:
-    soglia: ${FOTOTIMELINE_QUASI_UGUALI_SOGLIA:6}
     finestra-raffica: PT10S
+    finestra-vicine: ${FOTOTIMELINE_QUASI_UGUALI_VICINE:PT6H}
     soglia-raffica: 12
+    # Con visione accesa, il contenuto (CLIP) deve confermare le coppie.
+    contenuto: ${FOTOTIMELINE_QUASI_UGUALI_CONTENUTO:true}
   # Eventi automatici: foto vicine nel tempo (e nel posto) raggruppate con un
   # nome. Soglie in DEPLOY.md, "Eventi".
   eventi:

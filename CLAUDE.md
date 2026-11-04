@@ -529,31 +529,60 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
 
 ## Foto quasi uguali
 
-- Pacchetto `quasiuguali`. `Foto.impronta` è un pHash a 64 bit (`Impronta`,
-  Java puro: 32×32 riquadri di luminosità, DCT, 8×8 basse frequenze contro la
-  mediana) calcolato dalla **miniatura**, mai dall'originale: si fa in
-  `FotoService.anteprime` per foto e HEIC (non i video); se non riesce resta
-  null e la riempie "Calcola impronte".
-- `CalcoloImpronte` (thread `impronte`, uno alla volta, annullabile) prende le
-  foto senza impronta per `_id` crescente a blocchi: idempotente, e una foto
-  che non riesce non si ripesca nello stesso giro. Tutto `/api/quasi-uguali/**`
-  è da admin (Strumenti); `risolvi` manda nel cestino.
-- `Raggruppamento`: niente confronto di tutte le coppie. L'impronta si divide
-  in `soglia + 1` bande: per il principio dei cassetti due impronte a distanza
-  ≤ soglia hanno una banda identica, quindi si confrontano solo le foto nello
-  stesso cassetto; poi union-find. Le raffiche (data EXIF entro
-  `finestra-raffica`, 10 s) hanno una soglia più larga (`soglia-raffica`, 12),
-  cercata scorrendo le foto in ordine di data. Le ricompressioni passano dalle
-  bande, senza guardare la data (WhatsApp la cambia).
-- Soglia 6 (`fototimeline.quasi-uguali.soglia`): in `ImprontaTest` le copie
-  ridimensionate e ricompresse (anche JPEG al 10%) stanno a 0–6 bit, foto
-  diverse a 20 o più. Alzarla costa: con 150.000 impronte casuali i gruppi si fanno in
-  ~0,2 s a 6 e ~3 s a 8 (bande più strette, cassetti più pieni).
-- `QuasiUguali` tiene i gruppi in cache (si rifanno se cambia il numero di foto
-  o dopo 10 minuti); `risolvi` e `ignora` la aggiornano senza ricalcolare.
+- Pacchetto `quasiuguali`. `Foto.impronta` è un pHash a 64 bit e `Foto.firma`
+  (`Firma`: dHash, 4×4 riquadri di colore, luce, contrasto, % di riquadri
+  chiari, `versione`) gli altri segnali; tutti e due da `Impronta.analizza`
+  (Java puro, una lettura della **miniatura**, mai dell'originale), in
+  `FotoService.anteprime` per foto e HEIC (non i video) e in `Rotazioni.ruota`.
+  Se non riesce restano null e li riempie "Calcola impronte". `firma` è
+  `@JsonIgnore`: non esce nelle risposte.
+- `CalcoloImpronte` (thread `impronte`, uno alla volta, annullabile) prende per
+  `_id` crescente a blocchi le foto senza impronta **o** senza la firma della
+  `Impronta.VERSIONE` di adesso: cambiare il calcolo della firma vuol dire
+  alzare `VERSIONE`, e il giro notturno (che lo lancia se `senzaImpronta` > 0)
+  rifà le firme da solo. Un pHash che c'è già non si riscrive. Costo: una
+  lettura e decodifica di miniatura per foto, ~5 ms (480 px, misurato); con 142.000 foto
+  15–20 minuti, niente cloud. Tutto `/api/quasi-uguali/**` è da admin
+  (Strumenti); `risolvi` manda nel cestino.
+- **Perché c'erano troppi falsi**: union-find (A~B e B~C mettevano insieme A e
+  C, e una catena di foto simili a due a due diventava un gruppo di foto
+  diverse; anche le coppie "non sono doppioni" si riunivano passando da una
+  terza), il solo pHash a 6 bit (e 12 per le raffiche: a 12 bit somigliano
+  anche foto diverse), e le foto buie, uniformi o i documenti, dove le basse
+  frequenze sono quasi zero e i bit del pHash li decide il rumore (due foto
+  nere davano lo stesso pHash).
+- `Confronto` decide una coppia con **tutti** i segnali: pHash, dHash e
+  cromaticità dei riquadri (r/(r+g+b): non cambia se la foto è solo più chiara)
+  sotto le soglie della `Sensibilita` (SEVERA predefinita, NORMALE, LARGA:
+  numeri e prove in `ConfrontoTest`), proporzioni entro una tolleranza, e con
+  visione accesa il coseno CLIP (`POST /clip/somiglianze` di visione, solo per
+  le coppie che passano, a blocchi di 2000) sopra 0,93/0,90/0,86: è un veto,
+  senza vettore o con visione giù non conta. Le soglie si spostano col tempo:
+  raffica (data EXIF entro `finestra-raffica`, 10 s) più larghe, stesso
+  momento (`finestra-vicine`, 6 h, qualunque data) un po' più larghe, date
+  EXIF a più di 2 giorni più strette. Le **povere** (luce < 40, ≥ 50% di
+  riquadri chiari, contrasto < 10, meno di 100.000 pixel) vogliono quasi la
+  stessa immagine a ogni sensibilità; le **piatte** (contrasto < 2) mai. Senza
+  firma basta il pHash, ma a 2 bit (4 con la larga).
+- `Raggruppamento`: niente confronto di tutte le coppie. Il pHash si divide in
+  `soglia + 1` bande (la soglia base della sensibilità, 6 o 8): per il
+  principio dei cassetti due impronte a distanza ≤ soglia hanno una banda
+  identica. Le soglie più larghe del tempo si cercano scorrendo le foto in
+  ordine di data. Poi **legame completo**: dalle coppie più simili, una foto
+  entra in un gruppo solo se è quasi uguale a tutte quelle che ci sono già
+  (`legameCompleto`), mai a catena. Con 150.000 impronte casuali (date comprese)
+  i gruppi si fanno in ~0,25 s con la severa (6 bit) e ~1,7 s con normale e
+  larga (8 bit: bande più strette, cassetti più pieni).
+- `QuasiUguali` tiene i gruppi in cache **per sensibilità** (si rifanno se cambia
+  il numero di foto o dopo 10 minuti; `invalida` le svuota tutte, e la cache
+  sta in memoria: un riavvio con un algoritmo nuovo la rifà comunque);
+  `risolvi`, `ignora` e `separa` la aggiornano senza ricalcolare.
   "Non sono doppioni" salva il gruppo in `quasi_uguali_ignorati`: le foto di uno
-  stesso documento non si uniscono più tra loro (risolvi lo fa per le tenute,
-  se più d'una). Le preferite: `tieni` sempre vero e `risolvi` le rifiuta (400).
+  stesso documento non stanno più nello stesso gruppo (risolvi lo fa per le
+  tenute, se più d'una). "Non è uguale" (`separa`) salva un documento di due id
+  per ogni altra foto del gruppo. Ogni foto della pagina ha `somiglianza`
+  (0–100) e `motivi` rispetto alla suggerita. Le preferite: `tieni` sempre vero
+  e `risolvi` le rifiuta (400). Le private stanno fuori (`diFamiglia()`).
 
 ## Volti e persone
 

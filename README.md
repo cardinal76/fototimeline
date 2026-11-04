@@ -171,8 +171,14 @@ Il server: [DEPLOY.md](DEPLOY.md).
   sotto, risoluzione, peso, data e fotocamera; suggerisce quale tenere (la
   risoluzione più alta, poi il file più grande, poi chi ha l'EXIF, poi la più
   vecchia; le preferite restano sempre). "Togli le altre" manda le scartate nel cestino,
-  "Non sono doppioni" non le ripropone più. Il confronto usa un'impronta
-  percettiva (pHash a 64 bit) calcolata dalla miniatura all'importazione; per le
+  "Non sono doppioni" non le ripropone più, "Non è uguale" toglie una foto sola dal
+  gruppo. Sensibilità **Severa** (predefinita), **Normale** o **Larga**, e accanto a
+  ogni foto quanto somiglia alla suggerita e perché. Il confronto vuole tutti i
+  segnali insieme: un'impronta percettiva (pHash a 64 bit), un dHash, i colori a
+  riquadri, le proporzioni e, con visione, il contenuto (CLIP); le foto buie, quasi
+  bianche o piccole devono essere quasi identiche, quelle uniformi non si propongono.
+  I gruppi sono a legame completo: ogni foto è quasi uguale a tutte le altre del
+  gruppo. Impronta e firma si calcolano dalla miniatura all'importazione; per le
   foto già in archivio c'è **Calcola impronte** (admin), in sottofondo.
 - **Cestino** (Strumenti → *Cestino*): le foto eliminate, da qualunque punto,
   non si cancellano subito. Spariscono da timeline, ricerca, mappa, album,
@@ -307,7 +313,8 @@ java -jar target/fototimeline-1.0.0.jar
 | `FOTOTIMELINE_VIDEO_RISOLUZIONE` | `1080`                           | Lato corto massimo dei convertiti (i 4K scendono) |
 | `FOTOTIMELINE_VIDEO_THREAD` | `2`                                   | Thread di ffmpeg per una conversione     |
 | `FOTOTIMELINE_VIDEO_DESTINAZIONE` | `<archivio>/.compatibili`       | Dove vanno i convertiti                  |
-| `FOTOTIMELINE_QUASI_UGUALI_SOGLIA` | `6`                            | Bit di differenza tra le impronte per dire "quasi uguali" |
+| `FOTOTIMELINE_QUASI_UGUALI_VICINE` | `PT6H`                         | Foto scattate entro questo tempo hanno soglie un po' più larghe (le soglie sono della sensibilità scelta nella pagina) |
+| `FOTOTIMELINE_QUASI_UGUALI_CONTENUTO` | `true`                      | Con visione accesa, il contenuto (CLIP) deve confermare le quasi uguali |
 | `FOTOTIMELINE_CESTINO_GIORNI` | `30`                                | Giorni nel cestino prima che una foto eliminata se ne vada per sempre, file compreso; `0` = mai |
 | `FOTOTIMELINE_EVENTI_PAUSA` | `PT4H`                                | Eventi: tra due scatti più lontani di così l'evento si spezza (salvo i viaggi) |
 | `FOTOTIMELINE_EVENTI_MINIMO_FOTO` | `12`                            | Eventi: foto minime per un evento   |
@@ -398,14 +405,15 @@ percorso Linux, per esempio `/mnt/c/Users/Marco/Pictures`.
 | GET    | `/api/archivio/video`        | Coda dei video da convertire: `fatti`, `daFare`, `corrente`, `percentuale`, `inAttesa` (cloud smontato) |
 | POST   | `/api/archivio/video/converti` | "Converti video": mette in coda i video già in archivio che ne hanno bisogno, 202 (admin) |
 | POST   | `/api/archivio/video/annulla`  | Ferma quello in corso e svuota la coda (admin)          |
-| GET    | `/api/quasi-uguali`          | Gruppi di foto quasi uguali (`pagina`, `dimensione`), dal più numeroso, con la `suggerita` da tenere |
+| GET    | `/api/quasi-uguali`          | Gruppi di foto quasi uguali (`pagina`, `dimensione`, `sensibilita` = `SEVERA`/`NORMALE`/`LARGA`), dal più numeroso, con la `suggerita` da tenere e per le altre `somiglianza` (0–100) e `motivi` |
 | POST   | `/api/quasi-uguali/risolvi`  | `{ tieni: [id], togli: [id] }`: manda le `togli` nel cestino come `DELETE /api/foto/{id}` (503 col cloud smontato, 400 per una preferita) |
 | GET    | `/api/cestino`               | Le foto nel cestino, dall'ultima eliminata (`pagina`, `dimensione`): `{ foto: [{ id, miniatura, nomeOriginale, video, eliminataIl, siEliminaIl, giorniRimasti }], totale, giorni }` |
 | POST   | `/api/cestino/ripristina`    | `{ ids }`: tornano nell'archivio com'erano; `{ fatte }` (503 col cloud smontato) |
 | POST   | `/api/cestino/elimina`       | `{ ids }`: eliminate per sempre, file compreso, solo quelle nel cestino; `{ fatte }` (503 col cloud smontato) |
 | POST   | `/api/cestino/svuota`        | Tutte le foto del cestino per sempre; `{ fatte }` (503 col cloud smontato) |
 | POST   | `/api/quasi-uguali/ignora`   | `{ ids: [id] }`: "non sono doppioni", il gruppo non ricompare |
-| GET    | `/api/quasi-uguali/calcola`  | "Calcola impronte": stato, avanzamento e foto ancora senza impronta |
+| POST   | `/api/quasi-uguali/separa`   | `{ id, da: [id] }`: "non è uguale", la foto `id` non si propone più con nessuna di `da` |
+| GET    | `/api/quasi-uguali/calcola`  | "Calcola impronte": stato, avanzamento e foto ancora senza impronta o senza la firma di adesso (`senzaImpronta`) |
 | POST   | `/api/quasi-uguali/calcola`  | Lo avvia in sottofondo: 202, 409 se già in corso (ruolo `fototimeline-admin`); `/calcola/annulla` lo ferma |
 | GET    | `/api/salute`                | `{ stato, voci: [{ chiave, titolo, stato, messaggio, dettagli }], controllatoIl, avvisiTelegram }`, stato `OK`/`ATTENZIONE`/`ERRORE` (admin) |
 | POST   | `/api/salute/prova`          | Messaggio di prova su Telegram: 204, 409 se non configurato, 502 se Telegram rifiuta (admin) |
