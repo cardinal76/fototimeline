@@ -490,7 +490,8 @@ public class RiconoscimentoVolti {
         long foto = mongo.count(Query.query(FotoService.diFamiglia().and("video").is(false)), Foto.class);
         long mancanti = mongo.count(daCercare(), Foto.class);
         long volti = mongo.count(Query.query(Criteria.where("nelCestino").is(false)), Volto.class);
-        long nominate = mongo.count(Query.query(Criteria.where("nome").ne(null)), Persona.class);
+        // Le nascoste non contano: per chi guarda non ci sono.
+        long nominate = mongo.count(Query.query(Criteria.where("nome").ne(null).and("nascosta").is(false)), Persona.class);
         Long nellIndice;
         try {
             nellIndice = visione.totale();

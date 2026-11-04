@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import it.fototimeline.service.FotoService;
+import it.fototimeline.sicurezza.UtenteCorrente;
 
 import it.fototimeline.volti.Persone.ElencoPersone;
 import it.fototimeline.volti.Persone.NomeGiaUsato;
@@ -35,6 +36,8 @@ import it.fototimeline.volti.RiconoscimentoVolti.StatoVolti;
  * (come i tag: è la famiglia che riconosce la famiglia); avviare e annullare
  * "Riconosci volti" è da admin (ConfigurazioneSicurezza). Niente di questo è
  * sotto {@code /api/condivise}: chi ha un link non vede nomi né volti.
+ * Le persone nascoste le vede solo l'amministratore, che le nasconde
+ * ({@code /api/persone/nascoste}); per gli altri non ci sono.
  * Con la funzione spenta tutto risponde 409, salvo lo stato.
  */
 @RestController
@@ -63,13 +66,15 @@ public class VoltiController {
     private final RitaglioVolto ritaglio;
 
     private final FotoService fotoService;
+    private final UtenteCorrente utente;
 
     public VoltiController(RiconoscimentoVolti riconoscimento, Persone persone, RitaglioVolto ritaglio,
-            FotoService fotoService) {
+            FotoService fotoService, UtenteCorrente utente) {
         this.riconoscimento = riconoscimento;
         this.persone = persone;
         this.ritaglio = ritaglio;
         this.fotoService = fotoService;
+        this.utente = utente;
     }
 
     /**
@@ -166,16 +171,31 @@ public class VoltiController {
 
     // ------------------------------------------------------------ le persone
 
+    /** Con un nome o i gruppi senza nome; le nascoste hanno un indirizzo loro, da admin. */
     @GetMapping("/api/persone")
     public ElencoPersone elenco(@RequestParam(defaultValue = "NOMINATE") Tipo tipo,
             @RequestParam(defaultValue = "500") int limite) {
         riconoscimento.richiediAttiva();
+        if (tipo == Tipo.NASCOSTE) {
+            throw new IllegalArgumentException("Le persone nascoste sono in /api/persone/nascoste");
+        }
         return persone.elenco(tipo, Math.clamp(limite, 1, 2000));
     }
 
+    /** "Persone nascoste" (admin, ConfigurazioneSicurezza): da qui "Mostra di nuovo". */
+    @GetMapping("/api/persone/nascoste")
+    public ElencoPersone nascoste(@RequestParam(defaultValue = "500") int limite) {
+        riconoscimento.richiediAttiva();
+        return persone.elenco(Tipo.NASCOSTE, Math.clamp(limite, 1, 2000));
+    }
+
+    /** Una nascosta, a chi non è admin, risponde 404: il suo nome non si legge dagli id di Foto.persone. */
     @GetMapping("/api/persone/{id}")
     public VocePersona persona(@PathVariable String id) {
         riconoscimento.richiediAttiva();
+        if (!utente.chi().admin() && persone.nascosta(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Persona non trovata");
+        }
         return persone.persona(id);
     }
 

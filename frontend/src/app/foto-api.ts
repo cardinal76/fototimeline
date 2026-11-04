@@ -486,6 +486,9 @@ export class FotoApi {
   }
 
   persone(tipo: TipoPersone = 'NOMINATE', limite = 500): Observable<ElencoPersone> {
+    if (tipo === 'NASCOSTE') {
+      return this.http.get<ElencoPersone>('/api/persone/nascoste', { params: { limite } });
+    }
     return this.http.get<ElencoPersone>('/api/persone', { params: { tipo, limite } });
   }
 

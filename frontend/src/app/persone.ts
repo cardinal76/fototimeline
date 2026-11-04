@@ -20,7 +20,7 @@ import { PersonaSimile, StatoVolti, TipoPersone, VocePersona, VoceVolto } from '
 const SCHEDE: { tipo: TipoPersone; nome: string }[] = [
   { tipo: 'NOMINATE', nome: 'Con un nome' },
   { tipo: 'GRUPPI', nome: 'Senza nome' },
-  { tipo: 'NASCOSTE', nome: 'Nascoste' },
+  { tipo: 'NASCOSTE', nome: 'Persone nascoste' },
 ];
 
 /**
@@ -28,6 +28,10 @@ const SCHEDE: { tipo: TipoPersone; nome: string }[] = [
  * le sue foto nella timeline. Da qui si dà un nome, si uniscono i gruppi
  * della stessa persona, si nascondono gli sconosciuti; nel dettaglio si
  * tolgono i volti sbagliati e si confermano le proposte. Esc lo chiude (App).
+ *
+ * "Nascondi" (admin, come nomi e unioni) vale per tutta la famiglia: la
+ * persona sparisce da qui, dal filtro "Persona" e dal visore, le sue foto
+ * restano. "Persone nascoste" le elenca, con "Mostra di nuovo".
  */
 @Component({
   selector: 'app-persone',
@@ -43,7 +47,10 @@ export class Persone {
   readonly admin = input(false);
   readonly chiudi = output<void>();
 
-  protected readonly schede = SCHEDE;
+  /** "Persone nascoste" solo per l'amministratore: il server agli altri non le dà. */
+  protected readonly titoloNascondi =
+    'Sconosciuti, folla: sparisce da Persone, dal filtro e dal visore per tutti; le foto restano e i volti simili nuovi restano nascosti con lei';
+  protected readonly schede = computed(() => SCHEDE.filter((s) => s.tipo !== 'NASCOSTE' || this.admin()));
   protected readonly tipo = signal<TipoPersone>('NOMINATE');
   protected readonly elenco = signal<VocePersona[]>([]);
   protected readonly totale = signal(0);
@@ -206,7 +213,20 @@ export class Persone {
     await this.fai(async () => {
       this.aperta.set(await firstValueFrom(this.api.nascondiPersona(p.id, nascosta)));
       this.galleria.aggiornaPersone();
-      this.galleria.avvisa(nascosta ? 'Nascosto: non si vede più tra le persone' : 'Di nuovo tra le persone');
+      this.galleria.avvisa(nascosta ? 'Nascosta: non si vede più tra le persone, né nel visore' : 'Di nuovo tra le persone');
+    }, 'Non riuscito');
+  }
+
+  /** "Nascondi" / "Mostra di nuovo" dalla griglia: esce da questo elenco e passa nell'altro. */
+  protected async nascondiVoce(p: VocePersona, nascosta: boolean): Promise<void> {
+    await this.fai(async () => {
+      await firstValueFrom(this.api.nascondiPersona(p.id, nascosta));
+      this.elenco.update((l) => l.filter((x) => x.id !== p.id));
+      this.totale.update((t) => Math.max(0, t - 1));
+      this.scelte.update((s) => s.filter((x) => x !== p.id));
+      this.galleria.aggiornaPersone();
+      const chi = p.nome ? `«${p.nome}»` : 'Il gruppo';
+      this.galleria.avvisa(nascosta ? `${chi} è tra le persone nascoste` : `${chi} è di nuovo tra le persone`);
     }, 'Non riuscito');
   }
 

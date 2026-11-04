@@ -410,8 +410,12 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
 - **Persone** (Strumenti): un volto per persona, con quante foto. La prima volta, da admin,
   **Riconosci volti** guarda tutte le foto (dalle miniature, ore con 110.000 foto, riprende da solo);
   le nuove si fanno da sole. In **Senza nome** clic sul nome di un gruppo e scrivi chi è; **Unisci…**
-  mette insieme i gruppi della stessa persona; nel dettaglio ✕ toglie un volto sbagliato e **Non
-  mostrare** nasconde gli sconosciuti. Clic su un volto: le sue foto; il filtro **Persona** si
+  mette insieme i gruppi della stessa persona; nel dettaglio ✕ toglie un volto sbagliato.
+  **Nascondi** (sotto ogni volto o nel dettaglio, da admin) toglie una persona o un gruppo, per
+  esempio uno sconosciuto, per tutta la famiglia: non c'è più in Persone, nel filtro **Persona**,
+  nel visore (niente "Chi è?" né "Forse è…?") e nei conteggi; le sue foto si vedono come prima, e i
+  volti nuovi che le somigliano restano nascosti con lei. **Persone nascoste** le elenca, con
+  **Mostra di nuovo**. Clic su un volto: le sue foto; il filtro **Persona** si
   combina con gli altri. Nel visore, nei dettagli, chi c'è nella foto, e **Chi è?** su un volto
   senza nome. I nomi restano nell'app: chi ha un link condiviso non li vede.
 - **Salute**: il pallino dice se va tutto bene (verde), se c'è da guardare (giallo) o se qualcosa

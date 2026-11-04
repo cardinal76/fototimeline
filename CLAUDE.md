@@ -581,6 +581,17 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   tutto (409), i dati restano. Vedere: tutti i ruoli; dare un nome dal visore
   (`/api/volti/{id}/nome|assegna|rifiuta`): gestore; la pagina Persone e il
   lavoro: admin.
+- **Nascoste** (`Persona.nascosta`, `POST /api/persone/{id}/nascondi`, admin):
+  di tutta la famiglia come il nome, non per account (le persone non hanno un
+  proprietario). Una nascosta non è in `elenco` NOMINATE/GRUPPI, nel conteggio
+  di `stato`, in `dellaFoto` (né il volto né le proposte verso di lei), nei
+  `simili` di una non nascosta, e i volti suoi non contano come proposte per
+  altri (`proposteDi`). Il raggruppamento la tratta come un gruppo senza nome:
+  i volti nuovi simili ci entrano e restano nascosti. `Foto.persone` la tiene
+  (il filtro funziona, le foto si vedono). L'elenco è `GET /api/persone/nascoste`
+  (admin; `tipo=NASCOSTE` su `/api/persone` è 400) e `GET /api/persone/{id}`
+  di una nascosta dà 404 a chi non è admin. Un filtro nuovo sulle persone le
+  esclude anche lui.
 
 ## Rotazione
 

@@ -348,10 +348,95 @@ class VoltiTest {
 
         Foto altra = importa(BLU);
         assertThat(voltiDi(altra).getFirst().getPersonaId()).isEqualTo(folla);
-        assertThat(persone.dellaFoto(altra.getId())).singleElement().satisfies(v -> {
-            assertThat(v.nascosta()).isTrue();
-            assertThat(v.nome()).isNull();
+        // Nel visore il volto di uno sconosciuto nascosto non c'è: niente riquadro, niente "Chi è?".
+        assertThat(persone.dellaFoto(altra.getId())).isEmpty();
+    }
+
+    @Test
+    void unaPersonaNascostaSparisceDaElenchiVisoreEConteggiMaLeSueFotoRestano() throws Exception {
+        Foto a = importa(ROSSO);
+        Foto b = importa(ROSSO_2);
+        String anna = gruppoDi(a);
+        persone.nomina(anna, "Anna");
+        Foto forse = importa(VIOLA);
+        assertThat(voltiDi(forse).getFirst().getProposta()).isEqualTo(anna);
+        long tutte = service.cerca(TUTTE, 0, 100).totale();
+        assertThat(riconoscimento.stato().persone()).isEqualTo(1);
+
+        mvc.perform(post("/api/persone/" + anna + "/nascondi").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nascosta\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.nascosta").value(true));
+
+        // Via dall'elenco con nome (quello del filtro "Persona"), dai conteggi, dal visore e dalle proposte.
+        assertThat(persone.elenco(Tipo.NOMINATE, 100).persone()).isEmpty();
+        assertThat(persone.elenco(Tipo.GRUPPI, 100).persone()).isEmpty();
+        assertThat(riconoscimento.stato().persone()).isZero();
+        assertThat(persone.dellaFoto(a.getId())).isEmpty();
+        assertThat(persone.dellaFoto(forse.getId())).singleElement().satisfies(v -> {
+            assertThat(v.proposta()).isNull();
+            assertThat(v.nomeProposta()).isNull();
         });
+        mvc.perform(get("/api/persone").param("tipo", "NOMINATE")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totale").value(0));
+        // Le nascoste hanno un indirizzo loro (da admin): dall'elenco di tutti no.
+        mvc.perform(get("/api/persone").param("tipo", "NASCOSTE")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/persone/nascoste")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.persone[0].id").value(anna))
+                .andExpect(jsonPath("$.persone[0].nome").value("Anna"))
+                .andExpect(jsonPath("$.persone[0].volti").value(2));
+
+        // Le foto no: si vedono come prima, anche col filtro.
+        assertThat(service.cerca(TUTTE, 0, 100).totale()).isEqualTo(tutte);
+        assertThat(cerca(anna)).containsExactlyInAnyOrder(a.getId(), b.getId());
+
+        // Un volto nuovo che le somiglia va a lei e resta nascosto: non nasce un gruppo nuovo che la rifà vedere.
+        Foto nuova = importa(ROSSO);
+        assertThat(voltiDi(nuova).getFirst().getPersonaId()).isEqualTo(anna);
+        assertThat(ricarica(nuova).getPersone()).containsExactly(anna);
+        assertThat(persone.dellaFoto(nuova.getId())).isEmpty();
+        assertThat(persone.elenco(Tipo.GRUPPI, 100).persone()).isEmpty();
+        assertThat(persone.elenco(Tipo.NOMINATE, 100).persone()).isEmpty();
+        assertThat(persone.elenco(Tipo.NASCOSTE, 100).persone()).singleElement()
+                .satisfies(p -> assertThat(p.volti()).isEqualTo(3));
+
+        // "Mostra di nuovo": torna com'era, col volto nuovo e la proposta.
+        mvc.perform(post("/api/persone/" + anna + "/nascondi").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nascosta\":false}")).andExpect(status().isOk()).andExpect(jsonPath("$.nascosta").value(false));
+        assertThat(persone.elenco(Tipo.NOMINATE, 100).persone()).singleElement().satisfies(p -> {
+            assertThat(p.nome()).isEqualTo("Anna");
+            assertThat(p.volti()).isEqualTo(3);
+            assertThat(p.proposte()).isEqualTo(1);
+        });
+        assertThat(persone.elenco(Tipo.NASCOSTE, 100).persone()).isEmpty();
+        assertThat(persone.dellaFoto(nuova.getId())).singleElement().satisfies(v -> assertThat(v.nome()).isEqualTo("Anna"));
+        assertThat(persone.dellaFoto(forse.getId())).singleElement()
+                .satisfies(v -> assertThat(v.nomeProposta()).isEqualTo("Anna"));
+    }
+
+    @Test
+    void iVoltiDiUnGruppoNascostoNonSiPropongonoAgliAltriNeSomigliano() throws Exception {
+        Foto a = importa(ROSSO);
+        importa(ROSSO_2);
+        String anna = gruppoDi(a);
+        persone.nomina(anna, "Anna");
+        Foto forse = importa(VIOLA);
+        Foto forse2 = importa(VIOLA);
+        assertThat(persone.persona(anna).proposte()).isEqualTo(2);
+
+        // Uno dei due viola è di uno sconosciuto nascosto (come se ci fosse entrato col raggruppamento).
+        Persona sconosciuto = new Persona();
+        sconosciuto.setNascosta(true);
+        sconosciuto = mongo.insert(sconosciuto);
+        Volto suo = voltiDi(forse2).getFirst();
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(suo.getId())),
+                new Update().set("personaId", sconosciuto.getId()), Volto.class);
+
+        // "Forse è Anna?" non lo propone più: né nel conteggio, né nell'elenco, né con "Sì, tutte".
+        assertThat(persone.persona(anna).proposte()).isEqualTo(1);
+        assertThat(persone.elenco(Tipo.NOMINATE, 100).persone().getFirst().proposte()).isEqualTo(1);
+        assertThat(persone.proposte(anna, 100)).extracting(Persone.VoceVolto::fotoId).containsExactly(forse.getId());
+        assertThat(persone.confermaProposte(anna)).isEqualTo(1);
+        assertThat(voltiDi(forse2).getFirst().getPersonaId()).isEqualTo(sconosciuto.getId());
+        assertThat(voltiDi(forse).getFirst().getPersonaId()).isEqualTo(anna);
     }
 
     @Test
@@ -369,6 +454,11 @@ class VoltiTest {
             assertThat(s.persona().volti()).isEqualTo(2);
             assertThat(s.somiglianza()).isBetween(0.42, 0.5);
         });
+
+        // Nascosto il viola, non si propone più da unire; dal viola nascosto i rossi sì.
+        persone.nascondi(viola, true);
+        assertThat(persone.simili(rossi, 10)).isEmpty();
+        assertThat(persone.simili(viola, 10)).extracting(s -> s.persona().id()).containsExactly(rossi);
     }
 
     // ------------------------------------------------------------ cestino ed eliminazione

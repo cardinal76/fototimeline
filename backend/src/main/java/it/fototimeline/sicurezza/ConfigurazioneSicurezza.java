@@ -158,7 +158,8 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers(HttpMethod.PUT, "/api/persone/*", "/api/eventi/*").hasAuthority(admin);
             a.requestMatchers(HttpMethod.POST, "/api/persone/**", "/api/volti/*/togli", "/api/eventi/unisci")
                     .hasAuthority(admin);
-            a.requestMatchers(HttpMethod.GET, "/api/persone/*/volti", "/api/persone/*/proposte",
+            // "Persone nascoste": chi le ha nascoste le rivede e le rimette; per gli altri non ci sono.
+            a.requestMatchers(HttpMethod.GET, "/api/persone/nascoste", "/api/persone/*/volti", "/api/persone/*/proposte",
                     "/api/persone/*/simili").hasAuthority(admin);
             a.requestMatchers(HttpMethod.DELETE, "/api/eventi/*").hasAuthority(admin);
 

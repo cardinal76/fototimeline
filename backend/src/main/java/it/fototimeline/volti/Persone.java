@@ -80,8 +80,12 @@ public class Persone {
     public record PersonaSimile(VocePersona persona, double somiglianza, int vicini) {
     }
 
-    /** Un volto nel visore: dove sta e di chi è (il nome solo per chi è entrato nell'app). */
-    public record VoltoInFoto(String id, Riquadro riquadro, String personaId, String nome, boolean nascosta,
+    /**
+     * Un volto nel visore: dove sta e di chi è (il nome solo per chi è entrato
+     * nell'app). I volti delle persone nascoste non ci sono, e nemmeno le
+     * proposte verso di loro.
+     */
+    public record VoltoInFoto(String id, Riquadro riquadro, String personaId, String nome,
             String proposta, String nomeProposta) {
     }
 
@@ -312,7 +316,7 @@ public class Persone {
             case NASCOSTE -> Criteria.where("nascosta").is(true);
         }), Persona.class);
         Map<String, Long> volti = conteggi("personaId", persone.stream().map(Persona::getId).toList());
-        Map<String, Long> proposte = tipo == Tipo.NOMINATE ? conteggi("proposta", volti.keySet()) : Map.of();
+        Map<String, Long> proposte = tipo == Tipo.NOMINATE ? conteggiProposte(volti.keySet()) : Map.of();
         long minimo = tipo == Tipo.GRUPPI ? properties.minimoGruppo() : 0;
         Comparator<VocePersona> ordine = tipo == Tipo.GRUPPI
                 ? Comparator.comparingLong(VocePersona::volti).reversed().thenComparing(VocePersona::id)
@@ -330,7 +334,7 @@ public class Persone {
     public VocePersona persona(String id) {
         Persona p = trova(id);
         long volti = conteggi("personaId", List.of(id)).getOrDefault(id, 0L);
-        long proposte = conteggi("proposta", List.of(id)).getOrDefault(id, 0L);
+        long proposte = conteggiProposte(List.of(id)).getOrDefault(id, 0L);
         return conCopertine(List.of(voce(p, volti, proposte))).getFirst();
     }
 
@@ -353,7 +357,7 @@ public class Persone {
     /** I volti proposti per una persona, dal più somigliante. */
     public List<VoceVolto> proposte(String personaId, int limite) {
         trova(personaId);
-        Query query = Query.query(Criteria.where("proposta").is(personaId).and("nelCestino").is(false))
+        Query query = Query.query(proposteDi(personaId))
                 .with(Sort.by(Sort.Order.desc("somiglianzaProposta"))).limit(limite);
         query.fields().exclude("vettore");
         return mongo.find(query, Volto.class).stream()
@@ -365,10 +369,11 @@ public class Persone {
      * Gli altri gruppi (o persone) che somigliano a questa: i vicini dei suoi
      * volti migliori, contati per persona. Serve a unire i pezzi di una
      * stessa persona finiti in gruppi diversi (da piccola e da grande, con e
-     * senza occhiali).
+     * senza occhiali). Le nascoste non si propongono, salvo a un'altra
+     * nascosta (due gruppi di sconosciuti da unire).
      */
     public List<PersonaSimile> simili(String personaId, int limite) {
-        trova(personaId);
+        Persona aperta = trova(personaId);
         List<Volto> campione = mongo.find(Query.query(Criteria.where("personaId").is(personaId).and("nelCestino").is(false))
                 .with(Sort.by(Sort.Order.desc("punteggio"))).limit(VOLTI_PER_SIMILI), Volto.class);
         if (campione.isEmpty()) {
@@ -396,6 +401,7 @@ public class Persone {
         Map<String, Long> volti = conteggi("personaId", persone.keySet());
         List<PersonaSimile> simili = perPersona.entrySet().stream()
                 .filter(e -> persone.containsKey(e.getKey()))
+                .filter(e -> aperta.isNascosta() || !persone.get(e.getKey()).isNascosta())
                 .sorted(Comparator.comparingDouble((Map.Entry<String, double[]> e) -> e.getValue()[1]).reversed()
                         .thenComparing(e -> -e.getValue()[0]))
                 .limit(limite)
@@ -410,7 +416,11 @@ public class Persone {
         return risultato;
     }
 
-    /** I volti di una foto, con il nome della persona (le nascoste senza nome). */
+    /**
+     * I volti di una foto, con il nome della persona. Quelli delle persone
+     * nascoste non ci sono (né riquadro né "Chi è?"), e una proposta verso una
+     * nascosta non si mostra: nascondere vale anche nel visore.
+     */
     public List<VoltoInFoto> dellaFoto(String fotoId) {
         Query query = Query.query(Criteria.where("fotoId").is(fotoId)).with(Sort.by("riquadro.x"));
         query.fields().exclude("vettore");
@@ -428,11 +438,17 @@ public class Persone {
         if (!ids.isEmpty()) {
             mongo.find(Query.query(Criteria.where("_id").in(ids)), Persona.class).forEach(p -> persone.put(p.getId(), p));
         }
-        return volti.stream().map(v -> {
+        return volti.stream().filter(v -> {
+            Persona p = v.getPersonaId() == null ? null : persone.get(v.getPersonaId());
+            return p == null || !p.isNascosta();
+        }).map(v -> {
             Persona p = v.getPersonaId() == null ? null : persone.get(v.getPersonaId());
             Persona proposta = v.getProposta() == null ? null : persone.get(v.getProposta());
+            if (proposta != null && proposta.isNascosta()) {
+                proposta = null;
+            }
             return new VoltoInFoto(v.getId(), v.getRiquadro(), p == null ? null : p.getId(),
-                    p == null || p.isNascosta() ? null : p.getNome(), p != null && p.isNascosta(),
+                    p == null ? null : p.getNome(),
                     proposta == null ? null : proposta.getId(), proposta == null ? null : proposta.getNome());
         }).toList();
     }
@@ -469,6 +485,12 @@ public class Persone {
         return persona(id);
     }
 
+    /**
+     * "Nascondi" / "Mostra di nuovo": vale per tutta la famiglia, come il nome.
+     * Resta un gruppo: i volti simili che arrivano dopo ci finiscono dentro e
+     * restano nascosti con lei ({@link #migliore} tratta una nascosta come un
+     * gruppo senza nome). Le foto restano dove sono, si vedono come prima.
+     */
     public synchronized VocePersona nascondi(String id, boolean nascosta) {
         trova(id);
         mongo.updateFirst(Query.query(Criteria.where("_id").is(id)), new Update().set("nascosta", nascosta), Persona.class);
@@ -600,7 +622,7 @@ public class Persone {
     /** Tutte le proposte di una persona diventano sue. @return quante */
     public synchronized int confermaProposte(String personaId) {
         Persona p = trova(personaId);
-        Query query = Query.query(Criteria.where("proposta").is(personaId).and("nelCestino").is(false));
+        Query query = Query.query(proposteDi(personaId));
         query.fields().include("fotoId", "personaId");
         List<Volto> volti = mongo.find(query, Volto.class);
         assegnaVolti(volti, p);
@@ -617,7 +639,33 @@ public class Persone {
                 Persona.class);
     }
 
+    /** True se c'è ed è nascosta. */
+    public boolean nascosta(String id) {
+        Persona p = id == null ? null : mongo.findById(id, Persona.class);
+        return p != null && p.isNascosta();
+    }
+
     // ------------------------------------------------------------ aiuti
+
+    /** Gli id delle persone nascoste (poche: sconosciuti, folla). */
+    private List<String> idNascoste() {
+        Query query = Query.query(Criteria.where("nascosta").is(true));
+        query.fields().include("_id");
+        return mongo.find(query, Persona.class).stream().map(Persona::getId).toList();
+    }
+
+    /** I volti proposti a questa persona, fuori dal cestino e non di una nascosta: lo sconosciuto resta nascosto. */
+    private Criteria proposteDi(String personaId) {
+        return Criteria.where("proposta").is(personaId).and("nelCestino").is(false).and("personaId").nin(idNascoste());
+    }
+
+    private Map<String, Long> conteggiProposte(Collection<String> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return conteggi(Criteria.where("proposta").in(ids).and("nelCestino").is(false).and("personaId").nin(idNascoste()),
+                "proposta");
+    }
 
     private Persona trova(String id) {
         Persona p = id == null ? null : mongo.findById(id, Persona.class);
@@ -649,11 +697,12 @@ public class Persone {
 
     /** Quanti volti (fuori dal cestino) per ciascuno di questi id, contati su {@code campo}. */
     private Map<String, Long> conteggi(String campo, Collection<String> ids) {
-        if (ids.isEmpty()) {
-            return Map.of();
-        }
+        return ids.isEmpty() ? Map.of() : conteggi(Criteria.where(campo).in(ids).and("nelCestino").is(false), campo);
+    }
+
+    private Map<String, Long> conteggi(Criteria criteri, String campo) {
         var aggregazione = Aggregation.newAggregation(
-                Aggregation.match(Criteria.where(campo).in(ids).and("nelCestino").is(false)),
+                Aggregation.match(criteri),
                 Aggregation.group(campo).count().as("n"));
         Map<String, Long> conteggi = new HashMap<>();
         mongo.aggregate(aggregazione, Volto.class, Document.class).getMappedResults()

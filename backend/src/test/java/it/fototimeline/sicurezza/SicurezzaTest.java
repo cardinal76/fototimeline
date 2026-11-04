@@ -215,6 +215,7 @@ class SicurezzaTest {
             POST   /api/volti/{id}/togli                          ADMIN
             PUT    /api/persone/{id}                              ADMIN
             POST   /api/persone/{id}/nascondi                     ADMIN
+            GET    /api/persone/nascoste                          ADMIN
             POST   /api/persone/unisci                            ADMIN
             POST   /api/persone/{id}/copertina                    ADMIN
             GET    /api/persone/{id}/volti                        ADMIN

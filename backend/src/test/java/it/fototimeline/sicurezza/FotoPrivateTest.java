@@ -272,6 +272,51 @@ class FotoPrivateTest {
     }
 
     @Test
+    void unaPersonaNascostaLaVedeSoloLAmministratoreESenzaIVoltiDellePrivate() throws Exception {
+        // Uno sconosciuto nascosto con due volti: quello della privata di Anna e quello di una foto di tutti.
+        Persona sconosciuto = new Persona();
+        sconosciuto.setNome("Il vicino");
+        sconosciuto.setNascosta(true);
+        sconosciuto = mongo.insert(sconosciuto);
+        String id = sconosciuto.getId();
+        String voltoPrivata = mongo.findOne(Query.query(Criteria.where("fotoId").is(privata.getId())), Volto.class).getId();
+        String voltoAltra = mongo.findOne(Query.query(Criteria.where("fotoId").is(altra.getId())), Volto.class).getId();
+        mongo.updateMulti(Query.query(Criteria.where("_id").in(voltoPrivata, voltoAltra)),
+                new Update().set("personaId", id), Volto.class);
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(id)), new Update().set("copertina", voltoPrivata),
+                Persona.class);
+        mettiNelPrivato(ANNA, privata, 1);
+
+        // L'admin la ritrova in "Persone nascoste": un volto solo, e la copertina non è quello della privata.
+        JsonNode nascoste = JSON.readTree(leggi(CAPO, "/api/persone/nascoste"));
+        assertThat(nascoste.get("totale").asLong()).isEqualTo(1);
+        assertThat(nascoste.get("persone").get(0).get("id").asText()).isEqualTo(id);
+        assertThat(nascoste.get("persone").get(0).get("volti").asLong()).isEqualTo(1);
+        assertThat(nascoste.get("persone").get(0).get("copertina").asText()).isEqualTo(voltoAltra);
+        assertThat(leggi(CAPO, "/api/persone/nascoste")).doesNotContain(voltoPrivata).doesNotContain(privata.getId());
+        assertThat(leggi(CAPO, "/api/persone/" + id + "/volti")).contains(altra.getId()).doesNotContain(privata.getId());
+        leggi(CAPO, "/api/persone/" + id);
+
+        // Gli altri non la vedono: né l'elenco, né per id (dagli id di Foto.persone), né il volto nel visore.
+        for (RequestPostProcessor chi : List.of(ANNA, BRUNO, NONNA)) {
+            mvc.perform(get("/api/persone/nascoste").with(chi)).andExpect(status().isForbidden());
+            mvc.perform(get("/api/persone/" + id).with(chi)).andExpect(status().isNotFound());
+            mvc.perform(get("/api/persone").param("tipo", "NASCOSTE").with(chi)).andExpect(status().isBadRequest());
+            assertThat(leggi(chi, "/api/persone")).doesNotContain(id).doesNotContain("Il vicino");
+            assertThat(leggi(chi, "/api/foto/" + altra.getId() + "/volti")).isEqualTo("[]");
+            // La foto sì, come prima.
+            assertThat(leggi(chi, "/api/foto")).contains(altra.getId());
+        }
+        // Rimetterla è dell'admin, come nasconderla.
+        mvc.perform(post("/api/persone/" + id + "/nascondi").with(BRUNO).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"nascosta\":false}")).andExpect(status().isForbidden());
+        mvc.perform(post("/api/persone/" + id + "/nascondi").with(CAPO).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"nascosta\":false}")).andExpect(status().isOk());
+        assertThat(leggi(BRUNO, "/api/persone/" + id)).contains("Il vicino");
+        assertThat(leggi(BRUNO, "/api/foto/" + altra.getId() + "/volti")).contains("Il vicino");
+    }
+
+    @Test
     void perIdLaPrivataRisponde404AGliAltriEAnnaSi() throws Exception {
         mettiNelPrivato(ANNA, privata, 1);
         String volto = mongo.findOne(Query.query(Criteria.where("fotoId").is(privata.getId())), Volto.class).getId();
@@ -437,7 +482,7 @@ class FotoPrivateTest {
             "/api/foto", "/api/timeline", "/api/mappa", "/api/ricordi", "/api/foto/{id}", "/api/tag", "/api/album",
             "/api/caricate-da", "/api/foto/{id}/miniatura", "/api/foto/{id}/vista", "/api/foto/{id}/file",
             "/api/foto/cerca-contenuto", "/api/luoghi", "/api/eventi", "/api/eventi/{id}", "/api/foto/{id}/volti",
-            "/api/volti/{id}/ritaglio", "/api/persone", "/api/persone/{id}/volti", "/api/cestino",
+            "/api/volti/{id}/ritaglio", "/api/persone", "/api/persone/nascoste", "/api/persone/{id}/volti", "/api/cestino",
             "/api/privato/cestino", "/api/quasi-uguali", "/api/condivise/{token}",
             "/api/condivise/{token}/foto/{id}/miniatura", "/api/condivise/{token}/foto/{id}/vista",
             "/api/condivise/{token}/foto/{id}/video", "/api/condivise/{token}/foto/{id}/originale",
