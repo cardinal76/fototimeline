@@ -1,6 +1,18 @@
 <div class="scena" (click)="sfondo()" (touchstart)="toccoInizio($event)" (touchend)="toccoFine($event)">
   <img class="sfondo" [src]="anteprima()" alt="" aria-hidden="true" />
-  @if (foto().video) {
+  @if (sfocata()) {
+    <!-- Privata non ancora toccata: sfocata, il video non parte; un tocco la mostra. -->
+    <img
+      class="immagine segnaposto sfocata"
+      [src]="anteprima()"
+      alt=""
+      aria-hidden="true"
+      (click)="$event.stopPropagation(); svela()"
+    />
+    <button type="button" class="svela" [attr.aria-label]="etichettaSfocata" (click)="$event.stopPropagation(); svela()">
+      <span aria-hidden="true">🔒</span> Tocca per vedere
+    </button>
+  } @else if (foto().video) {
     <video
       class="immagine pronta"
       [attr.data-rotazione]="foto().rotazione || null"
@@ -47,7 +59,7 @@
       (contextmenu)="soloGuardare($event)"
     />
   }
-  @if (!caricata() && !foto().video) {
+  @if (!caricata() && !foto().video && !sfocata()) {
     <img class="immagine segnaposto" [src]="anteprima()" alt="" aria-hidden="true" (click)="$event.stopPropagation()" />
   }
 

@@ -337,6 +337,8 @@ export interface PuntoMappa {
   approssimativa: boolean;
   /** Rotazione scelta a mano: va nell'indirizzo della miniatura. */
   rotazione: number;
+  /** Nel proprio "Privato" (le private degli altri non arrivano): si mostra sfocata finché non la si tocca. */
+  privata?: boolean;
 }
 
 /** I luoghi delle foto con quante ce ne sono (GET /api/luoghi), i più fotografati prima. */

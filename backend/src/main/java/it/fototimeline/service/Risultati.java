@@ -16,9 +16,10 @@ public final class Risultati {
      * Una foto sulla mappa: solo quello che serve al marker e al popup.
      * {@code approssimativa}: senza GPS (o col GPS lontano), al posto del luogo
      * scelto a mano. {@code rotazione}: quella scelta a mano, per l'indirizzo della miniatura.
+     * {@code privata}: nel Privato di chi guarda (le altre private non ci sono): il frontend la sfoca.
      */
     public record PuntoMappa(String id, double lat, double lon, String giorno, String titolo, boolean video,
-            String luogo, boolean approssimativa, int rotazione) {
+            String luogo, boolean approssimativa, int rotazione, boolean privata) {
     }
 
     /** "Accadde oggi": le foto di un anno passato nello stesso giorno. */

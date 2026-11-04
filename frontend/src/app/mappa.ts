@@ -5,6 +5,7 @@ import { rotazione } from './formati';
 import { FotoApi } from './foto-api';
 import { Galleria } from './galleria';
 import { PuntoMappa } from './modelli';
+import { ETICHETTA_SFOCATA, Sfocate } from './sfocate';
 
 /**
  * Le foto con posizione GPS su OpenStreetMap, raggruppate quando sono vicine.
@@ -71,23 +72,63 @@ import { PuntoMappa } from './modelli';
       background: rgb(0 0 0 / 0.25);
       border-radius: 50%;
     }
+    /* Privata non ancora toccata: la miniatura sfocata sotto, il bordo e il lucchetto nitidi. */
+    :host ::ng-deep .segno.privata {
+      position: relative;
+      overflow: hidden;
+    }
+    :host ::ng-deep .segno.privata::before {
+      content: '';
+      position: absolute;
+      inset: -12px;
+      background: inherit;
+      border: 0;
+      filter: blur(10px);
+    }
+    :host ::ng-deep .segno .lucchetto-segno {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+    }
     :host ::ng-deep .leaflet-popup-content {
       margin: 8px;
       text-align: center;
+    }
+    :host ::ng-deep .cornice {
+      position: relative;
+      display: block;
+      margin: 0 auto;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--superficie-2);
+      cursor: zoom-in;
+    }
+    /* A sinistra: a destra c'è la × del popup. */
+    :host ::ng-deep .cornice .lucchetto {
+      position: absolute;
+      top: 5px;
+      left: 6px;
+      font-size: 0.8rem;
+      text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
     }
     :host ::ng-deep .anteprima {
       display: block;
       width: 200px;
       height: 150px;
       object-fit: cover;
-      border-radius: 6px;
-      cursor: zoom-in;
+      transition: filter 0.25s, transform 0.25s;
     }
   `,
 })
 export class Mappa implements OnDestroy {
   private readonly api = inject(FotoApi);
   private readonly galleria = inject(Galleria);
+  private readonly sfocate = inject(Sfocate);
 
   /** L'id della foto da aprire nel visore. */
   readonly apri = output<string>();
@@ -145,21 +186,48 @@ export class Mappa implements OnDestroy {
 
   private segno(p: PuntoMappa): L.Marker {
     const miniatura = `/api/foto/${p.id}/miniatura${rotazione(p, '?')}`;
+    const sfocata = this.sfocate.sfocata(p);
     const segno = L.marker([p.lat, p.lon], {
       icon: L.divIcon({
         className: '',
-        html: `<div class="segno${p.video ? ' video' : ''}${p.approssimativa ? ' approssimativa' : ''}" style="background-image:url('${miniatura}')"></div>`,
+        html:
+          `<div class="segno${p.video ? ' video' : ''}${p.approssimativa ? ' approssimativa' : ''}${sfocata ? ' privata' : ''}" style="background-image:url('${miniatura}')">` +
+          (sfocata ? '<span class="lucchetto-segno" aria-hidden="true">🔒</span>' : '') +
+          '</div>',
         iconSize: [44, 44],
         iconAnchor: [22, 22],
       }),
-      title: (p.titolo ?? p.giorno) + (p.approssimativa ? ' (posizione approssimativa)' : ''),
+      title: sfocata ? ETICHETTA_SFOCATA : (p.titolo ?? p.giorno) + (p.approssimativa ? ' (posizione approssimativa)' : ''),
     });
     const contenuto = document.createElement('div');
+    // Un pulsante: anche da tastiera (Invio) si svela e poi si apre.
+    const cornice = document.createElement('button');
+    cornice.type = 'button';
+    cornice.className = 'cornice';
     const img = document.createElement('img');
-    img.className = 'anteprima';
+    img.className = 'anteprima' + (sfocata ? ' sfocata' : '');
     img.src = miniatura;
-    img.alt = p.titolo ?? '';
-    img.addEventListener('click', () => this.apri.emit(p.id));
+    img.alt = '';
+    cornice.setAttribute('aria-label', sfocata ? ETICHETTA_SFOCATA : p.titolo || 'Apri la foto');
+    cornice.append(img);
+    if (p.privata) {
+      const lucchetto = document.createElement('span');
+      lucchetto.className = 'lucchetto';
+      lucchetto.title = 'Nel tuo Privato: la vedi solo tu';
+      lucchetto.textContent = '🔒';
+      lucchetto.setAttribute('aria-hidden', 'true');
+      cornice.append(lucchetto);
+    }
+    cornice.addEventListener('click', () => {
+      // Privata e sfocata: il primo clic la mostra (anche il segno sulla mappa), il secondo la apre.
+      if (this.sfocate.svelaAlPrimoClic(p)) {
+        img.classList.remove('sfocata');
+        segno.getElement()?.querySelector('.segno')?.classList.remove('privata');
+        cornice.setAttribute('aria-label', p.titolo || 'Apri la foto');
+        return;
+      }
+      this.apri.emit(p.id);
+    });
     const didascalia = document.createElement('div');
     didascalia.textContent = [
       p.video ? '▶ Video' : null,
@@ -169,7 +237,7 @@ export class Mappa implements OnDestroy {
     ]
       .filter(Boolean)
       .join(' · ');
-    contenuto.append(img, didascalia);
+    contenuto.append(cornice, didascalia);
     segno.bindPopup(contenuto);
     return segno;
   }

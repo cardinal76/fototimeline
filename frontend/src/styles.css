@@ -82,3 +82,12 @@ select,
 .condivisioni li.spenta {
   opacity: 0.55;
 }
+
+/*
+ * Le proprie foto private, finché non si toccano (Sfocate): sfocate forte e
+ * un po' ingrandite, così dai bordi non si vede niente. Il contenitore taglia.
+ */
+img.sfocata {
+  filter: blur(24px);
+  transform: scale(1.15);
+}
