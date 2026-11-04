@@ -39,6 +39,15 @@
       }
     }
 
+    @if (scelti().size && galleria.admin()) {
+      <!-- Fissa in basso: gli eventi scelti si uniscono anche dopo aver scorso la pagina. -->
+      <div class="barra-scelti" role="toolbar" aria-label="Eventi scelti">
+        <b>{{ scelti().size }} scelti</b>
+        <button type="button" [disabled]="occupato() || scelti().size < 2" (click)="unisci()">Unisci</button>
+        <button type="button" class="link" (click)="deseleziona()">Deseleziona</button>
+      </div>
+    }
+
     <div class="comandi" role="toolbar" aria-label="Eventi">
       <input
         #cerca
@@ -52,11 +61,6 @@
       <button type="button" [attr.aria-pressed]="nascosti()" (click)="commutaNascosti()">
         {{ nascosti() ? 'Nascondi i nascosti' : 'Mostra i nascosti' }}
       </button>
-      @if (scelti().size && galleria.admin()) {
-        <b>{{ scelti().size }} scelti</b>
-        <button type="button" [disabled]="occupato() || scelti().size < 2" (click)="unisci()">Unisci</button>
-        <button type="button" class="link" (click)="deseleziona()">Deseleziona</button>
-      }
       @if (galleria.puoGestire() && !modulo()) {
         <button type="button" title="Un evento con un nome e due date: tutte le foto di quei giorni" (click)="nuovoPerDate()">
           + Nuovo evento per date
