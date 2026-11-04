@@ -9,7 +9,10 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-/** Le soglie predefinite (application.yml) vengono da qui: le copie stanno sotto, le foto diverse ben sopra. */
+/**
+ * Il pHash da solo: le copie stanno sotto 6 bit, le foto diverse ben sopra.
+ * Le soglie di ogni sensibilità, con gli altri segnali, in ConfrontoTest.
+ */
 class ImprontaTest {
 
     private static final int SOGLIA = 6;
@@ -61,6 +64,24 @@ class ImprontaTest {
         int d = Impronta.distanza(Impronta.di(primo), Impronta.di(Immagini.altroScatto(primo, 12)));
         System.out.println("Distanza tra due scatti di una raffica: " + d);
         assertThat(d).isBetween(1, SOGLIA_RAFFICA);
+    }
+
+    @Test
+    void lAnalisiDaLoStessoPhashEUnaFirmaDellaVersioneDiAdesso() {
+        BufferedImage img = Immagini.scena(5, 800, 600);
+        Impronta.Analisi a = Impronta.analizza(img);
+        assertThat(a.impronta()).isEqualTo(Impronta.di(img));
+        assertThat(a.firma().versione()).isEqualTo(Impronta.VERSIONE);
+        assertThat(a.firma().colori()).hasSize(48);
+        assertThat(a.firma().contrasto()).isGreaterThan(10);
+        assertThat(a.firma().chiari()).isBetween(0, 100);
+        // Bianca: tutta chiara, contrasto zero.
+        BufferedImage bianca = new BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB);
+        bianca.getGraphics().fillRect(0, 0, 100, 100);
+        Firma f = Impronta.analizza(bianca).firma();
+        assertThat(f.chiari()).isEqualTo(100);
+        assertThat(f.contrasto()).isZero();
+        assertThat(f.luce()).isEqualTo(255);
     }
 
     @Test

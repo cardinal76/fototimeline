@@ -40,6 +40,12 @@ public class Visione {
     record StatoIndice(String modello, int dimensione, long totale) {
     }
 
+    record DomandaSomiglianze(List<List<String>> coppie) {
+    }
+
+    record RispostaSomiglianze(List<Double> punteggi) {
+    }
+
     private final RestClient rest;
 
     public Visione(VisioneProperties properties, RestClient.Builder builder) {
@@ -103,6 +109,20 @@ public class Visione {
                 .retrieve()
                 .body(RispostaCerca.class));
         return r == null || r.risultati() == null ? List.of() : r.risultati();
+    }
+
+    /**
+     * Il coseno tra i vettori delle miniature di più coppie di foto, nello
+     * stesso ordine; null per una coppia se visione non ha il vettore di una
+     * delle due. Per le quasi uguali: visione non vede nient'altro che gli id.
+     */
+    public List<Double> somiglianze(List<List<String>> coppie) {
+        RispostaSomiglianze r = chiama("somiglianze", () -> client().post().uri("/clip/somiglianze")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new DomandaSomiglianze(coppie))
+                .retrieve()
+                .body(RispostaSomiglianze.class));
+        return r == null || r.punteggi() == null ? List.of() : r.punteggi();
     }
 
     /** Quanti vettori ha l'indice di visione. */

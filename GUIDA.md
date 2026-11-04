@@ -398,10 +398,15 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   cose davvero segrete, meglio non caricarle.
 - **Quasi uguali**: raffiche e copie della stessa foto (ridimensionate, passate da WhatsApp). Per
   ogni gruppo la suggerita è segnata **Tieni**; un clic su una foto cambia tieni/togli, poi
-  **Togli le altre** (chiede conferma; serve il cloud montato), **Non sono doppioni** o **Salta**.
-  Le preferite non si propongono mai da togliere. La prima volta, da admin, **Calcola impronte**
-  (nel dialogo) per le foto già in archivio: legge solo le miniature, non serve il cloud. Le foto
-  nuove la prendono da sole.
+  **Togli le altre** (chiede conferma; serve il cloud montato), **Non sono doppioni** (tutto il
+  gruppo) o **Salta**; **Non è uguale** sotto una foto la toglie dal gruppo e non ce la rimette
+  più. In alto la **sensibilità**: **Severa** (predefinita: solo copie e raffiche), **Normale**
+  (anche copie ritagliate o ritoccate) o **Larga** (anche foto solo simili, da guardare una per
+  una); il browser se la ricorda. Sotto ogni foto "Uguale al 95%" e perché: forma, bordi,
+  colori, contenuto, raffica. Le preferite non si propongono mai da togliere. La prima volta, da
+  admin, **Calcola impronte** (nel dialogo) per le foto già in archivio: legge solo le miniature,
+  non serve il cloud (con 140.000 foto una ventina di minuti, lo fa anche il giro notturno). Le
+  foto nuove la prendono da sole.
 - **Persone** (Strumenti): un volto per persona, con quante foto. La prima volta, da admin,
   **Riconosci volti** guarda tutte le foto (dalle miniature, ore con 110.000 foto, riprende da solo);
   le nuove si fanno da sole. In **Senza nome** clic sul nome di un gruppo e scrivi chi è; **Unisci…**

@@ -826,7 +826,9 @@ public class FotoService {
         }
         if (letto.genere() != Genere.VIDEO) {
             try {
-                letto.foto().setImpronta(Impronta.calcola(archivio.miniatura(letto.foto().getId())));
+                Impronta.Analisi analisi = Impronta.analizza(archivio.miniatura(letto.foto().getId()));
+                letto.foto().setImpronta(analisi.impronta());
+                letto.foto().setFirma(analisi.firma());
             } catch (IOException | RuntimeException e) {
                 // Non blocca l'importazione: la riempie "Calcola impronte".
                 log.warn("Impronta di {} non calcolata: {}", letto.foto().getNomeOriginale(), e.toString());

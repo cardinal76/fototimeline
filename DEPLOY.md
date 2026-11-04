@@ -1223,7 +1223,10 @@ Ogni notte, alle **2:30 ora italiana** (`FOTOTIMELINE_NOTTE_CRON`, predefinito
 4. **Indicizza contenuto**: le foto non ancora nell'indice (senza visione si salta);
 5. **Riconosci volti**: le foto non ancora guardate (con `FOTOTIMELINE_VOLTI=false` o
    senza visione si salta);
-6. **Calcola impronte**: solo se qualche foto non ce l'ha.
+6. **Calcola impronte**: solo se qualche foto non ce l'ha, o non ha la firma (dHash,
+   colori) della versione di adesso: dopo un rilascio che cambia il calcolo delle quasi
+   uguali, la prima notte rifà le firme (le miniature, ~20 minuti con 140.000 foto; il
+   pHash che c'è non si riscrive). Lanciarlo a mano da *Quasi uguali* fa lo stesso.
 
 Sono gli stessi lavori dei pulsanti, con le loro regole: uno alla volta (i primi tre sul
 thread delle importazioni, con la barra e **Annulla**), nessun parallelismo in più (di

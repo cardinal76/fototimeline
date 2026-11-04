@@ -703,7 +703,14 @@ export interface FotoSimile {
   suggerita: boolean;
   /** Da tenere all'inizio: la suggerita e le preferite. */
   tieni: boolean;
+  /** Quanto somiglia alla suggerita, da 0 a 100; assente per la suggerita. */
+  somiglianza?: number;
+  /** Perché sta nel gruppo: forma, bordi, colori, contenuto, tempo (rispetto alla suggerita). */
+  motivi: string[];
 }
+
+/** Quanto è larga la ricerca delle quasi uguali; la predefinita è SEVERA. */
+export type Sensibilita = 'SEVERA' | 'NORMALE' | 'LARGA';
 
 /** Una foto del cestino. */
 export interface VoceCestino {
@@ -740,6 +747,7 @@ export interface PaginaGruppi {
   totale: number;
   pagina: number;
   altre: boolean;
+  sensibilita: Sensibilita;
 }
 
 /** "Calcola impronte": stato vuoto se dall'avvio del server non è mai partito. */
