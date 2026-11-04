@@ -233,6 +233,7 @@ class SicurezzaTest {
             GET    /api/quasi-uguali                              ADMIN
             POST   /api/quasi-uguali/risolvi                      ADMIN
             POST   /api/quasi-uguali/ignora                       ADMIN
+            POST   /api/quasi-uguali/separa                       ADMIN
             GET    /api/quasi-uguali/calcola                      ADMIN
             POST   /api/quasi-uguali/calcola                      ADMIN
             POST   /api/quasi-uguali/calcola/annulla              ADMIN
@@ -697,11 +698,24 @@ class SicurezzaTest {
         mvc.perform(post("/api/quasi-uguali/ignora").with(GESTORE).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"ids\":[\"a\",\"b\"]}"))
                 .andExpect(status().isForbidden());
+        mvc.perform(post("/api/quasi-uguali/separa").with(GESTORE).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"id\":\"a\",\"da\":[\"b\"]}"))
+                .andExpect(status().isForbidden());
         mvc.perform(post("/api/quasi-uguali/calcola").with(GESTORE).with(csrf())).andExpect(status().isForbidden());
 
         var admin = oidcLogin().authorities(new SimpleGrantedAuthority("ROLE_fototimeline-admin"));
         mvc.perform(get("/api/quasi-uguali").with(admin)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.totale").value(0));
+                .andExpect(jsonPath("$.totale").value(0))
+                .andExpect(jsonPath("$.sensibilita").value("SEVERA"));
+        mvc.perform(get("/api/quasi-uguali?sensibilita=LARGA").with(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.sensibilita").value("LARGA"));
+        mvc.perform(get("/api/quasi-uguali?sensibilita=QUALSIASI").with(admin)).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/quasi-uguali/separa").with(admin).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"id\":\"a\",\"da\":[\"b\"]}"))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/api/quasi-uguali/separa").with(admin).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"id\":\"a\",\"da\":[]}"))
+                .andExpect(status().isBadRequest());
         mvc.perform(get("/api/quasi-uguali/calcola").with(admin)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.senzaImpronta").value(0));
         // Qui le foto non ci sono, quindi 0.
