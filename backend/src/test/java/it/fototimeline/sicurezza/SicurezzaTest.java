@@ -182,6 +182,8 @@ class SicurezzaTest {
             POST   /api/volti/{id}/assegna                        GESTIONE
             POST   /api/volti/{id}/nome                           GESTIONE
             POST   /api/volti/{id}/rifiuta                        GESTIONE
+            POST   /api/volti/{id}/togli                          GESTIONE
+            POST   /api/volti/{id}/scarta                         GESTIONE
             POST   /api/condivisioni                              GESTIONE
             POST   /ricevi-condivisi                              GESTIONE
             GET    /api/privato/cestino                           GESTIONE
@@ -213,7 +215,6 @@ class SicurezzaTest {
             POST   /api/contenuto/annulla                         ADMIN
             POST   /api/volti/riconosci                           ADMIN
             POST   /api/volti/annulla                             ADMIN
-            POST   /api/volti/{id}/togli                          ADMIN
             PUT    /api/persone/{id}                              ADMIN
             POST   /api/persone/{id}/nascondi                     ADMIN
             GET    /api/persone/nascoste                          ADMIN
@@ -602,17 +603,22 @@ class SicurezzaTest {
                 .content("{\"nome\":\"Anna\"}")).andExpect(status().isConflict());
         mvc.perform(post("/api/volti/x/nome").with(GESTORE).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nome\":\"Anna\"}")).andExpect(status().isForbidden());
-        // La pagina Persone (nomi, unioni, "non è lei") sta in Strumenti: solo l'amministratore.
+        // Correggere un volto della foto (togli, "non è un volto") anche: è il visore, un volto alla volta.
+        for (String correzione : new String[] {"/api/volti/x/togli", "/api/volti/x/scarta"}) {
+            mvc.perform(post(correzione).with(UTILIZZATORE).with(csrf())).andExpect(status().isForbidden());
+            mvc.perform(post(correzione).with(GESTORE)).andExpect(status().isForbidden());
+            mvc.perform(post(correzione).with(GESTORE).with(csrf())).andExpect(status().isConflict());
+            mvc.perform(post(correzione).with(ADMIN).with(csrf())).andExpect(status().isConflict());
+        }
+        // La pagina Persone (nomi delle persone intere, unioni) sta in Strumenti: solo l'amministratore.
         mvc.perform(put("/api/persone/x").with(GESTORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nome\":\"Anna\"}")).andExpect(status().isForbidden());
         mvc.perform(post("/api/persone/unisci").with(GESTORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"in\":\"a\",\"da\":[\"b\"]}")).andExpect(status().isForbidden());
-        mvc.perform(post("/api/volti/x/togli").with(GESTORE).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(put("/api/persone/x").with(ADMIN).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nome\":\"Anna\"}")).andExpect(status().isConflict());
         mvc.perform(post("/api/persone/unisci").with(ADMIN).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"in\":\"a\",\"da\":[\"b\"]}")).andExpect(status().isConflict());
-        mvc.perform(post("/api/volti/x/togli").with(ADMIN).with(csrf())).andExpect(status().isConflict());
         // "Riconosci volti" è da admin.
         mvc.perform(post("/api/volti/riconosci").with(GESTORE).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(post("/api/volti/annulla").with(GESTORE).with(csrf())).andExpect(status().isForbidden());

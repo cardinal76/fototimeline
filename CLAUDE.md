@@ -611,9 +611,18 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   `_id > ""` per partire, il primo giro va senza.
 - Privacy: nessuna API dei volti è pubblica e `FotoCondivisa` non ha
   `persone` (test in `CondivisioniTest`). `FOTOTIMELINE_VOLTI=false` spegne
-  tutto (409), i dati restano. Vedere: tutti i ruoli; dare un nome dal visore
-  (`/api/volti/{id}/nome|assegna|rifiuta`): gestore; la pagina Persone e il
-  lavoro: admin.
+  tutto (409), i dati restano. Vedere: tutti i ruoli; correggere i volti dal
+  visore, uno alla volta (`/api/volti/{id}/nome|assegna|rifiuta|togli|scarta`,
+  menu ✎ in `persone-foto.ts`): gestore; la pagina Persone e il lavoro: admin.
+- **Correzioni a mano**: `Volto.manuale` (deciso da qualcuno) ed `esclusi`
+  (persone a cui non va). "È un'altra persona…" (`nome` su un volto con nome)
+  sposta solo quel volto (`Persone.spostaVolto`) e mette la persona di prima
+  negli esclusi; su un volto di un gruppo senza nome il nome va al gruppo.
+  "Non è nessuno" (`togli`) lo lascia senza persona, e un gruppo nuovo non se
+  lo prende (`assegna` salta i `manuale` fra i `liberi`). "Non è un volto"
+  (`scarta`) lo cancella da Mongo e dall'indice; la foto resta con
+  `voltiCercati`, quindi non torna. Il raggruppamento tocca solo i volti
+  nuovi: un volto corretto non cambia più da solo.
 - **Nascoste** (`Persona.nascosta`, `POST /api/persone/{id}/nascondi`, admin):
   di tutta la famiglia come il nome, non per account (le persone non hanno un
   proprietario). Una nascosta non è in `elenco` NOMINATE/GRUPPI, nel conteggio

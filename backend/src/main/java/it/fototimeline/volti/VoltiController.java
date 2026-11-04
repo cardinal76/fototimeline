@@ -32,9 +32,10 @@ import it.fototimeline.volti.RiconoscimentoVolti.StatoLavoro;
 import it.fototimeline.volti.RiconoscimentoVolti.StatoVolti;
 
 /**
- * Volti e persone. Vedere e nominare le persone lo può chiunque usi l'app
- * (come i tag: è la famiglia che riconosce la famiglia); avviare e annullare
- * "Riconosci volti" è da admin (ConfigurazioneSicurezza). Niente di questo è
+ * Volti e persone. Vedere le persone lo può chiunque usi l'app; correggere i
+ * volti di una foto dal visore (nome, sposta, togli, "non è un volto") il
+ * gestore, come i tag; le persone intere (pagina Persone) e avviare e
+ * annullare "Riconosci volti" l'admin (ConfigurazioneSicurezza). Niente di questo è
  * sotto {@code /api/condivise}: chi ha un link non vede nomi né volti.
  * Le persone nascoste le vede solo l'amministratore, che le nasconde
  * ({@code /api/persone/nascoste}); per gli altri non ci sono.
@@ -142,6 +143,15 @@ public class VoltiController {
         riconoscimento.richiediAttiva();
         voltoVisibile(id);
         persone.togliVolto(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** "Non è un volto": il volto se ne va (Mongo e indice dei vicini) e non torna. */
+    @PostMapping("/api/volti/{id}/scarta")
+    public ResponseEntity<Void> scarta(@PathVariable String id) {
+        riconoscimento.richiediAttiva();
+        voltoVisibile(id);
+        persone.scartaVolto(id);
         return ResponseEntity.noContent().build();
     }
 
