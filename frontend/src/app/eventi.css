@@ -137,3 +137,27 @@
   align-items: center;
   gap: 0.6rem;
 }
+
+/* Gli eventi scelti: la barra resta in basso mentre si scorre, come quella della selezione
+   delle foto nella timeline. */
+.barra-scelti {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.9rem;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  background: var(--superficie);
+  border: 1px solid var(--bordo);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+.barra-scelti b {
+  margin-right: 0.5rem;
+}

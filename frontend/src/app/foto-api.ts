@@ -2,6 +2,7 @@ import { HttpClient, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
+import { EsitoDate, RichiestaDate } from './date-multiple';
 import { rotazione } from './formati';
 import {
   CollegamentoGoogle,
@@ -576,6 +577,11 @@ export class FotoApi {
 
   multipla(ids: string[], operazione: Operazione, valore?: string): Observable<{ modificate: number }> {
     return this.http.post<{ modificate: number }>('/api/foto/multiple', { ids, operazione, valore });
+  }
+
+  /** "📅 Data…" sulla selezione: la data di tutte insieme (al più 500), con quante cambiate, saltate e gli errori. */
+  cambiaDate(ids: string[], richiesta: RichiestaDate): Observable<EsitoDate> {
+    return this.http.post<EsitoDate>('/api/foto/data', { ids, ...richiesta });
   }
 
   /** Gira la foto di 90 (destra) o -90 (sinistra) gradi in più: si salva nella scheda, il file non cambia. */

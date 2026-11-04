@@ -166,6 +166,7 @@ class SicurezzaTest {
             PUT    /api/foto/{id}                                 GESTIONE
             DELETE /api/foto/{id}                                 GESTIONE
             POST   /api/foto/multiple                             GESTIONE
+            POST   /api/foto/data                                 GESTIONE
             POST   /api/foto/{id}/ruota                           GESTIONE
             POST   /api/foto/ruota                                GESTIONE
             GET    /api/luoghi/cerca                              GESTIONE
@@ -1055,6 +1056,9 @@ class SicurezzaTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"gradi\":90}")).andExpect(status().isForbidden());
         mvc.perform(post("/api/foto/multiple").with(UTILIZZATORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"ids\":[\"" + id + "\"],\"operazione\":\"PREFERITA\"}")).andExpect(status().isForbidden());
+        mvc.perform(post("/api/foto/data").with(UTILIZZATORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ids\":[\"" + id + "\"],\"modo\":\"STESSO_GIORNO\",\"giorno\":\"1999-01-01\"}"))
+                .andExpect(status().isForbidden());
         mvc.perform(put("/api/foto/" + id + "/luogo").with(UTILIZZATORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"chiave\":null}")).andExpect(status().isForbidden());
         mvc.perform(multipart("/api/foto").file(new MockMultipartFile("file", "x.png", "image/png", new byte[] {1}))
@@ -1095,6 +1099,9 @@ class SicurezzaTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.rotazione").value(90));
         mvc.perform(post("/api/foto/multiple").with(GESTORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"ids\":[\"" + id + "\"],\"operazione\":\"PREFERITA\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.modificate").value(1));
+        mvc.perform(post("/api/foto/data").with(GESTORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ids\":[\"" + id + "\"],\"modo\":\"STESSO_GIORNO\",\"giorno\":\"1999-01-01\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.modificate").value(1));
         mvc.perform(post("/api/condivisioni").with(GESTORE).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"ids\":[\"" + id + "\"]}")).andExpect(status().isCreated());

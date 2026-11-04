@@ -650,6 +650,7 @@
     <button type="button" (click)="operazione('TOGLI_TAG')">− Tag</button>
     <button type="button" (click)="operazione('IMPOSTA_ALBUM')">Album…</button>
     <button type="button" (click)="dialogoLuogo.set(true)">📍 Luogo…</button>
+    <button type="button" title="La data di tutte insieme: stesso giorno, stessa ora o sposta di…" (click)="dialogoData.set(true)">📅 Data…</button>
     <button type="button" (click)="operazione('PREFERITA')">★ Preferite</button>
     <button type="button" title="Ruota a sinistra di 90°" aria-label="Ruota a sinistra" (click)="ruota(-90)">↺</button>
     <button type="button" title="Ruota a destra di 90°" aria-label="Ruota a destra" (click)="ruota(90)">↻ Ruota</button>
@@ -1290,6 +1291,10 @@
 @if (dialogoEventi()) {
   <app-eventi (chiudi)="dialogoEventi.set(false)" />
 }
+@if (dialogoData()) {
+  <app-data-selezione (chiudi)="dialogoData.set(false)" (fatto)="selezione.set(false)" />
+}
+
 @if (dialogoSceltaEvento()) {
   <app-scelta-evento (chiudi)="dialogoSceltaEvento.set(false)" />
 }

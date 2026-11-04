@@ -169,7 +169,7 @@ public class ConfigurazioneSicurezza {
                     ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
             // I volti di una foto si correggono dal visore (nome, sposta a un'altra persona, togli, "non è un
             // volto"), un volto alla volta, come i tag: chi cambia le foto. Le persone intere sono dell'admin, sopra.
-            a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
+            a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/data", "/api/foto/ruota",
                     "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
                     "/api/eventi/*/foto", "/api/eventi/per-date", "/api/volti/*/assegna", "/api/volti/*/nome",
                     "/api/volti/*/rifiuta", "/api/volti/*/togli", "/api/volti/*/scarta", "/api/condivisioni",
