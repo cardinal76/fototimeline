@@ -18,11 +18,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import it.fototimeline.dominio.Foto;
 import it.fototimeline.service.FotoService;
 import it.fototimeline.sicurezza.UtenteCorrente;
 
 import it.fototimeline.volti.Persone.ElencoPersone;
 import it.fototimeline.volti.Persone.NomeGiaUsato;
+import it.fototimeline.volti.Persone.PersonaGiaNellaFoto;
 import it.fototimeline.volti.Persone.PersonaSimile;
 import it.fototimeline.volti.Persone.Tipo;
 import it.fototimeline.volti.Persone.VocePersona;
@@ -57,6 +59,10 @@ public class VoltiController {
     }
 
     public record Copertina(String volto) {
+    }
+
+    /** Una persona da aggiungere a una foto: per id o per nome (che c'è già, o nuova). */
+    public record Aggiunta(String persona, String nome) {
     }
 
     public record Confermate(int confermate) {
@@ -171,6 +177,22 @@ public class VoltiController {
         return persone.nominaVolto(id, n.nome());
     }
 
+    /**
+     * "+ Aggiungi persona" nel visore: la persona è nella foto anche senza un
+     * volto trovato (di spalle, piccola, tagliata). 409 se c'è già.
+     */
+    @PostMapping("/api/foto/{id}/persone")
+    public VocePersona aggiungiPersona(@PathVariable String id, @RequestBody Aggiunta a) {
+        riconoscimento.richiediAttiva();
+        Foto foto = fotoService.trovaVisibile(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Foto non trovata"));
+        if (foto.isVideo()) {
+            throw new IllegalArgumentException("Le persone si aggiungono alle foto, non ai video");
+        }
+        // Come i suoi volti: una foto nel cestino o privata non conta per le persone.
+        return persone.aggiungiAllaFoto(id, foto.nelCestino() || foto.getPrivataDi() != null, a.persona(), a.nome());
+    }
+
     @PostMapping("/api/volti/{id}/rifiuta")
     public ResponseEntity<Void> rifiuta(@PathVariable String id) {
         riconoscimento.richiediAttiva();
@@ -266,6 +288,15 @@ public class VoltiController {
     public List<PersonaSimile> simili(@PathVariable String id) {
         riconoscimento.richiediAttiva();
         return persone.simili(id, 12);
+    }
+
+    /** 409 con chi è già nella foto e in quali foto. */
+    @ExceptionHandler(PersonaGiaNellaFoto.class)
+    public ProblemDetail personaGiaNellaFoto(PersonaGiaNellaFoto e) {
+        ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        p.setProperty("persona", e.persona().getId());
+        p.setProperty("foto", e.foto());
+        return p;
     }
 
     @ExceptionHandler(NomeGiaUsato.class)

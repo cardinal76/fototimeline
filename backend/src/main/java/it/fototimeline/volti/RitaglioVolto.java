@@ -32,6 +32,8 @@ public class RitaglioVolto {
     static final int LATO = 160;
     /** Quanto più grande del riquadro: il volto con un po' di capelli e di mento. */
     private static final double MARGINE = 1.35;
+    /** Tutta la miniatura: ritagliata, il quadrato più grande al centro. */
+    private static final Riquadro TUTTA = new Riquadro(0, 0, 1, 1);
 
     private final ArchivioFile archivio;
     private final FotoService fotoService;
@@ -54,7 +56,8 @@ public class RitaglioVolto {
             if (immagine == null) {
                 throw new IOException("miniatura illeggibile");
             }
-            return jpeg(ritaglia(immagine, volto.getRiquadro()));
+            // Una persona aggiunta a mano non ha riquadro: il quadrato al centro della foto.
+            return jpeg(ritaglia(immagine, volto.getRiquadro() != null ? volto.getRiquadro() : TUTTA));
         } catch (IOException e) {
             throw new UncheckedIOException("Ritaglio del volto non riuscito: " + e.getMessage(), e);
         }

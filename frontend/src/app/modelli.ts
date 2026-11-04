@@ -584,14 +584,19 @@ export interface PersonaSimile {
   vicini: number;
 }
 
-/** Un volto nel visore; il riquadro è in frazioni dell'immagine. */
+/**
+ * Un volto nel visore; il riquadro è in frazioni dell'immagine. Una persona
+ * aggiunta a mano (`aggiunto`, visione non ha trovato il volto) non ha
+ * riquadro: non si disegna niente.
+ */
 export interface VoltoInFoto {
   id: string;
-  riquadro: { x: number; y: number; larghezza: number; altezza: number };
+  riquadro?: { x: number; y: number; larghezza: number; altezza: number } | null;
   personaId?: string;
   nome?: string;
   proposta?: string;
   nomeProposta?: string;
+  aggiunto?: boolean;
 }
 
 /** I telefoni visibili (l'admin tutti, gli altri il proprio) e quello che vale per tutti. */

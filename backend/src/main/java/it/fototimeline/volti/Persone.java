@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -22,7 +23,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -54,6 +58,17 @@ import it.fototimeline.volti.Volto.Riquadro;
  * un gruppo intero dalla parte sbagliata. I volti della stessa foto non si
  * contano (in una foto la stessa persona c'è una volta sola).
  *
+ * <p><b>Una persona al massimo una volta per foto</b>, sempre: dopo ogni
+ * assegnazione, spostamento, conferma o unione {@link #risolviDoppioni}
+ * lascia la persona a un volto solo della foto e libera gli altri. Vince chi
+ * l'ha appena decisa a mano, poi un volto deciso a mano, poi uno automatico,
+ * poi una persona {@code aggiunta} senza volto (un volto vero la sostituisce);
+ * a parità il più somigliante al centro degli altri volti della persona. Due
+ * volti veri decisi a mano per la stessa persona nella stessa foto non si
+ * fanno: {@link PersonaGiaNellaFoto}, 409. Chi è già su un volto della foto
+ * non si propone ("Forse è…?") agli altri volti. I dati di prima li corregge
+ * {@link #correggiDoppioni} all'avvio.
+ *
  * <p>Ogni modifica passa da qui ed è {@code synchronized}: il lavoro che
  * assegna e chi unisce due persone non si pestano i piedi. Le foto tengono
  * gli id delle loro persone in {@code Foto.persone} ({@link #aggiornaFoto}).
@@ -66,6 +81,9 @@ public class Persone {
     static final String FOTO_PERSONE = "persone";
     private static final int NOME_MASSIMO = 80;
     private static final int VOLTI_PER_SIMILI = 16;
+    /** Quanti volti al più per il centro di una persona, quando due volti di una foto se la contendono. */
+    private static final int VOLTI_PER_CENTRO = 2000;
+    private static final int MASSIMO_FOTO_IN_ERRORE = 20;
 
     public enum Tipo { NOMINATE, GRUPPI, NASCOSTE }
 
@@ -90,7 +108,35 @@ public class Persone {
      * proposte verso di loro.
      */
     public record VoltoInFoto(String id, Riquadro riquadro, String personaId, String nome,
-            String proposta, String nomeProposta) {
+            String proposta, String nomeProposta, boolean aggiunto) {
+    }
+
+    /** Quello che ha fatto {@link #correggiDoppioni}: volti liberati e proposte tolte. */
+    public record Correzione(int liberati, int proposte) {
+    }
+
+    /**
+     * La persona è già in questa foto, su un altro volto deciso a mano (o, per
+     * una persona aggiunta senza volto, su un volto qualsiasi): una persona c'è
+     * una volta sola per foto. 409, come le altre {@link IllegalStateException}.
+     */
+    public static class PersonaGiaNellaFoto extends IllegalStateException {
+        private final transient Persona persona;
+        private final transient List<String> foto;
+
+        PersonaGiaNellaFoto(String messaggio, Persona persona, List<String> foto) {
+            super(messaggio);
+            this.persona = persona;
+            this.foto = foto;
+        }
+
+        public Persona persona() {
+            return persona;
+        }
+
+        public List<String> foto() {
+            return foto;
+        }
     }
 
     /** C'è già una persona con questo nome: si uniscono, non si fanno due "Anna". */
@@ -138,10 +184,28 @@ public class Persone {
             }
         }
         aggiornaFoto(foto);
+        // Due volti della stessa foto finiti alla stessa persona: resta il più somigliante.
+        Set<String> toccate = new HashSet<>(foto);
+        nuovi.forEach(v -> toccate.add(v.getFotoId()));
+        foto.addAll(sistemaFoto(toccate, Set.of()));
         return foto;
     }
 
     private boolean assegna(Volto v, List<Vicino> vicini, Set<String> foto) {
+        // Le persone già sugli altri volti di questa foto: chi è su un volto deciso a mano non si
+        // prende (vince la mano), e nessuna di loro si propone. Una aggiunta senza volto non conta:
+        // un volto vero la sostituisce.
+        Query stessaFoto = Query.query(Criteria.where("fotoId").is(v.getFotoId()).and("_id").ne(v.getId())
+                .and("personaId").ne(null).and("aggiunto").ne(true));
+        stessaFoto.fields().include("personaId", "manuale");
+        Set<String> aMano = new HashSet<>();
+        Set<String> presenti = new HashSet<>();
+        for (Volto altro : mongo.find(stessaFoto, Volto.class)) {
+            presenti.add(altro.getPersonaId());
+            if (altro.isManuale()) {
+                aMano.add(altro.getPersonaId());
+            }
+        }
         Map<String, Double> somiglianze = new LinkedHashMap<>();
         for (Vicino x : vicini) {
             if (!x.id().equals(v.getId())) {
@@ -155,7 +219,8 @@ public class Persone {
                 .and("nelCestino").is(false));
         query.fields().include("personaId", "fotoId", "manuale");
         Map<String, double[]> perPersona = new HashMap<>();
-        List<Volto> liberi = new ArrayList<>();
+        // Un libero per foto, il più simile: due volti della stessa foto non fanno lo stesso gruppo.
+        Map<String, Volto> liberi = new LinkedHashMap<>();
         for (Volto altro : mongo.find(query, Volto.class)) {
             double s = somiglianze.get(altro.getId());
             if (altro.getPersonaId() != null) {
@@ -164,7 +229,8 @@ public class Persone {
                 stat[1] += s;
             } else if (s >= properties.sogliaGruppo() && !altro.isManuale()) {
                 // Uno tolto a mano ("non è nessuno") resta di nessuno: un gruppo nuovo non se lo prende.
-                liberi.add(altro);
+                liberi.merge(altro.getFotoId(), altro,
+                        (a, b) -> somiglianze.get(a.getId()) >= somiglianze.get(b.getId()) ? a : b);
             }
         }
         Map<String, Persona> persone = new HashMap<>();
@@ -173,13 +239,15 @@ public class Persone {
                     .forEach(p -> persone.put(p.getId(), p));
         }
         // Una persona con nome (e non nascosta) sopra la soglia sicura; se no un gruppo senza nome o nascosto.
-        String scelta = migliore(perPersona, persone, v, true, properties.sogliaSicura(), Comparator.comparingDouble(s -> s[1]));
+        String scelta = migliore(perPersona, persone, v, aMano, true, properties.sogliaSicura(),
+                Comparator.comparingDouble(s -> s[1]));
         if (scelta == null) {
-            scelta = migliore(perPersona, persone, v, false, properties.sogliaGruppo(), Comparator.comparingDouble(s -> s[1]));
+            scelta = migliore(perPersona, persone, v, aMano, false, properties.sogliaGruppo(),
+                    Comparator.comparingDouble(s -> s[1]));
         }
         String proposta = null;
         if (scelta == null || !persone.get(scelta).conNome() || persone.get(scelta).isNascosta()) {
-            proposta = migliore(perPersona, persone, v, true, properties.sogliaProposta(),
+            proposta = migliore(perPersona, persone, v, presenti, true, properties.sogliaProposta(),
                     Comparator.comparingDouble(s -> s[0]));
         }
         Update update = new Update();
@@ -207,10 +275,10 @@ public class Persone {
             update.set("personaId", gruppo.getId());
             v.setPersonaId(gruppo.getId());
             cambiata = true;
-            List<String> ids = liberi.stream().map(Volto::getId).toList();
+            List<String> ids = liberi.values().stream().map(Volto::getId).toList();
             mongo.updateMulti(Query.query(Criteria.where("_id").in(ids).and("personaId").is(null).and("manuale").ne(true)),
                     new Update().set("personaId", gruppo.getId()), Volto.class);
-            liberi.forEach(l -> foto.add(l.getFotoId()));
+            liberi.values().forEach(l -> foto.add(l.getFotoId()));
         }
         if (!update.getUpdateObject().isEmpty()) {
             mongo.updateFirst(Query.query(Criteria.where("_id").is(v.getId())), update, Volto.class);
@@ -218,11 +286,15 @@ public class Persone {
         return cambiata;
     }
 
-    /** Fra le persone dei vicini sopra la soglia, quella che vince secondo {@code ordine}; null se nessuna. */
+    /**
+     * Fra le persone dei vicini sopra la soglia, quella che vince secondo {@code ordine}; null se
+     * nessuna. Mai una degli esclusi del volto né una di {@code vietate} (già sulla foto).
+     */
     private static String migliore(Map<String, double[]> perPersona, Map<String, Persona> persone, Volto v,
-            boolean conNome, double soglia, Comparator<double[]> ordine) {
+            Set<String> vietate, boolean conNome, double soglia, Comparator<double[]> ordine) {
         return perPersona.entrySet().stream()
-                .filter(e -> persone.containsKey(e.getKey()) && !v.getEsclusi().contains(e.getKey()))
+                .filter(e -> persone.containsKey(e.getKey()) && !v.getEsclusi().contains(e.getKey())
+                        && !vietate.contains(e.getKey()))
                 .filter(e -> {
                     Persona p = persone.get(e.getKey());
                     return conNome == (p.conNome() && !p.isNascosta());
@@ -253,16 +325,180 @@ public class Persone {
         }
     }
 
+    // ------------------------------------------------------------ una persona per foto
+
+    /**
+     * Dopo una modifica a queste foto: una persona su un volto solo per foto
+     * ({@link #risolviDoppioni}) e niente proposte verso chi c'è già.
+     *
+     * @param decisi i volti appena decisi a mano: tengono la persona
+     * @return le foto in cui un volto è stato liberato
+     */
+    private Set<String> sistemaFoto(Collection<String> fotoIds, Set<String> decisi) {
+        Set<String> cambiate = new HashSet<>();
+        List<String> tutte = new ArrayList<>(new LinkedHashSet<>(fotoIds));
+        for (int da = 0; da < tutte.size(); da += 1000) {
+            List<String> pezzo = tutte.subList(da, Math.min(tutte.size(), da + 1000));
+            risolviDoppioni(Criteria.where("fotoId").in(pezzo), decisi).forEach(v -> cambiate.add(v.getFotoId()));
+            togliProposteDeiPresenti(Criteria.where("fotoId").in(pezzo));
+        }
+        return cambiate;
+    }
+
+    /**
+     * Le foto (fra quelle dei volti che rispondono a {@code criteri}) con la
+     * stessa persona su più volti: ne resta uno, gli altri tornano senza
+     * persona. Vince, nell'ordine: un volto di {@code decisi} (appena deciso a
+     * mano), un volto vero deciso a mano, uno automatico, una persona aggiunta
+     * a mano senza volto (che se ne va: c'è il volto vero). A parità il più
+     * somigliante al centro degli altri volti della persona (quelli fuori da
+     * questa foto), poi il più sicuro per il rilevatore. Un volto deciso a mano
+     * che perde resta "tolto a mano", con la persona negli esclusi.
+     *
+     * @return i volti liberati (com'erano prima)
+     */
+    private List<Volto> risolviDoppioni(Criteria criteri, Set<String> decisi) {
+        var aggregazione = Aggregation.newAggregation(
+                Aggregation.match(new Criteria().andOperator(criteri, Criteria.where("personaId").ne(null))),
+                Aggregation.group("fotoId", "personaId").count().as("n").push("_id").as("volti"),
+                Aggregation.match(Criteria.where("n").gt(1)))
+                .withOptions(AggregationOptions.builder().allowDiskUse(true).build());
+        List<Document> doppi = mongo.aggregate(aggregazione, Volto.class, Document.class).getMappedResults();
+        if (doppi.isEmpty()) {
+            return List.of();
+        }
+        Set<String> cambiate = new HashSet<>();
+        List<Volto> liberati = new ArrayList<>();
+        for (Document d : doppi) {
+            Document chiave = d.get("_id", Document.class);
+            String fotoId = chiave.getString("fotoId");
+            String personaId = chiave.getString("personaId");
+            List<String> ids = d.getList("volti", Object.class).stream().map(Object::toString).toList();
+            List<Volto> volti = mongo.find(Query.query(Criteria.where("_id").in(ids).and("personaId").is(personaId)),
+                    Volto.class);
+            if (volti.size() < 2) {
+                continue;
+            }
+            float[] centro = media(centro(personaId, fotoId));
+            Comparator<Volto> ordine = Comparator.comparingInt((Volto v) -> livello(v, decisi))
+                    .thenComparingDouble(v -> {
+                        Double c = coseno(centro, v.vettoreFloat());
+                        return c == null ? -2 : c;
+                    })
+                    .thenComparingDouble(Volto::getPunteggio)
+                    .thenComparing(Volto::getId, Comparator.reverseOrder());
+            Volto vince = volti.stream().max(ordine).orElseThrow();
+            for (Volto v : volti) {
+                if (v != vince) {
+                    libera(v, personaId);
+                    liberati.add(v);
+                    cambiate.add(fotoId);
+                }
+            }
+            log.debug("Foto {}: {} su {} volti, resta {}, liberati {}", fotoId, personaId, volti.size(), vince.getId(),
+                    volti.stream().filter(v -> v != vince).map(Volto::getId).toList());
+        }
+        aggiornaFoto(cambiate);
+        liberati.forEach(v -> dopoTolto(v.getPersonaId(), v.getId()));
+        return liberati;
+    }
+
+    /** Chi tiene la persona quando due volti di una foto se la contendono: più alto vince. */
+    private static int livello(Volto v, Set<String> decisi) {
+        if (decisi.contains(v.getId())) {
+            return 3;
+        }
+        if (v.isAggiunto()) {
+            return 0;
+        }
+        return v.isManuale() ? 2 : 1;
+    }
+
+    /** I volti della persona fuori da questa foto, per il suo centro. */
+    private List<Volto> centro(String personaId, String fotoId) {
+        Query query = Query.query(Criteria.where("personaId").is(personaId).and("fotoId").ne(fotoId)
+                .and("nelCestino").is(false).and("aggiunto").ne(true)).limit(VOLTI_PER_CENTRO);
+        query.fields().include("vettore");
+        return mongo.find(query, Volto.class);
+    }
+
+    /** Il volto perde la persona: un aggiunto se ne va, uno deciso a mano resta "tolto", uno automatico libero. */
+    private void libera(Volto v, String personaId) {
+        if (v.isAggiunto()) {
+            mongo.remove(Query.query(Criteria.where("_id").is(v.getId())), Volto.class);
+            return;
+        }
+        Update update = new Update().unset("personaId");
+        if (v.isManuale()) {
+            update.addToSet("esclusi", personaId);
+        }
+        mongo.updateFirst(Query.query(Criteria.where("_id").is(v.getId()).and("personaId").is(personaId)), update,
+                Volto.class);
+    }
+
+    /**
+     * Le proposte (fra i volti che rispondono a {@code criteri}) verso una
+     * persona che è già su un altro volto vero della stessa foto: si tolgono.
+     * Una persona aggiunta senza volto non conta: la proposta può essere
+     * proprio il suo volto. @return quante
+     */
+    private int togliProposteDeiPresenti(Criteria criteri) {
+        Query query = Query.query(new Criteria().andOperator(criteri, Criteria.where("proposta").ne(null)));
+        query.fields().include("fotoId", "proposta");
+        List<Volto> proposti = mongo.find(query, Volto.class);
+        int tolte = 0;
+        for (int da = 0; da < proposti.size(); da += 1000) {
+            List<Volto> pezzo = proposti.subList(da, Math.min(proposti.size(), da + 1000));
+            Query presenti = Query.query(Criteria.where("fotoId").in(pezzo.stream().map(Volto::getFotoId).toList())
+                    .and("personaId").ne(null).and("aggiunto").ne(true));
+            presenti.fields().include("fotoId", "personaId");
+            Map<String, List<Volto>> perFoto = new HashMap<>();
+            mongo.find(presenti, Volto.class).forEach(v -> perFoto.computeIfAbsent(v.getFotoId(), k -> new ArrayList<>()).add(v));
+            List<String> daTogliere = pezzo.stream()
+                    .filter(p -> perFoto.getOrDefault(p.getFotoId(), List.of()).stream()
+                            .anyMatch(x -> !x.getId().equals(p.getId()) && p.getProposta().equals(x.getPersonaId())))
+                    .map(Volto::getId).toList();
+            if (!daTogliere.isEmpty()) {
+                mongo.updateMulti(Query.query(Criteria.where("_id").in(daTogliere)),
+                        new Update().unset("proposta").unset("somiglianzaProposta"), Volto.class);
+                tolte += daTogliere.size();
+            }
+        }
+        return tolte;
+    }
+
+    /**
+     * Corregge i dati di prima della regola "una persona al massimo una volta
+     * per foto": in ogni foto resta il volto migliore ({@link #risolviDoppioni})
+     * e le proposte verso chi c'è già se ne vanno. Idempotente: un secondo giro
+     * non trova niente. Parte da solo all'avvio ({@link #allAvvio}).
+     */
+    public synchronized Correzione correggiDoppioni() {
+        int liberati = risolviDoppioni(new Criteria(), Set.of()).size();
+        return new Correzione(liberati, togliProposteDeiPresenti(new Criteria()));
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void allAvvio() {
+        try {
+            Correzione c = correggiDoppioni();
+            if (c.liberati() > 0 || c.proposte() > 0) {
+                log.info("Una persona per foto: {} volti liberati, {} proposte tolte", c.liberati(), c.proposte());
+            }
+        } catch (RuntimeException e) {
+            // Non ferma l'avvio: la regola vale comunque per le modifiche nuove, e al prossimo avvio si riprova.
+            log.warn("Correzione \"una persona per foto\" non riuscita: {}", e.getMessage());
+        }
+    }
+
     // ------------------------------------------------------------ cestino ed eliminazione
 
     /** La foto è nel cestino: i suoi volti non contano più. @return gli id da togliere dall'indice */
     synchronized List<String> nelCestino(String fotoId) {
-        List<String> ids = idVolti(fotoId);
-        if (!ids.isEmpty()) {
-            mongo.updateMulti(Query.query(Criteria.where("fotoId").is(fotoId)), new Update().set("nelCestino", true),
-                    Volto.class);
-        }
-        return ids;
+        // Anche le persone aggiunte a mano (non sono nell'indice: non fra gli id).
+        mongo.updateMulti(Query.query(Criteria.where("fotoId").is(fotoId)), new Update().set("nelCestino", true),
+                Volto.class);
+        return idVolti(fotoId);
     }
 
     /** Tornata dal cestino: i volti tornano com'erano. @return i loro vettori, da rimettere nell'indice */
@@ -270,27 +506,40 @@ public class Persone {
         mongo.updateMulti(Query.query(Criteria.where("fotoId").is(fotoId)), new Update().set("nelCestino", false),
                 Volto.class);
         Map<String, float[]> vettori = new LinkedHashMap<>();
-        mongo.find(Query.query(Criteria.where("fotoId").is(fotoId)), Volto.class)
+        // Le persone aggiunte a mano non hanno vettore: nell'indice non vanno.
+        mongo.find(Query.query(Criteria.where("fotoId").is(fotoId).and("aggiunto").ne(true)), Volto.class)
                 .forEach(v -> vettori.put(v.getId(), v.vettoreFloat()));
         return vettori;
     }
 
-    /** Eliminata per sempre: i volti se ne vanno, e i gruppi senza nome rimasti vuoti pure. @return gli id tolti */
+    /** Eliminata per sempre: i volti se ne vanno, e i gruppi senza nome rimasti vuoti pure. @return gli id da togliere dall'indice */
     synchronized List<String> eliminata(String fotoId) {
-        Query query = Query.query(Criteria.where("fotoId").is(fotoId));
-        query.fields().include("personaId");
+        return togli(Criteria.where("fotoId").is(fotoId));
+    }
+
+    /**
+     * I volti trovati da visione, da rifare (un giro interrotto a metà): le
+     * persone aggiunte a mano restano. @return gli id da togliere dall'indice
+     */
+    synchronized List<String> togliRilevati(String fotoId) {
+        return togli(Criteria.where("fotoId").is(fotoId).and("aggiunto").ne(true));
+    }
+
+    private List<String> togli(Criteria criteri) {
+        Query query = Query.query(criteri);
+        query.fields().include("personaId", "aggiunto");
         List<Volto> volti = mongo.find(query, Volto.class);
         if (volti.isEmpty()) {
             return List.of();
         }
-        mongo.remove(Query.query(Criteria.where("fotoId").is(fotoId)), Volto.class);
+        mongo.remove(Query.query(Criteria.where("_id").in(volti.stream().map(Volto::getId).toList())), Volto.class);
         volti.stream().filter(v -> v.getPersonaId() != null)
                 .forEach(v -> dopoTolto(v.getPersonaId(), v.getId()));
-        return volti.stream().map(Volto::getId).toList();
+        return volti.stream().filter(v -> !v.isAggiunto()).map(Volto::getId).toList();
     }
 
     private List<String> idVolti(String fotoId) {
-        Query query = Query.query(Criteria.where("fotoId").is(fotoId));
+        Query query = Query.query(Criteria.where("fotoId").is(fotoId).and("aggiunto").ne(true));
         query.fields().include("_id");
         return mongo.find(query, Volto.class).stream().map(Volto::getId).toList();
     }
@@ -379,8 +628,8 @@ public class Persone {
      */
     public List<PersonaSimile> simili(String personaId, int limite) {
         Persona aperta = trova(personaId);
-        List<Volto> campione = mongo.find(Query.query(Criteria.where("personaId").is(personaId).and("nelCestino").is(false))
-                .with(Sort.by(Sort.Order.desc("punteggio"))).limit(VOLTI_PER_SIMILI), Volto.class);
+        List<Volto> campione = mongo.find(Query.query(Criteria.where("personaId").is(personaId).and("nelCestino").is(false)
+                .and("aggiunto").ne(true)).with(Sort.by(Sort.Order.desc("punteggio"))).limit(VOLTI_PER_SIMILI), Volto.class);
         if (campione.isEmpty()) {
             return List.of();
         }
@@ -422,14 +671,19 @@ public class Persone {
     }
 
     /**
-     * I volti di una foto, con il nome della persona. Quelli delle persone
+     * I volti di una foto, con il nome della persona: da sinistra a destra, poi
+     * le persone aggiunte a mano (senza riquadro). Quelli delle persone
      * nascoste non ci sono (né riquadro né "Chi è?"), e una proposta verso una
-     * nascosta non si mostra: nascondere vale anche nel visore.
+     * nascosta non si mostra: nascondere vale anche nel visore. Nemmeno una
+     * proposta verso chi è già su un altro volto della foto.
      */
     public List<VoltoInFoto> dellaFoto(String fotoId) {
-        Query query = Query.query(Criteria.where("fotoId").is(fotoId)).with(Sort.by("riquadro.x"));
+        Query query = Query.query(Criteria.where("fotoId").is(fotoId));
         query.fields().exclude("vettore");
-        List<Volto> volti = mongo.find(query, Volto.class);
+        List<Volto> volti = new ArrayList<>(mongo.find(query, Volto.class));
+        volti.sort(Comparator.comparing((Volto v) -> v.getRiquadro() == null)
+                .thenComparingDouble(v -> v.getRiquadro() == null ? 0 : v.getRiquadro().x())
+                .thenComparing(Volto::getId));
         Set<String> ids = new HashSet<>();
         volti.forEach(v -> {
             if (v.getPersonaId() != null) {
@@ -449,13 +703,20 @@ public class Persone {
         }).map(v -> {
             Persona p = v.getPersonaId() == null ? null : persone.get(v.getPersonaId());
             Persona proposta = v.getProposta() == null ? null : persone.get(v.getProposta());
-            if (proposta != null && proposta.isNascosta()) {
+            if (proposta != null && (proposta.isNascosta() || suUnAltroVolto(volti, v, proposta.getId()))) {
                 proposta = null;
             }
             return new VoltoInFoto(v.getId(), v.getRiquadro(), p == null ? null : p.getId(),
                     p == null ? null : p.getNome(),
-                    proposta == null ? null : proposta.getId(), proposta == null ? null : proposta.getNome());
+                    proposta == null ? null : proposta.getId(), proposta == null ? null : proposta.getNome(),
+                    v.isAggiunto());
         }).toList();
+    }
+
+    /** Questa persona è su un altro volto vero (non aggiunto) di questi? */
+    private static boolean suUnAltroVolto(List<Volto> volti, Volto v, String personaId) {
+        return volti.stream().anyMatch(x -> !x.getId().equals(v.getId()) && !x.isAggiunto()
+                && personaId.equals(x.getPersonaId()));
     }
 
     public Volto volto(String id) {
@@ -506,16 +767,27 @@ public class Persone {
      * Unisce le persone {@code da} in {@code in}: volti, proposte e foto
      * passano a lei, le altre spariscono. Il nome resta quello di {@code in};
      * se non ce l'ha, prende il primo delle altre.
+     *
+     * <p>Due persone che stanno insieme in una foto: dopo l'unione la foto ne
+     * ha una sola, quindi un volto solo la tiene ({@link #risolviDoppioni}: un
+     * volto deciso a mano su uno automatico, se no il più somigliante) e gli
+     * altri tornano senza persona. Se in una foto sono su due volti veri
+     * decisi entrambi a mano, l'unione non si fa (409): qualcuno ha detto che
+     * sono due persone, prima si corregge uno dei due volti.
      */
     public synchronized VocePersona unisci(String in, Collection<String> da) {
         Persona destinazione = trova(in);
         String nome = destinazione.getNome();
         String copertina = destinazione.getCopertina();
+        List<Persona> altre = new ArrayList<>();
         for (String id : new LinkedHashSet<>(da)) {
-            if (id.equals(in)) {
-                continue;
+            if (!id.equals(in)) {
+                altre.add(trova(id));
             }
-            Persona altra = trova(id);
+        }
+        controllaUnione(destinazione, altre);
+        for (Persona altra : altre) {
+            String id = altra.getId();
             mongo.updateMulti(Query.query(Criteria.where("personaId").is(id)), new Update().set("personaId", in), Volto.class);
             mongo.updateMulti(Query.query(Criteria.where("proposta").is(id)), new Update().set("proposta", in), Volto.class);
             mongo.updateMulti(Query.query(Criteria.where("esclusi").is(id)), new Update().addToSet("esclusi", in), Volto.class);
@@ -546,12 +818,23 @@ public class Persone {
         if (!update.getUpdateObject().isEmpty()) {
             mongo.updateFirst(Query.query(Criteria.where("_id").is(in)), update, Persona.class);
         }
+        // Le foto dove erano insieme: ora una volta sola. E non la si propone dove c'è già.
+        risolviDoppioni(Criteria.where("personaId").is(in), Set.of());
+        togliProposteDeiPresenti(Criteria.where("proposta").is(in));
         return persona(in);
     }
 
-    /** "Non è lei": il volto esce dalla persona e non ci torna da solo. */
+    /**
+     * "Non è lei": il volto esce dalla persona e non ci torna da solo. Una
+     * persona aggiunta a mano senza volto se ne va e basta: un volto vuoto
+     * senza riquadro non serve a niente.
+     */
     public synchronized void togliVolto(String voltoId) {
         Volto v = volto(voltoId);
+        if (v.isAggiunto()) {
+            scartaVolto(voltoId);
+            return;
+        }
         String persona = v.getPersonaId();
         if (persona == null) {
             return;
@@ -573,8 +856,13 @@ public class Persone {
      * prima restano come sono, e quella di prima finisce fra gli
      * {@code esclusi} ("non è lei"), così non ci torna da sola. Il volto è
      * {@code manuale}: il raggruppamento non lo tocca più.
+     *
+     * <p>Se la persona è già su un altro volto automatico della foto, la mano
+     * vince: quello torna senza persona. Su un altro volto deciso a mano, 409
+     * ({@link #controllaPosto}).
      */
     private void spostaVolto(Volto v, Persona p) {
+        controllaPosto(v, p);
         String prima = v.getPersonaId();
         assegnaVolti(List.of(v), p);
         if (prima != null && !prima.equals(p.getId())) {
@@ -582,6 +870,57 @@ public class Persone {
             mongo.updateFirst(Query.query(Criteria.where("_id").is(v.getId())), new Update().addToSet("esclusi", prima),
                     Volto.class);
         }
+        sistemaFoto(List.of(v.getFotoId()), Set.of(v.getId()));
+    }
+
+    /**
+     * La persona può andare a questo volto? No se è già su un altro volto vero
+     * della foto deciso a mano: due decisioni a mano che si contraddicono non
+     * si sciolgono da sole. Una persona aggiunta senza volto non prende chi è
+     * già nella foto in nessun modo.
+     */
+    private void controllaPosto(Volto v, Persona p) {
+        Criteria altri = Criteria.where("fotoId").is(v.getFotoId()).and("_id").ne(v.getId()).and("personaId").is(p.getId());
+        if (v.isAggiunto()) {
+            if (mongo.exists(Query.query(altri), Volto.class)) {
+                throw new PersonaGiaNellaFoto(chi(p) + " è già in questa foto", p, List.of(v.getFotoId()));
+            }
+            return;
+        }
+        if (mongo.exists(Query.query(altri.and("manuale").is(true).and("aggiunto").ne(true)), Volto.class)) {
+            throw new PersonaGiaNellaFoto(chi(p) + " è già in questa foto, su un altro volto: una persona c'è una volta"
+                    + " sola per foto. Correggi prima quel volto (✎ → Non è nessuno).", p, List.of(v.getFotoId()));
+        }
+    }
+
+    /**
+     * Prima di unire: in nessuna foto queste persone sono su due volti veri
+     * decisi entrambi a mano, se no 409 con le foto da correggere.
+     */
+    private void controllaUnione(Persona in, List<Persona> altre) {
+        if (altre.isEmpty()) {
+            return;
+        }
+        List<String> ids = new ArrayList<>();
+        ids.add(in.getId());
+        altre.forEach(p -> ids.add(p.getId()));
+        var aggregazione = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("personaId").in(ids).and("manuale").is(true).and("aggiunto").ne(true)),
+                Aggregation.group("fotoId").addToSet("personaId").as("persone"),
+                Aggregation.match(Criteria.where("persone.1").exists(true)),
+                Aggregation.limit(MASSIMO_FOTO_IN_ERRORE));
+        List<String> foto = mongo.aggregate(aggregazione, Volto.class, Document.class).getMappedResults().stream()
+                .map(d -> d.getString("_id")).toList();
+        if (!foto.isEmpty()) {
+            throw new PersonaGiaNellaFoto("Non si possono unire: " + (foto.size() == 1 ? "in una foto sono" : "in "
+                    + (foto.size() == MASSIMO_FOTO_IN_ERRORE ? "almeno " : "") + foto.size() + " foto sono")
+                    + " su due volti diversi decisi a mano, e una persona c'è una volta sola per foto."
+                    + " Correggi prima quei volti.", in, foto);
+        }
+    }
+
+    private static String chi(Persona p) {
+        return p.getNome() != null ? p.getNome() : "Questa persona";
     }
 
     /**
@@ -596,6 +935,10 @@ public class Persone {
         aggiornaFoto(List.of(v.getFotoId()));
         if (v.getPersonaId() != null) {
             dopoTolto(v.getPersonaId(), voltoId);
+        }
+        if (v.isAggiunto()) {
+            // Nell'indice dei vicini non c'è mai stato.
+            return;
         }
         try {
             visione.togli(List.of(voltoId));
@@ -664,14 +1007,90 @@ public class Persone {
         }
     }
 
-    /** Tutte le proposte di una persona diventano sue. @return quante */
+    /**
+     * Le proposte di una persona diventano sue, una per foto (la più
+     * somigliante) e non dove lei è già su un volto deciso a mano: una persona
+     * c'è una volta sola per foto. Le altre proposte di quelle foto se ne
+     * vanno ({@link #sistemaFoto}). @return quante
+     */
     public synchronized int confermaProposte(String personaId) {
         Persona p = trova(personaId);
         Query query = Query.query(proposteDi(personaId));
-        query.fields().include("fotoId", "personaId");
+        query.fields().include("fotoId", "personaId", "somiglianzaProposta");
         List<Volto> volti = mongo.find(query, Volto.class);
-        assegnaVolti(volti, p);
-        return volti.size();
+        if (volti.isEmpty()) {
+            return 0;
+        }
+        Set<String> foto = new HashSet<>();
+        volti.forEach(v -> foto.add(v.getFotoId()));
+        Query giaSua = Query.query(Criteria.where("fotoId").in(foto).and("personaId").is(personaId)
+                .and("manuale").is(true).and("aggiunto").ne(true));
+        giaSua.fields().include("fotoId");
+        Set<String> conLei = new HashSet<>();
+        mongo.find(giaSua, Volto.class).forEach(v -> conLei.add(v.getFotoId()));
+        Map<String, Volto> perFoto = new LinkedHashMap<>();
+        for (Volto v : volti) {
+            if (!conLei.contains(v.getFotoId())) {
+                perFoto.merge(v.getFotoId(), v, (a, b) -> somiglianza(a) >= somiglianza(b) ? a : b);
+            }
+        }
+        List<Volto> scelti = List.copyOf(perFoto.values());
+        assegnaVolti(scelti, p);
+        sistemaFoto(foto, scelti.stream().map(Volto::getId).collect(Collectors.toSet()));
+        return scelti.size();
+    }
+
+    private static double somiglianza(Volto v) {
+        return v.getSomiglianzaProposta() == null ? 0 : v.getSomiglianzaProposta();
+    }
+
+    /**
+     * "+ Aggiungi persona" dal visore: la persona è nella foto anche se visione
+     * non ha trovato il suo volto (di spalle, piccola, tagliata). Diventa un
+     * {@link Volto} {@code aggiunto}: niente riquadro né vettore, deciso a mano.
+     * Un nome che c'è già va a quella persona (anche nascosta, come "Chi è?"),
+     * uno nuovo fa una persona nuova. Se è già nella foto, 409.
+     *
+     * @param nelCestino la foto non conta per le persone (cestino o privata): il volto nemmeno
+     */
+    public synchronized VocePersona aggiungiAllaFoto(String fotoId, boolean nelCestino, String personaId, String nome) {
+        Persona p;
+        if (personaId != null && !personaId.isBlank()) {
+            p = trova(personaId);
+        } else {
+            String pulito = pulisciNome(nome);
+            if (pulito == null) {
+                throw new IllegalArgumentException("Manca il nome");
+            }
+            p = conNome(pulito);
+            if (p == null) {
+                p = new Persona();
+                p.setNome(pulito);
+                p.setCreataIl(clock.instant());
+                p.setNominataIl(clock.instant());
+            }
+        }
+        if (p.getId() != null && mongo.exists(Query.query(Criteria.where("fotoId").is(fotoId).and("personaId").is(p.getId())),
+                Volto.class)) {
+            throw new PersonaGiaNellaFoto(chi(p) + " è già in questa foto", p, List.of(fotoId));
+        }
+        if (p.getId() == null) {
+            p = mongo.insert(p);
+        }
+        Volto v = new Volto();
+        v.setFotoId(fotoId);
+        v.setPersonaId(p.getId());
+        v.setManuale(true);
+        v.setAggiunto(true);
+        v.setNelCestino(nelCestino);
+        v.setTrovatoIl(clock.instant());
+        v = mongo.insert(v);
+        if (p.getCopertina() == null) {
+            mongo.updateFirst(Query.query(Criteria.where("_id").is(p.getId())), new Update().set("copertina", v.getId()),
+                    Persona.class);
+        }
+        aggiornaFoto(List.of(fotoId));
+        return persona(p.getId());
     }
 
     /** Il volto da mostrare nella griglia per questa persona (deve essere suo). */
@@ -792,6 +1211,10 @@ public class Persone {
         float[] somma = null;
         for (Volto v : volti) {
             float[] x = v.vettoreFloat();
+            if (x.length == 0) {
+                // Una persona aggiunta a mano: niente vettore, non sposta il centro.
+                continue;
+            }
             if (somma == null) {
                 somma = new float[x.length];
             }

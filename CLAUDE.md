@@ -623,6 +623,28 @@ cd frontend && npm run build                  # compila in backend/src/main/reso
   (`scarta`) lo cancella da Mongo e dall'indice; la foto resta con
   `voltiCercati`, quindi non torna. Il raggruppamento tocca solo i volti
   nuovi: un volto corretto non cambia più da solo.
+- **Una persona al massimo una volta per foto**, sempre: dopo ogni
+  assegnazione (raggruppamento, "Chi è?", conferma, sposta, unione)
+  `Persone.risolviDoppioni` lascia la persona a un volto solo e libera gli
+  altri. Vince chi l'ha appena decisa a mano, poi un volto deciso a mano, poi
+  uno automatico (fra loro il più somigliante al centro degli altri volti
+  della persona), per ultima una persona aggiunta senza volto, che se ne va.
+  Due volti veri decisi a mano per la stessa persona nella stessa foto non si
+  fanno: `PersonaGiaNellaFoto`, 409 (anche `unisci`, prima di toccare
+  niente). Il raggruppamento non dà a un volto chi è su un volto a mano della
+  stessa foto, e nessuno propone ("Forse è…?", suggerimenti del "Chi è?") chi
+  è già su un altro volto vero della foto. I dati di prima li corregge
+  `correggiDoppioni` all'avvio (`ApplicationReadyEvent`, idempotente). Una
+  modifica nuova ai volti passa da `sistemaFoto` anche lei.
+- **Persone aggiunte a mano** ("+ Aggiungi persona" nel visore,
+  `POST /api/foto/{id}/persone`, gestore, 404 per le private degli altri):
+  un `Volto` con `aggiunto` e `manuale`, senza riquadro né vettore. Mai
+  nell'indice dei vicini (`ricostruisciIndice`, `ripristinata`, `nelCestino`
+  li saltano), né nei centri (`media`) né in `simili`; contano per
+  `Foto.persone`, la pagina della persona, i conteggi e la regola sopra. Il
+  ritaglio è il quadrato al centro della miniatura; il visore non disegna
+  riquadri. Rifare i volti di una foto (`togliRilevati`) le lascia; "togli"
+  le cancella. Una query nuova sui vettori dei volti salta `aggiunto`.
 - **Nascoste** (`Persona.nascosta`, `POST /api/persone/{id}/nascondi`, admin):
   di tutta la famiglia come il nome, non per account (le persone non hanno un
   proprietario). Una nascosta non è in `elenco` NOMINATE/GRUPPI, nel conteggio
