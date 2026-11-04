@@ -183,6 +183,7 @@ class SicurezzaTest {
             POST   /api/volti/{id}/rifiuta                        GESTIONE
             POST   /api/volti/{id}/togli                          GESTIONE
             POST   /api/volti/{id}/scarta                         GESTIONE
+            POST   /api/foto/{id}/persone                         GESTIONE
             POST   /api/condivisioni                              GESTIONE
             POST   /ricevi-condivisi                              GESTIONE
             GET    /api/privato/cestino                           GESTIONE

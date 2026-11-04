@@ -277,7 +277,8 @@ public class RiconoscimentoVolti {
                     continue;
                 }
                 // Un giro interrotto a metà può aver lasciato dei volti: si rifanno.
-                List<String> vecchi = persone.eliminata(e.getKey());
+                // Le persone aggiunte a mano senza volto restano.
+                List<String> vecchi = persone.togliRilevati(e.getKey());
                 if (!vecchi.isEmpty()) {
                     visione.togli(vecchi);
                 }
@@ -431,7 +432,8 @@ public class RiconoscimentoVolti {
         int messi = 0;
         while (!lavoro.annullato) {
             // Gli id dei volti sono ObjectId: "" non è confrontabile con loro, quindi il primo giro senza.
-            Criteria criteri = Criteria.where("nelCestino").is(false);
+            // Le persone aggiunte a mano non hanno vettore: nell'indice non vanno.
+            Criteria criteri = Criteria.where("nelCestino").is(false).and("aggiunto").ne(true);
             if (ultimoId != null) {
                 criteri = criteri.and("_id").gt(ultimoId);
             }
@@ -489,7 +491,7 @@ public class RiconoscimentoVolti {
         }
         long foto = mongo.count(Query.query(FotoService.diFamiglia().and("video").is(false)), Foto.class);
         long mancanti = mongo.count(daCercare(), Foto.class);
-        long volti = mongo.count(Query.query(Criteria.where("nelCestino").is(false)), Volto.class);
+        long volti = mongo.count(Query.query(Criteria.where("nelCestino").is(false).and("aggiunto").ne(true)), Volto.class);
         // Le nascoste non contano: per chi guarda non ci sono.
         long nominate = mongo.count(Query.query(Criteria.where("nome").ne(null).and("nascosta").is(false)), Persona.class);
         Long nellIndice;

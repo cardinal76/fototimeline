@@ -168,11 +168,13 @@ public class ConfigurazioneSicurezza {
             a.requestMatchers(new AndRequestMatcher(new AntPathRequestMatcher("/api/foto/*/file", "GET"),
                     ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
             // I volti di una foto si correggono dal visore (nome, sposta a un'altra persona, togli, "non è un
-            // volto"), un volto alla volta, come i tag: chi cambia le foto. Le persone intere sono dell'admin, sopra.
+            // volto", aggiungi una persona senza volto), un volto alla volta, come i tag: chi cambia le foto.
+            // Le persone intere sono dell'admin, sopra.
             a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
                     "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
                     "/api/eventi/*/foto", "/api/eventi/per-date", "/api/volti/*/assegna", "/api/volti/*/nome",
-                    "/api/volti/*/rifiuta", "/api/volti/*/togli", "/api/volti/*/scarta", "/api/condivisioni",
+                    "/api/volti/*/rifiuta", "/api/volti/*/togli", "/api/volti/*/scarta", "/api/foto/*/persone",
+                    "/api/condivisioni",
                     RICEVI_CONDIVISI).hasAnyAuthority(gestione);
             // Gli eventi creati a mano per date (nome, dal, al): li cambia ed elimina chi cambia l'evento delle
             // foto. Gli altri eventi (rinomina, nascondi, torna automatico) restano dell'admin, sopra.

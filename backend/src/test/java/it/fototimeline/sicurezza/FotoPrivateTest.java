@@ -329,9 +329,19 @@ class FotoPrivateTest {
             mvc.perform(post("/api/volti/" + volto + "/nome").with(chi).with(csrf())
                     .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Zia\"}"))
                     .andExpect(status().isNotFound());
+            // Nemmeno una persona aggiunta a mano.
+            mvc.perform(post("/api/foto/" + privata.getId() + "/persone").with(chi).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Zia\"}"))
+                    .andExpect(status().isNotFound());
         }
         assertThat(mongo.findById(volto, Volto.class)).isNotNull();
         assertThat(mongo.count(new Query(), Persona.class)).isZero();
+        assertThat(mongo.count(Query.query(Criteria.where("aggiunto").is(true)), Volto.class)).isZero();
+        // Anna sì; nella sua privata la persona aggiunta non conta per gli altri, come i volti.
+        mvc.perform(post("/api/foto/" + privata.getId() + "/persone").with(ANNA).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Nonno\"}"))
+                .andExpect(status().isOk());
+        assertThat(mongo.findOne(Query.query(Criteria.where("aggiunto").is(true)), Volto.class).isNelCestino()).isTrue();
         // Anna sì: le sue foto private le corregge lei.
         mvc.perform(post("/api/volti/" + volto + "/nome").with(ANNA).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Zia\"}"))

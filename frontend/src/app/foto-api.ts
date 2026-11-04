@@ -534,6 +534,11 @@ export class FotoApi {
     return this.http.get<VoltoInFoto[]>(`/api/foto/${encodeURIComponent(id)}/volti`);
   }
 
+  /** "+ Aggiungi persona": nella foto anche senza un volto trovato; un nome nuovo fa una persona nuova. 409 se c'è già. */
+  aggiungiPersona(fotoId: string, nome: string): Observable<VocePersona> {
+    return this.http.post<VocePersona>(`/api/foto/${encodeURIComponent(fotoId)}/persone`, { nome });
+  }
+
   togliVolto(id: string): Observable<void> {
     return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/togli`, {});
   }

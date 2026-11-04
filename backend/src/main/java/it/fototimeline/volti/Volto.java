@@ -48,6 +48,8 @@ public class Volto {
     private Set<String> esclusi = new TreeSet<>();
     /** La persona l'ha decisa qualcuno (assegnato o tolto a mano). */
     private boolean manuale;
+    /** Messa a mano sulla foto, senza volto trovato: niente riquadro né vettore (sopra). */
+    private boolean aggiunto;
     /** La sua foto è nel cestino: non conta e non è nell'indice dei vicini. */
     private boolean nelCestino;
     private Instant trovatoIl;
@@ -106,6 +108,9 @@ public class Volto {
 
     public boolean isManuale() { return manuale; }
     public void setManuale(boolean manuale) { this.manuale = manuale; }
+
+    public boolean isAggiunto() { return aggiunto; }
+    public void setAggiunto(boolean aggiunto) { this.aggiunto = aggiunto; }
 
     public boolean isNelCestino() { return nelCestino; }
     public void setNelCestino(boolean nelCestino) { this.nelCestino = nelCestino; }
