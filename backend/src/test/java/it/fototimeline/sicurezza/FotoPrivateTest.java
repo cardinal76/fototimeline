@@ -259,6 +259,11 @@ class FotoPrivateTest {
                 "/api/ricordi?data=2025-05-10", "/api/foto/cerca-contenuto?q=diario")) {
             assertThat(leggi(ANNA, indirizzo)).as(indirizzo).contains(privata.getId());
         }
+        // Sulla mappa col segno "privata", che il frontend sfoca; le altre no.
+        for (var punto : JSON.readTree(leggi(ANNA, "/api/mappa"))) {
+            assertThat(punto.get("privata").asBoolean()).as(punto.get("id").asText())
+                    .isEqualTo(punto.get("id").asText().equals(privata.getId()));
+        }
         assertThat(leggi(ANNA, "/api/tag")).contains("segreto-anna");
         assertThat(leggi(ANNA, "/api/album")).contains("Diario di Anna");
         assertThat(JSON.readTree(leggi(ANNA, "/api/timeline")).get(0).get("conteggio").asLong()).isEqualTo(3);

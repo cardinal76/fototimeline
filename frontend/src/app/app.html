@@ -536,12 +536,20 @@
         [style.flex-grow]="rapporto(f)"
         [style.flex-basis.px]="base(f)"
         [attr.aria-pressed]="selezione() ? galleria.selezionate().has(f.id) : null"
-        [attr.aria-label]="f.titolo || f.nomeOriginale"
+        [attr.aria-label]="sfocate.sfocata(f) && !selezione() ? etichettaSfocata : f.titolo || f.nomeOriginale"
         [attr.data-id]="f.id"
         (click)="clic(f, $event)"
         (pointerdown)="trascinaSelezione.premi(f.id, $event)"
       >
-        <img [src]="miniatura(f)" [style.aspect-ratio]="rapporto(f)" [attr.draggable]="selezione() ? 'false' : null" loading="lazy" decoding="async" alt="" />
+        <img
+          [src]="miniatura(f)"
+          [class.sfocata]="sfocate.sfocata(f)"
+          [style.aspect-ratio]="rapporto(f)"
+          [attr.draggable]="selezione() ? 'false' : null"
+          loading="lazy"
+          decoding="async"
+          alt=""
+        />
         @if (f.preferita) {
           <span class="stella" aria-label="Preferita">★</span>
         }
@@ -555,7 +563,7 @@
         @if (selezione() || galleria.puoGestire()) {
           <span class="spunta" [class.al-passaggio]="!selezione()" aria-hidden="true">✓</span>
         }
-        @if (f.titolo) {
+        @if (f.titolo && !sfocate.sfocata(f)) {
           <span class="didascalia">{{ f.titolo }}</span>
         }
       </button>
