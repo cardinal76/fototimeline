@@ -21,6 +21,7 @@ import { durata } from './formati';
 import { LuogoFoto } from './luogo-foto';
 import { Foto } from './modelli';
 import { PersoneFoto } from './persone-foto';
+import { ETICHETTA_SFOCATA, Sfocate } from './sfocate';
 
 interface Bozza {
   titolo: string;
@@ -68,6 +69,7 @@ const SWIPE_PX = 50;
 })
 export class Visore {
   protected readonly galleria = inject(Galleria);
+  private readonly sfocate = inject(Sfocate);
   private readonly elemento = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly foto = input.required<Foto>();
@@ -105,6 +107,12 @@ export class Visore {
   /** Girata a mano: il ⤓ dà la copia girata (solo i JPEG, senza perdita); qui i byte dell'archivio. */
   protected readonly scaricaNonRuotata = computed(() => FotoApi.originaleNonRuotato(this.foto()));
   protected readonly anteprima = computed(() => FotoApi.miniatura(this.foto()));
+  /**
+   * Privata e non ancora toccata (per esempio arrivandoci con le frecce):
+   * si vede solo la miniatura sfocata, niente foto intera né video.
+   */
+  protected readonly sfocata = computed(() => this.sfocate.sfocata(this.foto()));
+  protected readonly etichettaSfocata = ETICHETTA_SFOCATA;
   protected readonly origine = computed(() => ORIGINI[this.foto().origineData]);
   /** "Anna": il nome di chi l'ha portata; null per le foto di prima. */
   protected readonly caricataDa = computed(() => {
@@ -192,6 +200,10 @@ export class Visore {
     if (this.schermoIntero()) {
       this.timerRiposo = setTimeout(() => this.aRiposo.set(true), RIPOSO_MS);
     }
+  }
+
+  protected svela(): void {
+    this.sfocate.svela(this.foto().id);
   }
 
   /** Un clic sullo sfondo chiude; in schermo intero fa solo ricomparire i comandi. */
@@ -373,6 +385,13 @@ export class Visore {
       return;
     }
     switch (e.key) {
+      case 'Enter':
+        // Invio mostra la privata sfocata; sui pulsanti del visore fa il loro clic.
+        if (!this.sfocata() || (this.elemento.nativeElement.contains(bersaglio) && bersaglio.closest('button, a'))) {
+          return;
+        }
+        this.svela();
+        break;
       case 'Escape':
         this.chiudi.emit();
         break;

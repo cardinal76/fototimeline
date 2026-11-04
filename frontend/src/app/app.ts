@@ -50,6 +50,7 @@ import { inAttesa } from './condivisi-in-attesa';
 import { RiceviCondivisi } from './ricevi-condivisi';
 import { ScegliLuogo } from './scegli-luogo';
 import { SceltaEvento } from './scelta-evento';
+import { ETICHETTA_SFOCATA, Sfocate } from './sfocate';
 import { Ricordi } from './ricordi';
 import { TrascinaSelezione, conIntervallo, indiciPerId } from './selezione';
 import { TimelineNav } from './timeline-nav';
@@ -85,6 +86,9 @@ const ALTEZZA_RIGA = 210;
 export class App {
   protected readonly galleria = inject(Galleria);
   private readonly api = inject(FotoApi);
+  /** Le proprie foto private, sfocate finché non si toccano. */
+  protected readonly sfocate = inject(Sfocate);
+  protected readonly etichettaSfocata = ETICHETTA_SFOCATA;
 
   protected readonly aperta = signal<Foto | null>(null);
   protected readonly vista = signal<'timeline' | 'mappa'>('timeline');
@@ -331,7 +335,8 @@ export class App {
         this.galleria.commuta(f.id);
       }
       this.ancora = f.id;
-    } else {
+    } else if (!this.sfocate.svelaAlPrimoClic(f)) {
+      // Privata e sfocata: il primo clic la mostra soltanto, il secondo la apre.
       this.aperta.set(f);
     }
   }

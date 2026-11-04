@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, output, signal } from '@ang
 
 import { FotoApi } from './foto-api';
 import { Foto, Ricordo } from './modelli';
+import { ETICHETTA_SFOCATA, Sfocate } from './sfocate';
 
 const CHIAVE = 'fototimeline.ricordi-chiusi';
 
@@ -31,8 +32,15 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
               </p>
               <div class="striscia">
                 @for (f of r.foto; track f.id) {
-                  <button type="button" [attr.aria-label]="f.titolo || f.nomeOriginale" (click)="apri.emit(f)">
-                    <img [src]="miniatura(f)" alt="" loading="lazy" />
+                  <button
+                    type="button"
+                    [attr.aria-label]="sfocate.sfocata(f) ? etichettaSfocata : f.titolo || f.nomeOriginale"
+                    (click)="clic(f)"
+                  >
+                    <img [src]="miniatura(f)" [class.sfocata]="sfocate.sfocata(f)" alt="" loading="lazy" />
+                    @if (f.privataDi) {
+                      <span class="lucchetto" title="Nel tuo Privato: la vedi solo tu" aria-hidden="true">🔒</span>
+                    }
                   </button>
                 }
               </div>
@@ -101,6 +109,7 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
       gap: 4px;
     }
     .striscia button {
+      position: relative;
       padding: 0;
       border: 0;
       cursor: zoom-in;
@@ -118,10 +127,20 @@ const CHIAVE = 'fototimeline.ricordi-chiusi';
       height: 96px;
       object-fit: cover;
     }
+    .lucchetto {
+      position: absolute;
+      top: 4px;
+      right: 5px;
+      font-size: 0.75rem;
+      text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+    }
   `,
 })
 export class Ricordi {
   private readonly api = inject(FotoApi);
+  /** Le proprie foto private: sfocate finché non si toccano. */
+  protected readonly sfocate = inject(Sfocate);
+  protected readonly etichettaSfocata = ETICHETTA_SFOCATA;
 
   readonly apri = output<Foto>();
 
@@ -147,10 +166,18 @@ export class Ricordi {
     });
   }
 
-  /** Il nome dell'evento della maggior parte delle foto di quell'anno, se ne hanno uno. */
   protected miniatura(f: Foto): string {
     return FotoApi.miniatura(f);
   }
+
+  /** Privata e sfocata: il primo clic la mostra soltanto, il secondo la apre. */
+  protected clic(f: Foto): void {
+    if (!this.sfocate.svelaAlPrimoClic(f)) {
+      this.apri.emit(f);
+    }
+  }
+
+  /** Il nome dell'evento della maggior parte delle foto di quell'anno, se ne hanno uno. */
 
   protected nomeEvento(r: Ricordo): string | undefined {
     const e = eventoDi(r);

@@ -391,6 +391,11 @@ docker logs --since 10m fototimeline-app-1 2>&1 | grep -iE 'telefono|importazion
   rimette per tutti. Se ne elimini una, la ritrovi lì sotto, **nel cestino**. Chi guarda soltanto
   (utilizzatore) non ha un Privato.
 
+  Le tue foto private si vedono **sfocate** (timeline, ricerca, mappa, "Accadde oggi", visore), così
+  chi ti sta accanto non le vede per caso: il primo tocco la mostra, il secondo la apre. Restano
+  visibili finché non ricarichi la pagina. In modalità selezione un tocco sceglie e basta, senza
+  mostrarla.
+
   **Attenzione, in parole semplici**: il Privato nasconde le foto *nell'app*, non le chiude in
   cassaforte. I file restano dove sono su LifetimeCloud, nelle cartelle per giorno, e non sono
   cifrati. Chi entra direttamente nel cloud (WebDAV, l'app di LifetimeCloud), nel server o nel

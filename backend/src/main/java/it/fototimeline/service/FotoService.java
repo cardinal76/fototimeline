@@ -937,7 +937,7 @@ public class FotoService {
                         Criteria.where("latitudine").ne(null).and("longitudine").ne(null),
                         Criteria.where("latitudineLuogo").ne(null).and("longitudineLuogo").ne(null))));
         query.fields().include("latitudine", "longitudine", "giorno", "titolo", "video", "luogo", "latitudineLuogo",
-                "longitudineLuogo", "rotazione");
+                "longitudineLuogo", "rotazione", Visibilita.CAMPO);
         return mongo.find(query, Foto.class).stream()
                 .map(f -> {
                     boolean approssimativa = f.getLatitudineLuogo() != null && f.getLongitudineLuogo() != null
@@ -946,7 +946,7 @@ public class FotoService {
                                             f.getLatitudineLuogo(), f.getLongitudineLuogo()) > luoghi.distanzaMassimaKm());
                     return new PuntoMappa(f.getId(), approssimativa ? f.getLatitudineLuogo() : f.getLatitudine(),
                             approssimativa ? f.getLongitudineLuogo() : f.getLongitudine(), f.getGiorno(), f.getTitolo(),
-                            f.isVideo(), f.getLuogo(), approssimativa, f.getRotazione());
+                            f.isVideo(), f.getLuogo(), approssimativa, f.getRotazione(), f.getPrivataDi() != null);
                 })
                 .toList();
     }

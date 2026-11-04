@@ -157,7 +157,7 @@ main {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.25s, opacity 0.2s;
+  transition: transform 0.25s, opacity 0.2s, filter 0.25s;
 }
 .tassello:hover img {
   transform: scale(1.03);
@@ -171,6 +171,14 @@ main {
 }
 .tassello.scelto {
   background: var(--accento-tenue);
+}
+/* Privata non ancora toccata: sfocata anche col mouse sopra e scelta (il tassello taglia i bordi). */
+.tassello img.sfocata,
+.tassello:hover img.sfocata {
+  transform: scale(1.15);
+}
+.tassello.scelto img.sfocata {
+  transform: scale(0.88);
 }
 .stella {
   position: absolute;
