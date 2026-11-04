@@ -156,7 +156,7 @@ public class ConfigurazioneSicurezza {
             // Le pagine Persone ed Eventi di Strumenti: nomi, unioni, nascoste, copertine, proposte.
             // Leggere (filtro "Persona", scelta dell'evento) e cambiare le persone e l'evento di una foto no.
             a.requestMatchers(HttpMethod.PUT, "/api/persone/*", "/api/eventi/*").hasAuthority(admin);
-            a.requestMatchers(HttpMethod.POST, "/api/persone/**", "/api/volti/*/togli", "/api/eventi/unisci")
+            a.requestMatchers(HttpMethod.POST, "/api/persone/**", "/api/eventi/unisci")
                     .hasAuthority(admin);
             // "Persone nascoste": chi le ha nascoste le rivede e le rimette; per gli altri non ci sono.
             a.requestMatchers(HttpMethod.GET, "/api/persone/nascoste", "/api/persone/*/volti", "/api/persone/*/proposte",
@@ -167,10 +167,13 @@ public class ConfigurazioneSicurezza {
             // L'originale da scaricare: l'utilizzatore guarda soltanto.
             a.requestMatchers(new AndRequestMatcher(new AntPathRequestMatcher("/api/foto/*/file", "GET"),
                     ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
+            // I volti di una foto si correggono dal visore (nome, sposta a un'altra persona, togli, "non è un
+            // volto"), un volto alla volta, come i tag: chi cambia le foto. Le persone intere sono dell'admin, sopra.
             a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
                     "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
                     "/api/eventi/*/foto", "/api/eventi/per-date", "/api/volti/*/assegna", "/api/volti/*/nome",
-                    "/api/volti/*/rifiuta", "/api/condivisioni", RICEVI_CONDIVISI).hasAnyAuthority(gestione);
+                    "/api/volti/*/rifiuta", "/api/volti/*/togli", "/api/volti/*/scarta", "/api/condivisioni",
+                    RICEVI_CONDIVISI).hasAnyAuthority(gestione);
             // Gli eventi creati a mano per date (nome, dal, al): li cambia ed elimina chi cambia l'evento delle
             // foto. Gli altri eventi (rinomina, nascondi, torna automatico) restano dell'admin, sopra.
             a.requestMatchers(HttpMethod.PUT, "/api/eventi/*/per-date").hasAnyAuthority(gestione);

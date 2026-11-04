@@ -538,6 +538,11 @@ export class FotoApi {
     return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/togli`, {});
   }
 
+  /** "Non è un volto": il volto se ne va per sempre (gestore, come gli altri del visore). */
+  scartaVolto(id: string): Observable<void> {
+    return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/scarta`, {});
+  }
+
   assegnaVolto(id: string, persona: string): Observable<void> {
     return this.http.post<void>(`/api/volti/${encodeURIComponent(id)}/assegna`, { persona });
   }

@@ -317,6 +317,30 @@ class FotoPrivateTest {
     }
 
     @Test
+    void iVoltiDellaPrivataLiCorreggeSoloAnna() throws Exception {
+        mettiNelPrivato(ANNA, privata, 1);
+        String volto = mongo.findOne(Query.query(Criteria.where("fotoId").is(privata.getId())), Volto.class).getId();
+        // Il gestore e l'admin che non la vedono: 404 come la foto, e il volto resta com'era.
+        for (RequestPostProcessor chi : List.of(BRUNO, CAPO)) {
+            for (String azione : List.of("togli", "scarta", "rifiuta")) {
+                mvc.perform(post("/api/volti/" + volto + "/" + azione).with(chi).with(csrf()))
+                        .andExpect(status().isNotFound());
+            }
+            mvc.perform(post("/api/volti/" + volto + "/nome").with(chi).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Zia\"}"))
+                    .andExpect(status().isNotFound());
+        }
+        assertThat(mongo.findById(volto, Volto.class)).isNotNull();
+        assertThat(mongo.count(new Query(), Persona.class)).isZero();
+        // Anna sì: le sue foto private le corregge lei.
+        mvc.perform(post("/api/volti/" + volto + "/nome").with(ANNA).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"nome\":\"Zia\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/volti/" + volto + "/scarta").with(ANNA).with(csrf())).andExpect(status().isNoContent());
+        assertThat(mongo.findById(volto, Volto.class)).isNull();
+    }
+
+    @Test
     void perIdLaPrivataRisponde404AGliAltriEAnnaSi() throws Exception {
         mettiNelPrivato(ANNA, privata, 1);
         String volto = mongo.findOne(Query.query(Criteria.where("fotoId").is(privata.getId())), Volto.class).getId();

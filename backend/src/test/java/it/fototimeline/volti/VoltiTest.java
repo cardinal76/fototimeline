@@ -336,6 +336,140 @@ class VoltiTest {
                 .andExpect(jsonPath("$[0].fotoId").value(blu.getId()));
     }
 
+    // ------------------------------------------------------------ correzioni dal visore
+
+    @Test
+    void unVoltoSbagliatoSiSpostaAUnAltraPersonaDaSoloEIlLavoroNonLoRiporta() throws Exception {
+        Foto a = importa(ROSSO);
+        Foto b = importa(ROSSO_2);
+        Foto c = importa(ROSSO);
+        String anna = gruppoDi(a);
+        persone.nomina(anna, "Anna");
+        Foto verde = importa(VERDE);
+        Foto verde2 = importa(VERDE);
+        String bruno = gruppoDi(verde);
+        persone.nomina(bruno, "Bruno");
+        Volto sbagliato = voltiDi(c).getFirst();
+        persone.copertina(anna, sbagliato.getId());
+
+        // "È un'altra persona…" → Bruno: va solo questo volto, Anna resta con gli altri due.
+        mvc.perform(post("/api/volti/" + sbagliato.getId() + "/nome").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"bruno\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(bruno)).andExpect(jsonPath("$.volti").value(3));
+        Volto spostato = voltiDi(c).getFirst();
+        assertThat(spostato.getPersonaId()).isEqualTo(bruno);
+        assertThat(spostato.isManuale()).isTrue();
+        assertThat(spostato.getEsclusi()).containsExactly(anna);
+        assertThat(ricarica(c).getPersone()).containsExactly(bruno);
+        assertThat(voltiDi(a).getFirst().getPersonaId()).isEqualTo(anna);
+        assertThat(voltiDi(b).getFirst().getPersonaId()).isEqualTo(anna);
+        assertThat(cerca(anna)).containsExactlyInAnyOrder(a.getId(), b.getId());
+        assertThat(cerca(bruno)).containsExactlyInAnyOrder(c.getId(), verde.getId(), verde2.getId());
+        // Contati e copertine: Anna ne ha due e la copertina era quello spostato, si rifà con uno suo.
+        VocePersona voceAnna = persone.persona(anna);
+        assertThat(voceAnna.volti()).isEqualTo(2);
+        assertThat(voceAnna.copertina()).isIn(voltiDi(a).getFirst().getId(), voltiDi(b).getFirst().getId());
+        mvc.perform(get("/api/foto/" + c.getId() + "/volti")).andExpect(jsonPath("$[0].nome").value("Bruno"));
+
+        // Un nome nuovo: una persona nuova con questo volto soltanto; Bruno torna a due.
+        mvc.perform(post("/api/volti/" + sbagliato.getId() + "/nome").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Carla\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.nome").value("Carla")).andExpect(jsonPath("$.volti").value(1))
+                .andExpect(jsonPath("$.copertina").value(sbagliato.getId()));
+        String carla = voltiDi(c).getFirst().getPersonaId();
+        assertThat(carla).isNotIn(anna, bruno);
+        assertThat(voltiDi(c).getFirst().getEsclusi()).containsExactlyInAnyOrder(anna, bruno);
+        assertThat(persone.persona(bruno).volti()).isEqualTo(2);
+        assertThat(ricarica(c).getPersone()).containsExactly(carla);
+
+        // Altri rossi e "Riconosci volti" da capo: i nuovi vanno ad Anna, quello corretto resta di Carla.
+        Foto d = importa(ROSSO);
+        assertThat(voltiDi(d).getFirst().getPersonaId()).isEqualTo(anna);
+        mvc.perform(post("/api/volti/riconosci").param("ricostruisci", "true")).andExpect(status().isAccepted());
+        aspettaLavoro();
+        assertThat(voltiDi(c).getFirst().getPersonaId()).isEqualTo(carla);
+        assertThat(ricarica(c).getPersone()).containsExactly(carla);
+    }
+
+    @Test
+    void togliereUnVoltoLoLasciaDiNessunoAncheQuandoArrivanoISuoiSimili() throws Exception {
+        Foto verde = importa(VERDE);
+        Foto verde2 = importa(VERDE);
+        String carlo = gruppoDi(verde);
+        persone.nomina(carlo, "Carlo");
+        // "Non è nessuno" su tutti e due: Carlo resta, senza volti; i volti restano di nessuno, a mano.
+        for (Foto f : List.of(verde, verde2)) {
+            mvc.perform(post("/api/volti/" + voltiDi(f).getFirst().getId() + "/togli")).andExpect(status().isNoContent());
+            assertThat(voltiDi(f).getFirst().getPersonaId()).isNull();
+            assertThat(voltiDi(f).getFirst().isManuale()).isTrue();
+            assertThat(ricarica(f).getPersone()).isNull();
+        }
+        assertThat(persone.persona(carlo).volti()).isZero();
+        assertThat(persone.persona(carlo).copertina()).isNull();
+
+        // Un verde nuovo somiglia a loro, ma un gruppo nuovo non se li prende: sono stati tolti a mano.
+        Foto verde3 = importa(VERDE);
+        assertThat(voltiDi(verde).getFirst().getPersonaId()).isNull();
+        assertThat(voltiDi(verde2).getFirst().getPersonaId()).isNull();
+        assertThat(voltiDi(verde3).getFirst().getPersonaId()).isNull();
+        // Si possono sempre nominare a mano.
+        mvc.perform(post("/api/volti/" + voltiDi(verde).getFirst().getId() + "/nome").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Dario\"}")).andExpect(status().isOk()).andExpect(jsonPath("$.volti").value(1));
+    }
+
+    @Test
+    void nonEUnVoltoLoTogliePerSempreAncheDallIndice() throws Exception {
+        Foto a = importa(ROSSO);
+        Foto b = importa(ROSSO_2);
+        String anna = gruppoDi(a);
+        persone.nomina(anna, "Anna");
+        Volto finto = voltiDi(b).getFirst();
+        persone.copertina(anna, finto.getId());
+
+        mvc.perform(post("/api/volti/" + finto.getId() + "/scarta")).andExpect(status().isNoContent());
+        assertThat(mongo.findById(finto.getId(), Volto.class)).isNull();
+        assertThat(indice).doesNotContainKey(finto.getId());
+        assertThat(ricarica(b).getPersone()).isNull();
+        assertThat(ricarica(b).getVoltiCercati()).isNotNull();
+        assertThat(cerca(anna)).containsExactly(a.getId());
+        VocePersona voce = persone.persona(anna);
+        assertThat(voce.volti()).isEqualTo(1);
+        assertThat(voce.copertina()).isEqualTo(voltiDi(a).getFirst().getId());
+        mvc.perform(get("/api/foto/" + b.getId() + "/volti")).andExpect(content().json("[]"));
+        mvc.perform(post("/api/volti/" + finto.getId() + "/scarta")).andExpect(status().isNotFound());
+
+        // Un gruppo senza nome rimasto vuoto se ne va.
+        Foto verde = importa(VERDE);
+        Foto verde2 = importa(VERDE);
+        String gruppo = gruppoDi(verde);
+        persone.scartaVolto(voltiDi(verde).getFirst().getId());
+        persone.scartaVolto(voltiDi(verde2).getFirst().getId());
+        mvc.perform(get("/api/persone/" + gruppo)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ilNomeDiUnaNascostaPortaIlVoltoDaLeiEResteNascosto() throws Exception {
+        Foto a = importa(ROSSO);
+        importa(ROSSO_2);
+        String sconosciuti = gruppoDi(a);
+        persone.nomina(sconosciuti, "Sconosciuti");
+        persone.nascondi(sconosciuti, true);
+        Foto verde = importa(VERDE);
+        Foto verde2 = importa(VERDE);
+        String bruno = gruppoDi(verde);
+        persone.nomina(bruno, "Bruno");
+
+        mvc.perform(post("/api/volti/" + voltiDi(verde2).getFirst().getId() + "/nome").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Sconosciuti\"}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.nascosta").value(true));
+        assertThat(voltiDi(verde2).getFirst().getPersonaId()).isEqualTo(sconosciuti);
+        // Nel visore non c'è più, Foto.persone la tiene (come ogni nascosta), Bruno ne ha uno.
+        mvc.perform(get("/api/foto/" + verde2.getId() + "/volti")).andExpect(content().json("[]"));
+        assertThat(ricarica(verde2).getPersone()).containsExactly(sconosciuti);
+        assertThat(persone.persona(bruno).volti()).isEqualTo(1);
+        assertThat(persone.elenco(Tipo.NOMINATE, 100).persone()).extracting(VocePersona::nome).containsExactly("Bruno");
+    }
+
     @Test
     void unGruppoNascostoNonSiMostraMaRaccoglieISuoiSimili() throws Exception {
         Foto a = importa(BLU);

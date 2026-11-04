@@ -17,6 +17,8 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 import org.bson.Document;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -58,6 +60,8 @@ import it.fototimeline.volti.Volto.Riquadro;
  */
 @Service
 public class Persone {
+
+    private static final Logger log = LoggerFactory.getLogger(Persone.class);
 
     static final String FOTO_PERSONE = "persone";
     private static final int NOME_MASSIMO = 80;
@@ -149,7 +153,7 @@ public class Persone {
         }
         Query query = Query.query(Criteria.where("_id").in(somiglianze.keySet()).and("fotoId").ne(v.getFotoId())
                 .and("nelCestino").is(false));
-        query.fields().include("personaId", "fotoId");
+        query.fields().include("personaId", "fotoId", "manuale");
         Map<String, double[]> perPersona = new HashMap<>();
         List<Volto> liberi = new ArrayList<>();
         for (Volto altro : mongo.find(query, Volto.class)) {
@@ -158,7 +162,8 @@ public class Persone {
                 double[] stat = perPersona.computeIfAbsent(altro.getPersonaId(), k -> new double[2]);
                 stat[0] = Math.max(stat[0], s);
                 stat[1] += s;
-            } else if (s >= properties.sogliaGruppo()) {
+            } else if (s >= properties.sogliaGruppo() && !altro.isManuale()) {
+                // Uno tolto a mano ("non è nessuno") resta di nessuno: un gruppo nuovo non se lo prende.
                 liberi.add(altro);
             }
         }
@@ -203,7 +208,7 @@ public class Persone {
             v.setPersonaId(gruppo.getId());
             cambiata = true;
             List<String> ids = liberi.stream().map(Volto::getId).toList();
-            mongo.updateMulti(Query.query(Criteria.where("_id").in(ids).and("personaId").is(null)),
+            mongo.updateMulti(Query.query(Criteria.where("_id").in(ids).and("personaId").is(null).and("manuale").ne(true)),
                     new Update().set("personaId", gruppo.getId()), Volto.class);
             liberi.forEach(l -> foto.add(l.getFotoId()));
         }
@@ -560,7 +565,44 @@ public class Persone {
 
     /** Il volto è di questa persona (una proposta confermata, o spostato a mano). */
     public synchronized void assegnaVolto(String voltoId, String personaId) {
-        assegnaVolti(List.of(volto(voltoId)), trova(personaId));
+        spostaVolto(volto(voltoId), trova(personaId));
+    }
+
+    /**
+     * Un volto solo, a mano, a un'altra persona: il suo gruppo o la persona di
+     * prima restano come sono, e quella di prima finisce fra gli
+     * {@code esclusi} ("non è lei"), così non ci torna da sola. Il volto è
+     * {@code manuale}: il raggruppamento non lo tocca più.
+     */
+    private void spostaVolto(Volto v, Persona p) {
+        String prima = v.getPersonaId();
+        assegnaVolti(List.of(v), p);
+        if (prima != null && !prima.equals(p.getId())) {
+            // Un altro update: Mongo non fa pull (in assegnaVolti) e addToSet sullo stesso campo insieme.
+            mongo.updateFirst(Query.query(Criteria.where("_id").is(v.getId())), new Update().addToSet("esclusi", prima),
+                    Volto.class);
+        }
+    }
+
+    /**
+     * "Non è un volto" (un disegno, un animale, una macchia): il volto se ne va
+     * da Mongo e dall'indice dei vicini, la sua persona ricalcola foto e
+     * copertina. La foto resta segnata come fatta ({@code voltiCercati}),
+     * quindi il lavoro non lo ritrova.
+     */
+    public synchronized void scartaVolto(String voltoId) {
+        Volto v = volto(voltoId);
+        mongo.remove(Query.query(Criteria.where("_id").is(voltoId)), Volto.class);
+        aggiornaFoto(List.of(v.getFotoId()));
+        if (v.getPersonaId() != null) {
+            dopoTolto(v.getPersonaId(), voltoId);
+        }
+        try {
+            visione.togli(List.of(voltoId));
+        } catch (RuntimeException e) {
+            // Resta un vettore in più nell'indice: un vicino che in Mongo non c'è si scarta (assegna).
+            log.warn("Volto {} non tolto dall'indice: {}", voltoId, e.getMessage());
+        }
     }
 
     private void assegnaVolti(List<Volto> volti, Persona p) {
@@ -584,6 +626,9 @@ public class Persone {
      * "Chi è?" dal visore, su un volto: se c'è già una persona con quel nome
      * il volto va a lei; se il volto sta in un gruppo senza nome, il gruppo
      * prende il nome; altrimenti nasce una persona nuova con questo volto.
+     * Da una persona con nome ("È un'altra persona…") si sposta solo questo
+     * volto ({@link #spostaVolto}). Il nome di una nascosta vale: il volto va
+     * a lei e resta nascosto con lei.
      */
     public synchronized VocePersona nominaVolto(String voltoId, String nome) {
         Volto v = volto(voltoId);
@@ -593,7 +638,7 @@ public class Persone {
         }
         Persona esistente = conNome(pulito);
         if (esistente != null) {
-            assegnaVolti(List.of(v), esistente);
+            spostaVolto(v, esistente);
             return persona(esistente.getId());
         }
         Persona attuale = v.getPersonaId() == null ? null : mongo.findById(v.getPersonaId(), Persona.class);
@@ -606,7 +651,7 @@ public class Persone {
         nuova.setCreataIl(clock.instant());
         nuova.setNominataIl(clock.instant());
         nuova = mongo.insert(nuova);
-        assegnaVolti(List.of(v), nuova);
+        spostaVolto(v, nuova);
         return persona(nuova.getId());
     }
 
