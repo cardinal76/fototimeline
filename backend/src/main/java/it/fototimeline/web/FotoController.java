@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -37,11 +38,13 @@ import it.fototimeline.service.ConversioneVideo.StatoConversioni;
 import it.fototimeline.service.FiltroFoto;
 import it.fototimeline.service.Periodo;
 import it.fototimeline.service.FotoService;
+import it.fototimeline.service.FotoService.EsitoDate;
 import it.fototimeline.service.FotoService.Modifica;
 import it.fototimeline.service.FotoService.Operazione;
 import it.fototimeline.service.ImportazioneCartelle;
 import it.fototimeline.service.FileScartato;
 import it.fototimeline.service.LavoriImportazione;
+import it.fototimeline.service.NuoveDate;
 import it.fototimeline.service.LavoriImportazione.StatoLavoro;
 import it.fototimeline.service.Risultati.Cartella;
 import it.fototimeline.service.Rotazioni;
@@ -243,6 +246,22 @@ public class FotoController {
     @PostMapping("/foto/multiple")
     public EsitoMultiplo multipla(@Valid @RequestBody RichiestaMultipla r) {
         return new EsitoMultiplo(service.operazioneMultipla(r.ids(), r.operazione(), r.valore()));
+    }
+
+    /** "📅 Data…" sulla selezione: le foto e come cambiarne la data ({@link NuoveDate.Richiesta}). */
+    public record RichiestaDate(@NotNull List<String> ids, @NotNull NuoveDate.Modo modo, LocalDate giorno,
+            Boolean mantieniOra, LocalDateTime quando, NuoveDate.Spostamento sposta) {
+    }
+
+    /**
+     * La data di più foto insieme (gestore e admin, come la modifica dal
+     * visore): al più {@link FotoService#MASSIMO_DATE}, una alla volta, con
+     * quante sono cambiate, saltate e gli errori di ognuna.
+     */
+    @PostMapping("/foto/data")
+    public EsitoDate cambiaDate(@Valid @RequestBody RichiestaDate r) {
+        return service.cambiaDate(r.ids(),
+                new NuoveDate.Richiesta(r.modo(), r.giorno(), r.mantieniOra(), r.quando(), r.sposta()));
     }
 
     @GetMapping("/tag")

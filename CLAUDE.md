@@ -81,6 +81,10 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   momento del caricamento. Per "Indicizza archivio": EXIF → cartella
   `AAAA/MM/GG` (`CARTELLA`) → data di modifica del file. `origineData` dice quale è stata usata; una
   modifica a mano la mette a `MANUALE`.
+- "📅 Data…" sulla selezione (`POST /api/foto/data`, `FotoService.cambiaDate`) passa per la
+  stessa strada della modifica dal visore (`cambiaData`: MANUALE, `mettiAlSuoPosto`,
+  `FotoDataCambiata`), una foto alla volta, al più `MASSIMO_DATE`. Il calcolo delle date nuove
+  (`NuoveDate`) è anche nel frontend per l'anteprima (`date-multiple.ts`): si cambiano insieme.
 
 ## Mongo: trappole note
 

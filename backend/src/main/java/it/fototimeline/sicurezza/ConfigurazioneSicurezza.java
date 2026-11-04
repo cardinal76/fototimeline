@@ -167,7 +167,7 @@ public class ConfigurazioneSicurezza {
             // L'originale da scaricare: l'utilizzatore guarda soltanto.
             a.requestMatchers(new AndRequestMatcher(new AntPathRequestMatcher("/api/foto/*/file", "GET"),
                     ConfigurazioneSicurezza::chiedeLOriginale)).hasAnyAuthority(gestione);
-            a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/ruota",
+            a.requestMatchers(HttpMethod.POST, "/api/foto", "/api/foto/multiple", "/api/foto/data", "/api/foto/ruota",
                     "/api/foto/*/ruota", "/api/eventi", "/api/eventi/togli", "/api/eventi/*/dividi",
                     "/api/eventi/*/foto", "/api/eventi/per-date", "/api/volti/*/assegna", "/api/volti/*/nome",
                     "/api/volti/*/rifiuta", "/api/condivisioni", RICEVI_CONDIVISI).hasAnyAuthority(gestione);
