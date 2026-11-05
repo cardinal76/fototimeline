@@ -927,7 +927,7 @@ class VideoGrandiTest {
         int chiamate;
 
         FintoMedia() {
-            super(new MediaProperties(null, null, null));
+            super(new MediaProperties(null, null, null, null));
         }
 
         @Override

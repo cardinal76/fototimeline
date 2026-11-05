@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import it.fototimeline.dominio.Foto;
+import it.fototimeline.media.NonFoto;
 import it.fototimeline.service.Risultati.Caricamento;
 import it.fototimeline.service.Risultati.Cartella;
 import it.fototimeline.service.Risultati.Importazione;
@@ -305,7 +306,8 @@ public class ImportazioneCartelle {
     /**
      * Le foto e i video sotto {@code base}, fuori dall'archivio, in ordine.
      * Riferisce a {@code avanzamento} i file trovati mentre cammina e si
-     * ferma se lo si annulla.
+     * ferma se lo si annulla. I file AppleDouble del Mac ({@code ._IMG_0001.jpg},
+     * {@link #delMac}) non si prendono nemmeno: non sono foto.
      */
     private List<Path> media(Path base, Avanzamento avanzamento) throws IOException {
         int[] trovati = {0};
@@ -313,11 +315,22 @@ public class ImportazioneCartelle {
             return s.takeWhile(p -> !avanzamento.annullata())
                     .filter(p -> !dentroArchivio(p))
                     .filter(Files::isRegularFile)
+                    .filter(p -> !delMac(p))
                     .filter(p -> FotoService.TIPI.containsKey(FotoService.estensione(p.getFileName().toString())))
                     .peek(p -> avanzamento.cercando(++trovati[0], p.getParent()))
                     .sorted()
                     .toList();
         }
+    }
+
+    /**
+     * True per i file che il Mac scrive accanto a quelli veri sui dischi non
+     * suoi ({@code ._nome}, AppleDouble): metadati, non foto. Dal nome, prima
+     * di aprirli; quelli già rinominati li riconosce poi il contenuto
+     * ({@link it.fototimeline.media.NonFoto#MAC}).
+     */
+    static boolean delMac(Path p) {
+        return p.getFileName().toString().startsWith("._");
     }
 
     /**
@@ -389,9 +402,23 @@ public class ImportazioneCartelle {
      * file li conta ({@link Avanzamento#cercando}); annullata, smette di cercare.
      */
     public Importazione indicizza(Avanzamento avanzamento) throws IOException {
+        return indicizza(avanzamento, null);
+    }
+
+    /**
+     * Come sopra, ricordando in {@code memoria} (se non è null) i file da
+     * buttare ({@link it.fototimeline.media.NonFoto}: vuoti, fatti di zeri,
+     * del Mac, pagine web): ai giri dopo non si rileggono finché dimensione e
+     * data di modifica restano quelle e la lettura è la stessa
+     * ({@link FotoService#VERSIONE_LETTURA}), come i file già falliti della
+     * cartella automatica. Gli altri errori si rileggono sempre, come prima.
+     */
+    public Importazione indicizza(Avanzamento avanzamento, MemoriaImportazione memoria) throws IOException {
         archivio.verificaDisponibile();
         Path base = archivio.radice();
         List<Path> file = new ArrayList<>();
+        // Dimensione e data dall'elenco delle cartelle, senza chiederle di nuovo file per file.
+        Map<Path, BasicFileAttributes> visti = new HashMap<>();
         if (Files.isDirectory(base)) {
             Files.walkFileTree(base, new SimpleFileVisitor<>() {
                 @Override
@@ -416,6 +443,9 @@ public class ImportazioneCartelle {
                     if (attributi.isRegularFile() && !nome.startsWith(".")
                             && FotoService.TIPI.containsKey(FotoService.estensione(nome))) {
                         file.add(p);
+                        if (memoria != null) {
+                            visti.put(p, attributi);
+                        }
                         avanzamento.cercando(file.size(), p.getParent());
                     }
                     return FileVisitResult.CONTINUE;
@@ -429,26 +459,79 @@ public class ImportazioneCartelle {
             });
         }
         file.sort(null);
+        Map<Path, BasicFileAttributes> attributi = new HashMap<>();
+        Set<Path> cambiati = new HashSet<>();
+        List<Path> daLeggere = memoria != null && !avanzamento.annullata()
+                ? daButtareGiaVisti(base, file, visti, memoria, attributi, cambiati, avanzamento)
+                : file;
 
         Riepilogo riepilogo = new Riepilogo();
-        avanzamento.inizio(file.size());
+        avanzamento.inizio(daLeggere.size());
         // Un file che ha già la scheda (stesso percorso) FotoService.indicizza lo salta prima di aprirlo.
         PerFile.Abbandono abbandono = (p, esito) -> {
             riepilogo.conta(relativo(p), esito);
             avanzamento.fatta(p, esito, false);
         };
-        inParallelo(file, avanzamento, (p, controllo) -> {
+        inParallelo(daLeggere, avanzamento, (p, controllo) -> {
             Caricamento esito;
             try {
                 esito = conRiprova(p, avanzamento, controllo, () -> fotoService.indicizza(p, controllo));
             } catch (FotoService.Annullata a) {
                 return;
             }
+            BasicFileAttributes attr = attributi.get(p);
+            if (memoria != null && attr != null) {
+                if (esito.esito() == Risultati.Esito.ERRORE && NonFoto.daButtare(esito.messaggio())) {
+                    memoria.ricorda(p, attr.size(), attr.lastModifiedTime().toInstant(), esito.messaggio());
+                } else if (cambiati.contains(p) && !FotoService.erroreDiLettura(esito.messaggio())) {
+                    // Era da buttare, è cambiato e stavolta è un'altra cosa: il ricordo non vale più.
+                    memoria.dimentica(p);
+                }
+            }
             if (controllo.concludi()) {
                 abbandono.conta(p, esito);
             }
         }, abbandono);
-        return riepilogo.importazione(file.size());
+        return riepilogo.importazione(daLeggere.size());
+    }
+
+    /**
+     * I file dell'indicizzazione da leggere: senza quelli già riconosciuti da
+     * buttare e rimasti uguali (contati in {@link Avanzamento#saltate}). Per
+     * gli altri {@code attributi} riceve dimensione e data, da ricordare se
+     * risultano da buttare, e {@code cambiati} quelli ricordati ma cambiati. I ricordi dei file che non ci sono più (buttati)
+     * si tolgono.
+     */
+    private List<Path> daButtareGiaVisti(Path base, List<Path> file, Map<Path, BasicFileAttributes> visti,
+            MemoriaImportazione memoria,
+            Map<Path, BasicFileAttributes> attributi, Set<Path> cambiati, Avanzamento avanzamento) {
+        Map<String, FileScartato> ricordati = memoria.sotto(base);
+        List<Path> daLeggere = new ArrayList<>(file.size());
+        Set<String> presenti = new HashSet<>();
+        int saltati = 0;
+        for (Path p : file) {
+            String percorso = p.toAbsolutePath().normalize().toString();
+            presenti.add(percorso);
+            FileScartato ricordo = ricordati.get(percorso);
+            BasicFileAttributes attr = visti.get(p);
+            if (attr == null) {
+                daLeggere.add(p);
+                continue;
+            }
+            if (ricordo != null && ricordo.uguale(attr.size(), attr.lastModifiedTime().toInstant())
+                    && NonFoto.daButtare(ricordo.motivo()) && ricordo.conLetturaAttuale()) {
+                saltati++;
+            } else {
+                daLeggere.add(p);
+                attributi.put(p, attr);
+                if (ricordo != null) {
+                    cambiati.add(p);
+                }
+            }
+        }
+        memoria.dimenticaTranne(base, presenti);
+        avanzamento.saltate(saltati, 0);
+        return daLeggere;
     }
 
     /** Il lavoro su un file: gli errori del file finiscono nell'esito, un'eccezione ferma tutto. */
@@ -692,6 +775,7 @@ public class ImportazioneCartelle {
         private int importate;
         private int duplicate;
         private int errori;
+        private int daButtare;
         private int rimossi;
         private final List<String> messaggi = new ArrayList<>();
 
@@ -705,6 +789,9 @@ public class ImportazioneCartelle {
                 case DUPLICATA -> duplicate++;
                 case ERRORE -> {
                     errori++;
+                    if (NonFoto.daButtare(esito.messaggio())) {
+                        daButtare++;
+                    }
                     if (messaggi.size() < MAX_MESSAGGI) {
                         messaggi.add(file + ": " + esito.messaggio());
                     }
@@ -714,7 +801,8 @@ public class ImportazioneCartelle {
 
         synchronized Importazione importazione(int trovate) {
             // In ordine di percorso: con più file insieme arrivano in un ordine qualunque.
-            return new Importazione(trovate, importate, duplicate, errori, rimossi, messaggi.stream().sorted().toList());
+            return new Importazione(trovate, importate, duplicate, errori, rimossi, messaggi.stream().sorted().toList(),
+                    daButtare);
         }
     }
 

@@ -54,6 +54,7 @@ import it.fototimeline.dominio.StatoConversione;
 import it.fototimeline.media.Contenuto;
 import it.fototimeline.media.InfoVideo;
 import it.fototimeline.media.JpegRiparato;
+import it.fototimeline.media.NonFoto;
 import it.fototimeline.media.Riduzione;
 import it.fototimeline.media.StrumentiMedia;
 import it.fototimeline.quasiuguali.Impronta;
@@ -105,13 +106,16 @@ public class FotoService {
      * impara a leggere file che prima fallivano. I file della cartella
      * automatica ricordati come falliti con una versione di prima
      * ({@link FileScartato#conLetturaAttuale}) si rileggono una volta da
-     * soli, senza "Riprova". "Indicizza archivio" non ricorda niente: rilegge
-     * sempre i file senza scheda.
+     * soli, senza "Riprova". "Indicizza archivio" ricorda solo i file da
+     * buttare ({@link NonFoto}); gli altri file senza scheda li rilegge sempre.
      *
      * <p>2: formato dal contenuto (JPEG col nome .heic, HEIC col nome .jpg,
      * AVIF), JPEG con un SOI fuori posto, fotogramma dei video con più tentativi.
+     * <p>3: JPEG con un SOI dopo i pixel (Xiaomi, Ultra HDR senza EOI), foto che
+     * Java legge solo a metà (riserva anche per la miniatura), ImageMagick dopo
+     * ffmpeg, file che non sono foto ({@link NonFoto}) detti col loro nome.
      */
-    public static final int VERSIONE_LETTURA = 2;
+    public static final int VERSIONE_LETTURA = 3;
 
     /**
      * True se l'errore dipende dal contenuto del file (cifrato, formato
@@ -121,6 +125,7 @@ public class FotoService {
      */
     public static boolean erroreDelFile(String messaggio) {
         return messaggio != null && !memoriaFinita(messaggio) && (messaggio.equals(CIFRATO_LIFETIME)
+                || NonFoto.daButtare(messaggio)
                 || messaggio.startsWith("Formato non supportato")
                 || messaggio.startsWith("Immagine illeggibile") || messaggio.startsWith("Video illeggibile"));
     }
@@ -649,6 +654,15 @@ public class FotoService {
                     && Arrays.equals(inizio, 0, INTESTAZIONE_LCB2.length, INTESTAZIONE_LCB2, 0, INTESTAZIONE_LCB2.length)) {
                 throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, CIFRATO_LIFETIME));
             }
+            // Lo stesso per i file che una foto non sono (vuoti, fatti di zeri, del Mac, pagine
+            // web): niente da leggere, da buttare. Gli zeri si guardano a campione, senza l'hash.
+            NonFoto nonFoto = NonFoto.dallInizio(inizio, inizio.length == 0 ? 0 : -1);
+            if (nonFoto == null && NonFoto.iniziaConZeri(inizio) && NonFoto.soloZeri(file)) {
+                nonFoto = NonFoto.ZERI;
+            }
+            if (nonFoto != null) {
+                throw new Scartato(new Caricamento(nome, Esito.ERRORE, null, nonFoto.messaggio()));
+            }
             // Il formato lo dicono i primi byte, non il nome (i "_n.heic" di Facebook sono JPEG).
             String dalContenuto = Contenuto.tipo(inizio);
             Genere g = genereDelTipo(dalContenuto);
@@ -703,8 +717,8 @@ public class FotoService {
                         foto.setLarghezza(metadati.ruotata90() ? dimensioni[1] : dimensioni[0]);
                         foto.setAltezza(metadati.ruotata90() ? dimensioni[0] : dimensioni[1]);
                     } catch (IOException e) {
-                        // Java non la legge: se ffmpeg c'è la converte lui, e il browser riceve quel JPEG.
-                        if (!media.videoDisponibile()) {
+                        // Java non la legge: la converte ffmpeg o ImageMagick, e il browser riceve quel JPEG.
+                        if (letturaNonRiuscita(e) || !media.riservaImmaginiDisponibile()) {
                             throw e;
                         }
                         anteprima = Files.createTempFile("fototimeline-", ".jpg");
@@ -719,8 +733,8 @@ public class FotoService {
                             throw e;
                         }
                         controllo.fase(ControlloFile.Fase.METADATI);
-                        log.info("{}: Java non la legge ({}), convertita con ffmpeg", nome, e.getMessage());
-                        // ffmpeg la scrive già dritta (applica l'EXIF): le dimensioni sono quelle del JPEG.
+                        log.info("{}: Java non la legge ({}), convertita con ffmpeg o ImageMagick", nome, e.getMessage());
+                        // ffmpeg e ImageMagick la scrivono già dritta (applicano l'EXIF): le dimensioni sono quelle del JPEG.
                         dimensioni = Riduzione.dimensioni(anteprima);
                         foto.setLarghezza(dimensioni[0]);
                         foto.setAltezza(dimensioni[1]);
@@ -806,23 +820,36 @@ public class FotoService {
         }
     }
 
-    /** Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla miniatura. */
+    /**
+     * Miniatura, per gli HEIC vista JPEG e, per le foto, l'impronta dalla
+     * miniatura. Una foto i cui pixel non si leggono (non il disco: il file)
+     * diventa "Immagine illeggibile (...)", un errore del file come quelli di {@link #leggi}.
+     */
     private void anteprime(Letto letto, Path file, ControlloFile controllo) throws Exception {
-        unaAllaVolta(() -> {
-            faiAnteprime(letto, file);
-            return null;
-        }, ControlloFile.Fase.MINIATURA, controllo);
+        try {
+            unaAllaVolta(() -> {
+                faiAnteprime(letto, file);
+                return null;
+            }, ControlloFile.Fase.MINIATURA, controllo);
+        } catch (IOException e) {
+            if (letto.genere() == Genere.VIDEO || letturaNonRiuscita(e) || memoriaFinita(String.valueOf(e.getMessage()))) {
+                throw e;
+            }
+            throw new IOException("Immagine illeggibile" + (e.getMessage() != null ? " (" + e.getMessage() + ")" : ""), e);
+        }
     }
 
     private void faiAnteprime(Letto letto, Path file) throws IOException {
         Path anteprima = letto.anteprima();
         String id = letto.foto().getId();
-        archivio.creaMiniatura(id, anteprima != null ? anteprima : file, anteprima == null);
-        if (anteprima != null && letto.genere() != Genere.VIDEO) {
-            // HEIC, o una foto che solo ffmpeg legge: il browser riceve il JPEG convertito.
-            archivio.salvaVista(id, anteprima);
-        } else if (letto.genere() == Genere.FOTO) {
-            vistaRiparata(id, letto.foto().getContentType(), file);
+        if (anteprima == null && letto.genere() == Genere.FOTO) {
+            miniaturaDiUnaFoto(id, letto.foto().getContentType(), file);
+        } else {
+            archivio.creaMiniatura(id, anteprima != null ? anteprima : file, anteprima == null);
+            if (anteprima != null && letto.genere() != Genere.VIDEO) {
+                // HEIC, o una foto che solo ffmpeg o ImageMagick leggono: il browser riceve il JPEG convertito.
+                archivio.salvaVista(id, anteprima);
+            }
         }
         if (letto.genere() != Genere.VIDEO) {
             try {
@@ -834,6 +861,38 @@ public class FotoService {
                 log.warn("Impronta di {} non calcolata: {}", letto.foto().getNomeOriginale(), e.toString());
             }
         }
+    }
+
+    /**
+     * Miniatura (e se serve vista) di una foto che Java legge, almeno
+     * l'intestazione. Se poi i pixel non si decodificano (un JPEG Xiaomi con
+     * un SOI dopo i pixel che {@link JpegRiparato} non sa sistemare, un JPEG
+     * con le tabelle rotte) li converte ffmpeg o ImageMagick, come in
+     * {@link #leggi}: miniatura e vista vengono da lì, l'originale non si tocca.
+     */
+    private void miniaturaDiUnaFoto(String id, String tipo, Path file) throws IOException {
+        try {
+            archivio.creaMiniatura(id, file, true);
+        } catch (IOException e) {
+            if (letturaNonRiuscita(e) || !media.riservaImmaginiDisponibile()) {
+                throw e;
+            }
+            Path convertita = Files.createTempFile("fototimeline-", ".jpg");
+            try {
+                media.immagineInJpeg(file, convertita);
+                log.info("{}: Java non ne legge i pixel ({}), convertita con ffmpeg o ImageMagick", file.getFileName(),
+                        e.getMessage());
+                archivio.creaMiniatura(id, convertita, false);
+                archivio.salvaVista(id, convertita);
+                return;
+            } catch (IOException ancora) {
+                e.addSuppressed(ancora);
+                throw e;
+            } finally {
+                eliminaSilenzioso(convertita);
+            }
+        }
+        vistaRiparata(id, tipo, file);
     }
 
     /**
@@ -1153,19 +1212,9 @@ public class FotoService {
                 }
                 case null, default -> {
                     // FOTO: si legge direttamente (un JPEG rotto dalla copia riparata); se Java
-                    // non ce la fa, come all'importazione la converte ffmpeg.
-                    try {
-                        archivio.creaMiniatura(foto.getId(), originale, true);
-                        vistaRiparata(foto.getId(), foto.getContentType(), originale);
-                        return;
-                    } catch (IOException e) {
-                        if (!media.videoDisponibile()) {
-                            throw e;
-                        }
-                        anteprima = Files.createTempFile("fototimeline-", ".jpg");
-                        media.immagineInJpeg(originale, anteprima);
-                        archivio.salvaVista(foto.getId(), anteprima);
-                    }
+                    // non ce la fa, come all'importazione la convertono ffmpeg o ImageMagick.
+                    miniaturaDiUnaFoto(foto.getId(), foto.getContentType(), originale);
+                    return;
                 }
             }
             archivio.creaMiniatura(foto.getId(), anteprima != null ? anteprima : originale, anteprima == null);

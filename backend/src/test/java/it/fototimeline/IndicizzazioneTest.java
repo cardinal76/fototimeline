@@ -254,7 +254,7 @@ class IndicizzazioneTest {
                     return lavoro.annullata();
                 }
             });
-        }).when(importazione).indicizza(any());
+        }).when(importazione).indicizza(any(), any());
 
         StatoLavoro partito = lavori.avviaIndicizzazione();
         assertThat(partito.ricerca()).isTrue();

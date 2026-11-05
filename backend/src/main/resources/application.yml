@@ -38,10 +38,12 @@ fototimeline:
   # (va bene solo sul PC).
   importazione: ${FOTOTIMELINE_IMPORTAZIONE:}
   # Programmi per HEIC e video (nel container ci sono; sul PC servono installati).
+  # ImageMagick legge le foto che né Java né ffmpeg leggono; vuoto = magick, o convert.
   media:
     heif-convert: ${FOTOTIMELINE_HEIF_CONVERT:heif-convert}
     ffmpeg: ${FOTOTIMELINE_FFMPEG:ffmpeg}
     ffprobe: ${FOTOTIMELINE_FFPROBE:ffprobe}
+    imagemagick: ${FOTOTIMELINE_IMAGEMAGICK:}
   # Versione compatibile (H.264/AAC in MP4) dei video che non tutti i browser
   # riproducono (HEVC dell'iPhone, VP9, ProRes): una alla volta, in sottofondo,
   # con ffmpeg a priorità bassa (nice -n 19).

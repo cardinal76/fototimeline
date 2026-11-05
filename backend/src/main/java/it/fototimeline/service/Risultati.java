@@ -36,11 +36,15 @@ public final class Risultati {
     }
 
     /**
-     * @param rimossi originali tolti dalla cartella di origine (importazione con
-     *                "sposta": le importate e le duplicate già in archivio)
+     * @param errori    i file non entrati, compresi quelli da buttare
+     * @param rimossi   originali tolti dalla cartella di origine (importazione con
+     *                  "sposta": le importate e le duplicate già in archivio)
+     * @param daButtare quanti degli {@code errori} sono file che una foto non
+     *                  sono ({@link it.fototimeline.media.NonFoto}: vuoti, zeri,
+     *                  del Mac, pagine web)
      */
     public record Importazione(int trovate, int importate, int duplicate, int errori, int rimossi,
-            List<String> messaggi) {
+            List<String> messaggi, int daButtare) {
     }
 
     /** Una cartella vista dal navigatore di "Importa cartella". */

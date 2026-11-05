@@ -52,10 +52,12 @@ RUN mvn -B -q -DskipTests package
 
 FROM eclipse-temurin:21-jre
 # curl per l'healthcheck; heif-convert (+ decoder HEVC e AV1) per HEIC e AVIF; ffmpeg per i video
-# (e per le foto che Java non legge).
+# (e per le foto che Java non legge); ImageMagick (convert) per quelle che non legge nemmeno ffmpeg,
+# come i JPEG a codifica aritmetica. Le sue risorse le limita l'app (-limit, StrumentiMedia).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ffmpeg libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d \
-    && rm -rf /var/lib/apt/lists/*
+        curl ffmpeg libheif-examples libheif-plugin-libde265 libheif-plugin-dav1d imagemagick \
+    && rm -rf /var/lib/apt/lists/* \
+    && convert -version | grep -q ImageMagick
 # Stesso uid di marco su server2: scrive nel cloud montato da rclone con --uid 1000.
 RUN userdel -r ubuntu 2>/dev/null || true; useradd --uid 1000 --create-home fototimeline
 # I volumi delle miniature e della diagnostica (heap dump), appena creati, prendono proprietario e permessi da qui.
