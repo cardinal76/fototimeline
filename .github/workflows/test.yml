@@ -28,6 +28,22 @@ jobs:
         with:
           path: ~/.embedmongo
           key: embedmongo-${{ runner.os }}-${{ hashFiles('backend/pom.xml') }}
+      # ImageMagick e ffmpeg per i test delle foto che Java non legge (JpegDifficiliTest,
+      # FileRovinatiTest): senza, quei test si saltano (assumeTrue). Sul runner vanno installati una
+      # volta (sudo apt-get install -y imagemagick ffmpeg); qui si prova solo se sudo non chiede la
+      # password, altrimenti un avviso nel riepilogo del job.
+      - name: ImageMagick e ffmpeg per i test
+        run: |
+          mancanti=""
+          command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1 || mancanti="$mancanti imagemagick"
+          command -v ffmpeg >/dev/null 2>&1 || mancanti="$mancanti ffmpeg"
+          if [ -z "$mancanti" ]; then
+            (magick -version 2>/dev/null || convert -version) | head -1
+          elif sudo -n true 2>/dev/null; then
+            sudo -n apt-get update -q && sudo -n apt-get install -y -q --no-install-recommends $mancanti
+          else
+            echo "::warning::Sul runner mancano:$mancanti. I test che li usano si saltano: sudo apt-get install -y$mancanti"
+          fi
       - run: ./mvnw -B verify
       - name: Report dei test
         if: failure()

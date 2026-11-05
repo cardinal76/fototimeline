@@ -52,8 +52,18 @@ in italiano, come i nomi di classi e metodi (`FotoService`, `importa`,
   contenuto non si riconosce; dopo l'importazione si decide con
   `FotoService.genere(Foto)`, cioè da `contentType`. Il file non si rinomina.
   I JPEG con un SOI fuori posto si leggono da una copia riparata
-  (`media/JpegRiparato`, anche come vista); quelli che Java non legge li
-  converte ffmpeg (`StrumentiMedia.immagineInJpeg`). AVIF: `libheif-plugin-dav1d`.
+  (`media/JpegRiparato`, anche come vista): nella testa, o dopo i pixel (manca
+  l'EOI e comincia un'altra immagine: lì le dimensioni si leggono ed è la
+  miniatura a fallire, per questo la riserva c'è anche in
+  `FotoService.miniaturaDiUnaFoto`). Quelli che Java non legge li converte
+  ffmpeg e, se non ce la fa, ImageMagick (`magick` o `convert`, con `-limit`
+  e un tempo massimo; `StrumentiMedia.immagineInJpeg`). AVIF: `libheif-plugin-dav1d`.
+- I file che una foto non sono (`media/NonFoto`: 0 byte, solo zeri guardati a
+  campione, AppleDouble `00 05 16 07`, HTML/XML) si fermano in `leggi` prima
+  dell'hash con un messaggio loro; sono errori del file e `daButtare` li conta a
+  parte (in `errori` ci sono ancora, per compatibilità). "Indicizza archivio"
+  ricorda solo questi in `importazione_scartati` (gli altri errori li rilegge
+  sempre); "Importa cartella" salta i `._*` dal nome.
 - Quando la lettura impara a leggere file che prima fallivano, aumenta
   `FotoService.VERSIONE_LETTURA`: i falliti ricordati dalla cartella
   automatica (`importazione_scartati`) si rileggono da soli.

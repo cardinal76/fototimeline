@@ -204,7 +204,7 @@ class FileAppesiTest {
         ImportazioneCartelle importazione = Mockito.mock(ImportazioneCartelle.class);
         CountDownLatch dentro = new CountDownLatch(1);
         // Come un Files.walk sul mount che non torna: Annulla non lo sveglia.
-        Mockito.when(importazione.indicizza(Mockito.any())).thenAnswer(inv -> {
+        Mockito.when(importazione.indicizza(Mockito.any(), Mockito.any())).thenAnswer(inv -> {
             dentro.countDown();
             maiPiu.await();
             return null;
@@ -227,7 +227,7 @@ class FileAppesiTest {
         Mockito.doAnswer(inv -> {
             secondo.countDown();
             return null;
-        }).when(importazione).indicizza(Mockito.any());
+        }).when(importazione).indicizza(Mockito.any(), Mockito.any());
         lavori.avviaIndicizzazione();
         assertThat(secondo.await(10, TimeUnit.SECONDS)).isTrue();
         assertThat(aspettaFine(lavori).stato()).isEqualTo(Stato.FINITA);

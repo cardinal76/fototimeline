@@ -26,6 +26,7 @@ import jakarta.annotation.PreDestroy;
 import it.fototimeline.cloud.ArchivioNonDisponibile;
 import it.fototimeline.eventi.EventiService;
 import it.fototimeline.luoghi.LuoghiService;
+import it.fototimeline.media.NonFoto;
 import it.fototimeline.service.ImportazioneCartelle.Avanzamento;
 import it.fototimeline.service.Risultati.Caricamento;
 
@@ -75,12 +76,37 @@ public class LavoriImportazione {
      * <p>{@code inLavorazione}: i file che si stanno leggendo adesso, con la
      * fase e da quanti secondi ({@link FileInLavorazione.Vista}); vuoto
      * quando il lavoro non è in corso.
+     *
+     * <p>{@code daButtare}: quanti degli {@code errori} sono file che una foto
+     * non sono ({@link it.fototimeline.media.NonFoto}: vuoti, fatti di zeri,
+     * del Mac, pagine web). {@code errori} li comprende, come prima;
+     * {@link #veriErrori()} no. Per l'indicizzazione anche {@code saltate}:
+     * i file già visti da buttare e rimasti uguali.
      */
     public record StatoLavoro(String id, String cartella, Origine origine, Stato stato,
             Instant iniziatoIl, Instant finitoIl, int trovate, int fatte, int importate, int duplicate,
             int errori, int rimossi, List<String> messaggi, String errore, int saltate, int inArrivo,
             boolean ricerca, String cercaIn, boolean annullamento, boolean inAttesa,
-            List<FileInLavorazione.Vista> inLavorazione) {
+            List<FileInLavorazione.Vista> inLavorazione, int daButtare) {
+
+        /** Gli errori senza i file da buttare. */
+        public int veriErrori() {
+            return errori - daButtare;
+        }
+
+        /** "3 errori · 248 file da buttare", "3 errori", "248 file da buttare" o "0 errori". */
+        public String erroriInBreve() {
+            return LavoriImportazione.erroriInBreve(veriErrori(), daButtare);
+        }
+    }
+
+    /** Errori e file da buttare in una riga, come li mostra l'app. */
+    public static String erroriInBreve(int errori, int daButtare) {
+        if (daButtare == 0) {
+            return errori + " errori";
+        }
+        String buttare = daButtare + " file da buttare";
+        return errori == 0 ? buttare : errori + " errori · " + buttare;
     }
 
     private final ImportazioneCartelle importazione;
@@ -176,7 +202,8 @@ public class LavoriImportazione {
      * importazioni: non gira mai insieme a una di loro.
      */
     public StatoLavoro avviaIndicizzazione() {
-        return avvia(archivio.radice(), Origine.INDICIZZAZIONE, importazione::indicizza);
+        // I file da buttare (vuoti, zeri, del Mac, pagine web) si ricordano: ai giri dopo non si rileggono.
+        return avvia(archivio.radice(), Origine.INDICIZZAZIONE, lavoro -> importazione.indicizza(lavoro, memoria));
     }
 
     /**
@@ -402,9 +429,9 @@ public class LavoriImportazione {
                     fine.importate(), fine.duplicate(), fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
             return;
         }
-        log.info("{} {} di {}: {} nuove, {} già presenti, {} errori, {} tolte dall'origine ({} in {})",
-                nome, fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.errori(), fine.rimossi(),
-                fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
+        log.info("{} {} di {}: {} nuove, {} già presenti, {}, {} tolte dall'origine ({} in {})",
+                nome, fine.stato(), fine.cartella(), fine.importate(), fine.duplicate(), fine.erroriInBreve(),
+                fine.rimossi(), fine.fatte(), Duration.between(fine.iniziatoIl(), fine.finitoIl()));
         if (fine.saltate() + fine.inArrivo() > 0) {
             log.info("{} di {}: {} file saltati perché già falliti uguali, {} lasciati al giro dopo perché in copia",
                     nome, fine.cartella(), fine.saltate(), fine.inArrivo());
@@ -447,6 +474,7 @@ public class LavoriImportazione {
         private int importate;
         private int duplicate;
         private int errori;
+        private int daButtare;
         private int rimossi;
         private int saltate;
         private int inArrivo;
@@ -533,6 +561,9 @@ public class LavoriImportazione {
                 case DUPLICATA -> duplicate++;
                 case ERRORE -> {
                     errori++;
+                    if (NonFoto.daButtare(esito.messaggio())) {
+                        daButtare++;
+                    }
                     if (messaggi.size() < MAX_MESSAGGI) {
                         messaggi.add(importazione.relativo(file) + ": " + esito.messaggio());
                     }
@@ -601,7 +632,7 @@ public class LavoriImportazione {
             List<FileInLavorazione.Vista> file = stato == Stato.IN_CORSO && elenco != null ? elenco.get() : List.of();
             return new StatoLavoro(id, importazione.relativo(Path.of(cartella)), origine, stato, iniziatoIl, finitoIl,
                     trovate, fatte, importate, duplicate, errori, rimossi, List.copyOf(messaggi), errore, saltate,
-                    inArrivo, ricerca, cercaIn, annullata && stato == Stato.IN_CORSO, inAttesa, file);
+                    inArrivo, ricerca, cercaIn, annullata && stato == Stato.IN_CORSO, inAttesa, file, daButtare);
         }
     }
 }

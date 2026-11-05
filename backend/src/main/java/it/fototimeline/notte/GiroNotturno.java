@@ -464,9 +464,11 @@ public class GiroNotturno {
         }
         // Indicizza: le foto nuove; luoghi ed eventi: le foto fatte.
         int quanti = p == Passo.INDICIZZA ? fine.importate() : fine.fatte();
+        // I file da buttare (vuoti, zeri, del Mac, pagine web) a parte: non sono errori da guardare, sono da cancellare.
+        String daButtare = fine.daButtare() > 0 ? fine.daButtare() + " file da buttare" : null;
         return switch (fine.stato()) {
-            case FINITA, IN_CORSO -> risultato(p, EsitoPasso.FATTO, quanti, cosa, fine.errori(), null, inizio);
-            case ANNULLATA -> risultato(p, EsitoPasso.ANNULLATO, quanti, cosa, fine.errori(), null, inizio);
+            case FINITA, IN_CORSO -> risultato(p, EsitoPasso.FATTO, quanti, cosa, fine.veriErrori(), daButtare, inizio);
+            case ANNULLATA -> risultato(p, EsitoPasso.ANNULLATO, quanti, cosa, fine.veriErrori(), daButtare, inizio);
             case FALLITA -> risultato(p, EsitoPasso.FALLITO, quanti, cosa, fine.errori(), fine.errore(), inizio);
         };
     }

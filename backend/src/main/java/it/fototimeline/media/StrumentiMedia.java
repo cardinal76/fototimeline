@@ -29,8 +29,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * Le conversioni che Java da solo non sa fare: HEIC in JPEG ({@code heif-convert})
  * e per i video lettura dei metadati ({@code ffprobe}) e di un fotogramma
  * ({@code ffmpeg}), e la versione compatibile dei video che non tutti i
- * browser sanno riprodurre ({@link #converti}). Se un programma manca, quel
- * formato viene rifiutato con un messaggio chiaro; il resto dell'app funziona lo stesso.
+ * browser sanno riprodurre ({@link #converti}). Le foto che ImageIO non legge
+ * le converte ffmpeg o, se nemmeno lui ce la fa, ImageMagick
+ * ({@link #immagineInJpeg}). Se un programma manca, quel formato viene
+ * rifiutato con un messaggio chiaro; il resto dell'app funziona lo stesso.
  */
 @Component
 public class StrumentiMedia {
@@ -40,6 +42,20 @@ public class StrumentiMedia {
     private static final long TIMEOUT_SECONDI = 300;
     /** Un fotogramma da un video di gigabyte sul cloud montato: ffmpeg legge anche il moov in fondo. */
     private static final long TIMEOUT_FOTOGRAMMA_SECONDI = 600;
+    /** ImageMagick su una foto da 40 MP e 36 MB: qualche secondo; oltre c'è qualcosa che non va. */
+    private static final long TIMEOUT_IMAGEMAGICK_SECONDI = 180;
+    /**
+     * I limiti di ImageMagick: la cache dei pixel sta in memoria fino a
+     * {@code memory}, poi in un file mappato fino a {@code map}, poi su disco
+     * (in {@code TMPDIR}) fino a {@code disk}; oltre, o dopo {@code time}
+     * secondi, si ferma con un errore. Una foto da 11072×3760 (41 MP, 16 bit
+     * per canale) sono ~330 MB di pixel: sta fra memoria e mappa senza
+     * toccare l'heap della JVM. Sono gli stessi tetti della policy di
+     * Debian/Ubuntu, che comunque vince se è più stretta.
+     */
+    static final List<String> LIMITI_IMAGEMAGICK = List.of("-limit", "memory", "256MiB", "-limit", "map", "512MiB",
+            "-limit", "disk", "2GiB", "-limit", "area", "128MP", "-limit", "thread", "2",
+            "-limit", "time", String.valueOf(TIMEOUT_IMAGEMAGICK_SECONDI - 30));
     /** "+41.9028+012.4964+050.000/" (ISO 6709, come lo scrivono iPhone e Android). */
     private static final Pattern ISO6709 = Pattern.compile("([+-]\\d+(?:\\.\\d+)?)([+-]\\d+(?:\\.\\d+)?)");
 
@@ -51,6 +67,8 @@ public class StrumentiMedia {
     private final MediaProperties properties;
     private final boolean heic;
     private final boolean video;
+    /** Il comando di ImageMagick ({@code magick} o {@code convert}), null se non c'è. */
+    private final String imagemagick;
     /** {@code nice} c'è (nel container sì): le conversioni girano a priorità bassa. */
     private final boolean nice;
 
@@ -59,8 +77,34 @@ public class StrumentiMedia {
         this.heic = esiste(properties.heifConvert(), "--version");
         this.video = esiste(properties.ffmpeg(), "-version") && esiste(properties.ffprobe(), "-version");
         this.nice = esiste("nice", "--version");
-        log.info("Formati extra: HEIC {}, video {}", heic ? "sì" : "no (manca heif-convert)",
-                video ? "sì" : "no (mancano ffmpeg/ffprobe)");
+        this.imagemagick = imagemagick(properties.imagemagick());
+        log.info("Formati extra: HEIC {}, video {}, ImageMagick {}", heic ? "sì" : "no (manca heif-convert)",
+                video ? "sì" : "no (mancano ffmpeg/ffprobe)", imagemagick != null ? imagemagick : "no");
+    }
+
+    /**
+     * Il programma di ImageMagick: quello configurato, o {@code magick}
+     * (ImageMagick 7), o {@code convert} (6). Di {@code convert} si guarda
+     * che sia davvero ImageMagick: su Windows c'è un altro programma con quel nome.
+     */
+    private static String imagemagick(String configurato) {
+        List<String> candidati = configurato != null ? List.of(configurato) : List.of("magick", "convert");
+        for (String c : candidati) {
+            String versione = versione(c);
+            if (versione != null && versione.contains("ImageMagick")) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    public boolean imagemagickDisponibile() {
+        return imagemagick != null;
+    }
+
+    /** C'è almeno un programma ({@code ffmpeg} o ImageMagick) per le foto che Java non legge. */
+    public boolean riservaImmaginiDisponibile() {
+        return video || imagemagick != null;
     }
 
     public boolean heicDisponibile() {
@@ -73,8 +117,8 @@ public class StrumentiMedia {
 
     /**
      * Converte un HEIC (o un AVIF, se libheif ha il decoder AV1) in JPEG, già
-     * ruotato come va visto. Se heif-convert non ce la fa prova ffmpeg
-     * ({@link #immagineInJpeg}); se non ce la fa nemmeno lui resta l'errore
+     * ruotato come va visto. Se heif-convert non ce la fa prova ffmpeg e poi
+     * ImageMagick ({@link #immagineInJpeg}); se non ce la fanno resta l'errore
      * di heif-convert, che è quello che dice qualcosa.
      */
     public void heicInJpeg(Path heif, Path jpeg) throws IOException {
@@ -84,12 +128,13 @@ public class StrumentiMedia {
                 throw new IOException("heif-convert non ha prodotto il JPEG");
             }
         } catch (IOException e) {
-            if (!video) {
+            if (!riservaImmaginiDisponibile()) {
                 throw e;
             }
             try {
                 immagineInJpeg(heif, jpeg);
-                log.info("{}: heif-convert non riesce ({}), convertito con ffmpeg", heif.getFileName(), e.getMessage());
+                log.info("{}: heif-convert non riesce ({}), convertito con ffmpeg o ImageMagick", heif.getFileName(),
+                        e.getMessage());
             } catch (IOException ancora) {
                 e.addSuppressed(ancora);
                 throw e;
@@ -98,13 +143,80 @@ public class StrumentiMedia {
     }
 
     /**
-     * Un'immagine qualsiasi che ffmpeg sa leggere (JPEG che Java rifiuta,
-     * WebP, AVIF...) in JPEG: l'ultima risorsa quando ImageIO non ce la fa.
+     * Un'immagine qualsiasi che ffmpeg o ImageMagick sanno leggere (JPEG che
+     * Java rifiuta, WebP, AVIF...) in JPEG, già dritto: l'ultima risorsa
+     * quando ImageIO non ce la fa. Prima ffmpeg, poi ImageMagick, che legge
+     * anche i JPEG a codifica aritmetica e certi file rotti che ffmpeg
+     * rifiuta. L'immagine non si tocca; se nessuno dei due ce la fa resta
+     * l'errore del primo, con quello del secondo fra i soppressi.
      */
     public void immagineInJpeg(Path immagine, Path jpeg) throws IOException {
-        if (!video) {
-            throw new IOException("Per convertire l'immagine serve ffmpeg sul server");
+        if (!riservaImmaginiDisponibile()) {
+            throw new IOException("Per convertire l'immagine servono ffmpeg o ImageMagick sul server");
         }
+        IOException errore = null;
+        if (video) {
+            try {
+                conFfmpeg(immagine, jpeg);
+                return;
+            } catch (IOException e) {
+                errore = e;
+            }
+        }
+        if (imagemagick != null) {
+            try {
+                conImageMagick(immagine, jpeg);
+                if (errore != null) {
+                    log.info("{}: ffmpeg non la legge ({}), convertita con ImageMagick", immagine.getFileName(),
+                            errore.getMessage());
+                }
+                return;
+            } catch (IOException e) {
+                if (errore == null) {
+                    errore = e;
+                } else {
+                    errore.addSuppressed(e);
+                }
+            }
+        }
+        throw errore;
+    }
+
+    /**
+     * Con ImageMagick: il primo fotogramma ({@code [0]}), raddrizzato secondo
+     * l'EXIF ({@code -auto-orient}), in sRGB senza trasparenza e senza
+     * metadati (l'EXIF lo legge l'app dall'originale), entro i
+     * {@link #LIMITI_IMAGEMAGICK} e un tempo massimo. Gira con {@code nice}
+     * e come primo candidato dell'OOM killer, come ffmpeg.
+     */
+    void conImageMagick(Path immagine, Path jpeg) throws IOException {
+        if (imagemagick == null) {
+            throw new IOException("Per convertire l'immagine serve ImageMagick sul server");
+        }
+        Files.deleteIfExists(jpeg);
+        List<String> comando = new ArrayList<>();
+        if (nice) {
+            comando.addAll(List.of("nice", "-n", "10"));
+        }
+        comando.add(imagemagick);
+        comando.addAll(LIMITI_IMAGEMAGICK);
+        comando.addAll(List.of(immagine.toAbsolutePath() + "[0]", "-auto-orient", "-colorspace", "sRGB",
+                "-background", "white", "-alpha", "remove", "-alpha", "off", "-strip", "-quality", "92",
+                "jpg:" + jpeg.toAbsolutePath()));
+        Uscita u;
+        try {
+            u = esegui(comando, TIMEOUT_IMAGEMAGICK_SECONDI, true);
+        } catch (IOException e) {
+            Files.deleteIfExists(jpeg);
+            throw new IOException("ImageMagick non ha convertito l'immagine: " + e.getMessage(), e);
+        }
+        if (!Files.exists(jpeg) || Files.size(jpeg) == 0) {
+            throw new IOException("ImageMagick non ha convertito l'immagine" + dettaglio(u.errori()));
+        }
+    }
+
+    /** Con ffmpeg: il primo fotogramma, in JPEG. */
+    void conFfmpeg(Path immagine, Path jpeg) throws IOException {
         Files.deleteIfExists(jpeg);
         Uscita u = esegui(List.of(properties.ffmpeg(), "-y", "-nostdin", "-v", "error", "-i", immagine.toString(),
                 "-frames:v", "1", "-update", "1", "-pix_fmt", "yuvj420p", "-q:v", "2", jpeg.toString()), TIMEOUT_SECONDI);
@@ -514,7 +626,15 @@ public class StrumentiMedia {
     }
 
     private Uscita esegui(List<String> comando, long timeoutSecondi) throws IOException {
+        return esegui(comando, timeoutSecondi, false);
+    }
+
+    /** @param sacrificabile true per metterlo in cima alla lista dell'OOM killer ({@link #primoDaSacrificare}) */
+    private Uscita esegui(List<String> comando, long timeoutSecondi, boolean sacrificabile) throws IOException {
         Process p = new ProcessBuilder(comando).redirectErrorStream(false).start();
+        if (sacrificabile) {
+            primoDaSacrificare(p);
+        }
         // L'uscita si legge mentre gira: se il buffer si riempie il processo si blocca.
         var uscita = new StringBuilder();
         var errori = new StringBuilder();
@@ -551,6 +671,29 @@ public class StrumentiMedia {
                     + ultimeRighe(errori.toString().strip()));
         }
         return new Uscita(uscita.toString(), errori.toString());
+    }
+
+    /** Quello che scrive {@code programma -version}, o null se non parte o esce male. */
+    private static String versione(String programma) {
+        try {
+            Process p = new ProcessBuilder(new ArrayList<>(List.of(programma, "-version")))
+                    .redirectErrorStream(true)
+                    .start();
+            byte[] uscita;
+            try (var in = p.getInputStream()) {
+                uscita = in.readNBytes(4096);
+            }
+            if (!p.waitFor(10, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return null;
+            }
+            return p.exitValue() == 0 ? new String(uscita, StandardCharsets.UTF_8) : null;
+        } catch (IOException e) {
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
     }
 
     private static boolean esiste(String programma, String opzione) {

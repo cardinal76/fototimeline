@@ -426,7 +426,7 @@ public class Salute {
             case MANUALE -> "Importazione";
         };
         dettagli.add(0, cosa + " di " + l.cartella() + ": " + l.importate() + " nuove · " + l.duplicate()
-                + " già presenti · " + l.errori() + " errori");
+                + " già presenti · " + l.erroriInBreve());
         if (l.saltate() > 0) {
             dettagli.add(1, l.saltate() + " file non riletti perché già falliti uguali (elenco e \"Riprova\" nell'app)");
         }
@@ -443,7 +443,7 @@ public class Salute {
                 String fine = cosa + (l.stato() == LavoriImportazione.Stato.ANNULLATA ? " annullata " : " finita ")
                         + data(l.finitoIl());
                 yield l.errori() > 0
-                        ? VoceSalute.attenzione(chiave, titolo, fine + " con " + l.errori() + " errori", dettagli)
+                        ? VoceSalute.attenzione(chiave, titolo, fine + " con " + l.erroriInBreve(), dettagli)
                         : VoceSalute.ok(chiave, titolo, fine + ": " + l.importate() + " nuove", dettagli);
             }
         };

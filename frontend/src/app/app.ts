@@ -831,6 +831,11 @@ export class App {
   /** I file già falliti che la cartella automatica non rilegge; null finché non si chiedono. */
   protected readonly scartati = signal<FileScartato[] | null>(null);
 
+  /** Gli errori del lavoro senza i file da buttare, che si contano a parte. */
+  protected veriErrori(l: LavoroImportazione): number {
+    return Math.max(0, l.errori - (l.daButtare ?? 0));
+  }
+
   protected commutaErrori(l: LavoroImportazione): void {
     this.erroriAperti.set(this.erroriAperti() === l.id ? null : l.id);
   }

@@ -195,8 +195,11 @@
           } @else {
             {{ nomeLavoro(l) }} {{ l.stato === 'FALLITA' ? 'non riuscita' : l.stato === 'ANNULLATA' ? 'annullata' : 'finita' }}
           }
-          @if (l.errori) {
-            · <span class="errore">{{ l.errori }} errori</span>
+          @if (veriErrori(l)) {
+            · <span class="errore">{{ veriErrori(l) }} errori</span>
+          }
+          @if (l.daButtare) {
+            · <span class="errore">{{ l.daButtare }} da buttare</span>
           }
         </span>
       </button>
@@ -763,10 +766,22 @@
         @if (l.rimossi) {
           · {{ l.rimossi }} tolte dall'origine
         }
-        @if (l.errori) {
+        @if (veriErrori(l)) {
           ·
           <button type="button" class="link errore" [attr.aria-expanded]="erroriAperti() === l.id" (click)="commutaErrori(l)">
-            {{ l.errori }} errori
+            {{ veriErrori(l) }} errori
+          </button>
+        }
+        @if (l.daButtare) {
+          ·
+          <button
+            type="button"
+            class="link errore"
+            title="Non sono foto: vuoti, fatti solo di zeri, file del Mac (._), pagine web. Da cancellare; non si rileggono finché non cambiano"
+            [attr.aria-expanded]="erroriAperti() === l.id"
+            (click)="commutaErrori(l)"
+          >
+            {{ l.daButtare }} file da buttare
           </button>
         }
         @if (l.saltate) {
@@ -774,11 +789,15 @@
           <button
             type="button"
             class="link"
-            title="Già falliti uguali in un giro prima: non si rileggono finché il file non cambia"
+            [title]="
+              l.origine === 'INDICIZZAZIONE'
+                ? 'File da buttare già visti in un giro prima: non si rileggono finché il file non cambia'
+                : 'Già falliti uguali in un giro prima: non si rileggono finché il file non cambia'
+            "
             [attr.aria-expanded]="!!scartati()"
             (click)="commutaScartati()"
           >
-            {{ l.saltate }} già falliti
+            {{ l.saltate }} {{ l.origine === 'INDICIZZAZIONE' ? 'già da buttare' : 'già falliti' }}
           </button>
         }
         @if (l.inArrivo) {

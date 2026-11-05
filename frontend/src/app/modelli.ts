@@ -157,6 +157,8 @@ export interface Importazione {
   /** Originali tolti dalla cartella di origine (importazione con "sposta"). */
   rimossi: number;
   messaggi: string[];
+  /** Quanti degli `errori` sono file che una foto non sono (vuoti, zeri, del Mac, pagine web). */
+  daButtare?: number;
 }
 
 /** Chi è collegato. Con il login spento (il PC) si è admin. */
@@ -236,11 +238,20 @@ export interface LavoroImportazione {
   fatte: number;
   importate: number;
   duplicate: number;
+  /** I file non entrati, compresi quelli da buttare (`daButtare`). */
   errori: number;
+  /**
+   * Quanti degli `errori` sono file che una foto non sono: vuoti, fatti di zeri, del Mac (._),
+   * pagine web. Si contano a parte: non c'è niente da sistemare, solo da cancellare.
+   */
+  daButtare?: number;
   rimossi: number;
   messaggi: string[];
   errore?: string;
-  /** Solo cartella automatica: file già falliti uguali in un giro prima, non riletti. */
+  /**
+   * Cartella automatica: file già falliti uguali in un giro prima, non riletti.
+   * Indicizzazione: file già visti da buttare e rimasti uguali.
+   */
   saltate?: number;
   /** Solo cartella automatica: file ancora in copia, lasciati al giro dopo. */
   inArrivo?: number;
