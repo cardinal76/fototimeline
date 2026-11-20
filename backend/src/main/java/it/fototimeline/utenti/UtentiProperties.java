@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * la sua Admin REST API, col service account di un client confidenziale
  * (DEPLOY.md, "Utenti e ruoli"). Il segreto non va mai nei log né nelle risposte.
  *
- * @param keycloak     l'issuer del realm, per esempio {@code https://presenze.footballer.it/auth/realms/fototimeline}
+ * @param keycloak     l'issuer del realm, per esempio {@code https://manager.ploory.it/auth/realms/fototimeline}
  * @param clientId     il client col service account ({@code manage-users}, {@code view-users}, {@code view-realm})
  * @param clientSecret il suo segreto; vuoto = la pagina dice cosa manca
  */
@@ -31,7 +31,7 @@ public record UtentiProperties(String keycloak, String clientId, String clientSe
         return realm.contains("/") ? null : realm;
     }
 
-    /** Keycloak senza il realm: {@code https://presenze.footballer.it/auth}. */
+    /** Keycloak senza il realm: {@code https://manager.ploory.it/auth}. */
     public String base() {
         return keycloak.substring(0, keycloak.lastIndexOf(REALMS));
     }

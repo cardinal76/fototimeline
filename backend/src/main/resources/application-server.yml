@@ -23,7 +23,7 @@ spring:
             scope: openid,profile,email
         provider:
           keycloak:
-            issuer-uri: ${KEYCLOAK_ISSUER:https://presenze.footballer.it/auth/realms/fototimeline}
+            issuer-uri: ${KEYCLOAK_ISSUER:https://manager.ploory.it/auth/realms/fototimeline}
             user-name-attribute: preferred_username
 
 fototimeline:
@@ -31,4 +31,4 @@ fototimeline:
     attivo: true
   # Lo stesso realm del login, per la pagina Utenti (Admin REST API di Keycloak).
   utenti:
-    keycloak: ${FOTOTIMELINE_UTENTI_KEYCLOAK:${KEYCLOAK_ISSUER:https://presenze.footballer.it/auth/realms/fototimeline}}
+    keycloak: ${FOTOTIMELINE_UTENTI_KEYCLOAK:${KEYCLOAK_ISSUER:https://manager.ploory.it/auth/realms/fototimeline}}
